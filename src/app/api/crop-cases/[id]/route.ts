@@ -76,9 +76,9 @@ export async function PATCH(request: Request, context: RouteContext) {
       { status: 400 },
     );
   }
-  if (!isGuidedStep(step) || step === "completed") {
+  if (!isGuidedStep(step) || step === "completed" || step === "photos") {
     return NextResponse.json(
-      { error: "A valid guided step is required." },
+      { error: "A valid guided question step is required." },
       { status: 400 },
     );
   }

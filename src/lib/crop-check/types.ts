@@ -36,6 +36,7 @@ export type GuidedQuestionStep =
   | "irrigation_frequency"
   | "drainage_condition"
   | "recent_heavy_rainfall"
+  | "photos"
   | "completed";
 
 export type PreCaseStep =
@@ -114,5 +115,6 @@ export const GUIDED_QUESTION_STEPS: GuidedQuestionStep[] = [
   "irrigation_frequency",
   "drainage_condition",
   "recent_heavy_rainfall",
+  "photos",
   "completed",
 ];
