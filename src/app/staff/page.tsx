@@ -1,69 +1,78 @@
-import Link from "next/link";
-import { AppShell } from "@/components/AppShell";
-import { Button } from "@/components/Button";
-import { StatusPill } from "@/components/StatusPill";
-import { staffQueue, staffStats } from "@/data/placeholder";
+import { redirect } from "next/navigation";
+import { StaffQueue } from "@/components/staff/StaffQueue";
+import { StaffShell } from "@/components/staff/StaffShell";
+import { StaffSignOutButton } from "@/components/staff/StaffSignOutButton";
+import { getStaffSession } from "@/lib/staff/auth";
+import { listStaffQueueCases } from "@/lib/staff/cases";
+import type { StaffCaseFilter } from "@/lib/staff/types";
+import { tryCreateAdminClient } from "@/lib/supabase/helpers";
 
-const priorityTone = {
-  High: "high",
-  Medium: "mild",
-  Low: "low",
-} as const;
+type PageProps = {
+  searchParams: Promise<{ filter?: string }>;
+};
 
-export default function StaffReviewPage() {
+const FILTERS: StaffCaseFilter[] = ["new", "urgent", "in_review", "all"];
+
+function parseFilter(value: string | undefined): StaffCaseFilter {
+  if (value && FILTERS.includes(value as StaffCaseFilter)) {
+    return value as StaffCaseFilter;
+  }
+  return "in_review";
+}
+
+export default async function StaffReviewPage({ searchParams }: PageProps) {
+  const session = await getStaffSession();
+  if (!session.ok) {
+    redirect("/staff/login");
+  }
+
+  const filter = parseFilter((await searchParams).filter);
+  const admin = tryCreateAdminClient();
+  if (!admin.ok) {
+    return (
+      <StaffShell
+        title="Staff review dashboard"
+        subtitle="Could not connect to Supabase."
+        staffName={session.staff.fullName}
+        actions={<StaffSignOutButton />}
+      >
+        <p className="rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">
+          {admin.error}
+        </p>
+      </StaffShell>
+    );
+  }
+
+  let cases;
+  let stats;
+  try {
+    const result = await listStaffQueueCases(admin.client, filter);
+    cases = result.cases;
+    stats = result.stats;
+  } catch {
+    return (
+      <StaffShell
+        title="Staff review dashboard"
+        subtitle="Secure queue for FVMLTD agronomists and reviewers."
+        staffName={session.staff.fullName}
+        actions={<StaffSignOutButton />}
+      >
+        <p className="rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">
+          Could not load the review queue. Apply the latest migrations and try
+          again.
+        </p>
+      </StaffShell>
+    );
+  }
+
   return (
-    <AppShell
+    <StaffShell
       title="Staff review dashboard"
-      subtitle="Agronomist queue for farmer assessments. All rows are placeholder demo data."
-      showBack
-      backHref="/"
-      footer={
-        <Button href="/results" variant="secondary">
-          Open sample assessment
-        </Button>
-      }
+      subtitle="Review new, urgent, and awaiting-review crop cases from farmers."
+      staffName={session.staff.fullName}
+      actions={<StaffSignOutButton />}
     >
-      <div className="mb-5 grid grid-cols-3 gap-2 border-y border-line py-3">
-        {staffStats.map((stat) => (
-          <div key={stat.label} className="text-center">
-            <p className="font-display text-xl font-semibold text-canopy">{stat.value}</p>
-            <p className="mt-0.5 text-[11px] leading-tight text-muted">{stat.label}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-lg font-semibold text-ink">Review queue</h2>
-        <span className="text-xs font-medium text-muted">{staffQueue.length} open</span>
-      </div>
-
-      <ul className="space-y-3">
-        {staffQueue.map((item) => (
-          <li key={item.id}>
-            <Link
-              href="/results"
-              className="block rounded-2xl bg-surface px-4 py-3 ring-1 ring-line transition hover:ring-leaf-bright"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-ink">{item.farmer}</p>
-                  <p className="mt-0.5 text-xs text-muted">
-                    {item.village} · {item.submitted}
-                  </p>
-                </div>
-                <StatusPill
-                  label={item.priority}
-                  tone={priorityTone[item.priority as keyof typeof priorityTone]}
-                />
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-2 text-sm">
-                <span className="font-medium text-leaf">{item.crop}</span>
-                <span className="text-muted">{item.aiFlag}</span>
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </AppShell>
+      <StaffQueue cases={cases} stats={stats} filter={filter} />
+    </StaffShell>
   );
 }

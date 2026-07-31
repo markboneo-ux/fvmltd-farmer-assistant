@@ -2,7 +2,7 @@
 
 Mobile-first web application for an AI crop assistant aimed at tropical smallholder farmers.
 
-This version includes the visual app shell, **Supabase**, **farmer registration**, **farm / crop-cycle management**, a **guided Crop Check** (with photographs), and a **server-side OpenAI preliminary assessment**. Chat and staff screens still use placeholder data.
+This version includes the visual app shell, **Supabase**, **farmer registration**, **farm / crop-cycle management**, a **guided Crop Check** (with photographs), a **server-side OpenAI preliminary assessment**, and a **secure FVMLTD Staff Review Dashboard**. Chat still uses placeholder data.
 
 ## Stack
 
@@ -25,7 +25,9 @@ This version includes the visual app shell, **Supabase**, **farmer registration*
 | `/chat` | AI crop assistant chat (demo messages) |
 | `/upload` | Upload / review crop photographs for a case |
 | `/results` | Preliminary AI assessment results (`?caseId=`) |
-| `/staff` | Staff review dashboard |
+| `/staff/login` | FVMLTD staff authentication (Supabase Auth) |
+| `/staff` | Secure staff review queue (new / urgent / awaiting review) |
+| `/staff/cases/[id]` | Staff case review detail + actions |
 
 ## Project structure
 
@@ -41,6 +43,7 @@ src/
     crop-cycles/        # Crop-cycle form types and validation
     crop-check/         # Guided crop-check steps and validation
     assessment/         # OpenAI preliminary assessment (server-only)
+    staff/              # Staff auth, queue queries, assessment review maps
     openai/             # OpenAI client + env helpers (server-only)
     supabase/
       client.ts         # Browser client (anon key only)
@@ -199,6 +202,7 @@ Run the SQL migrations in `supabase/migrations/` against your project **in filen
 | `20260731200000_crop_check_guided_fields.sql` | Adds guided crop-check fields and `draft` status on `crop_cases` |
 | `20260731210000_case_photo_slots_and_storage.sql` | Photo slot keys, skip support, private `case-photos` Storage bucket |
 | `20260731220000_ai_assessment_structured_fields.sql` | Structured AI assessment columns + soil EC |
+| `20260731230000_staff_review_dashboard.sql` | Staff workflow fields, case messages, lab requests, staff RLS helper |
 
 ### 3. Local environment variables
 
@@ -274,15 +278,76 @@ Open [http://localhost:3000](http://localhost:3000).
 - Display type: Fraunces. Interface type: Figtree.
 - Navigation between farmer screens uses a compact bottom nav on key pages.
 
+## Staff Review Dashboard
+
+Only **authenticated FVMLTD staff** can access `/staff` and `/api/staff/*`.
+
+### Access setup
+
+1. Apply migration `20260731230000_staff_review_dashboard.sql`.
+2. In Supabase Auth, create a staff user (email + password).
+3. Insert a matching `staff_users` row:
+
+```sql
+insert into public.staff_users (auth_user_id, full_name, email, role, is_active)
+values (
+  '<auth-user-uuid>',
+  'Ada Agronomist',
+  'ada@fvmltd.example',
+  'agronomist',
+  true
+);
+```
+
+4. Sign in at `/staff/login`.
+
+Middleware requires a Supabase Auth session for staff routes. Handlers then verify an **active** `staff_users` row linked to `auth.users.id`.
+
+### Queue views
+
+- **New cases** — `crop_cases.status = open`
+- **Urgent cases** — staff `is_urgent` flag or AI urgency `high` / `critical`
+- **Awaiting review** — `in_review` or `awaiting_info`
+
+### Case detail shows
+
+Farmer details, farm location, crop/variety, photographs (signed URLs), soil results, fertilizer/spray history, AI assessment, confidence score, and missing information.
+
+### Staff actions
+
+| Action | Effect |
+| --- | --- |
+| Approve assessment | Marks assessment approved; case `resolved` |
+| Edit assessment | Saves staff overrides; case `resolved` |
+| Ask farmer another question | Creates `case_messages` row; case `awaiting_info` |
+| Request soil test | Creates `lab_test_requests` (`soil`) + follow-up |
+| Request laboratory test | Creates `lab_test_requests` (`laboratory`) + follow-up |
+| Mark urgent | Sets `crop_cases.is_urgent` |
+| Close case | Sets status `closed` with optional reason |
+
+Staff API routes (all require staff auth):
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/staff/me` |
+| `GET` | `/api/staff/cases?filter=new\|urgent\|in_review\|all` |
+| `GET` | `/api/staff/cases/[id]` |
+| `POST` | `/api/staff/cases/[id]/approve` |
+| `PATCH` | `/api/staff/cases/[id]/assessment` |
+| `POST` | `/api/staff/cases/[id]/ask` |
+| `POST` | `/api/staff/cases/[id]/request-test` |
+| `POST` | `/api/staff/cases/[id]/urgent` |
+| `POST` | `/api/staff/cases/[id]/close` |
+
 ## Out of scope (for this version)
 
-- Authentication and authorization policies
+- Farmer authentication (farmers still use local session + `farmerId`)
 - Payments
-- Catalog-backed product recommendations (AI product recommendations stay disabled)
-- Live staff queue binding (still placeholder)
+- Catalog-backed product recommendations (AI product recommendations stay disabled unless staff approves)
+- Farmer reply UI for staff questions (messages are stored; farmer chat reply comes later)
 
 ## Suggested next steps
 
-1. Add Supabase Auth for farmers and staff; write RLS policies.
-2. Wire staff review to approve assessments and catalog products.
+1. Add Supabase Auth for farmers; expand RLS policies beyond staff self-select.
+2. Let farmers answer staff questions from the assistant chat.
 3. Collect soil pH/EC in the crop-check flow when available.

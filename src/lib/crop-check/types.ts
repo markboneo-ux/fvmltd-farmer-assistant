@@ -65,7 +65,13 @@ export type CropCaseRecord = {
   drainageCondition: CropCheckDrainage | null;
   recentHeavyRainfall: boolean | null;
   guidedStep: string | null;
-  status: "draft" | "open" | "in_review" | "resolved" | "closed";
+  status:
+    | "draft"
+    | "open"
+    | "in_review"
+    | "awaiting_info"
+    | "resolved"
+    | "closed";
   completedAt: string | null;
 };
 
