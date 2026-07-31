@@ -26,12 +26,20 @@ $$;
 -- ---------------------------------------------------------------------------
 create table public.farmers (
   id uuid primary key default gen_random_uuid(),
+  farmer_code text not null unique,
   auth_user_id uuid unique references auth.users (id) on delete set null,
   full_name text not null,
   phone text unique,
   village text,
   region text,
   country text default 'Tanzania',
+  farm_size numeric(10, 3)
+    check (farm_size is null or farm_size > 0),
+  farm_size_unit text
+    check (farm_size_unit is null or farm_size_unit in ('acres', 'hectares')),
+  main_crops text[] not null default '{}',
+  consent_store_data boolean not null default false,
+  consent_at timestamptz,
   preferred_language text default 'en',
   notes text,
   member_since date default current_date,
@@ -40,6 +48,8 @@ create table public.farmers (
 );
 
 create index farmers_auth_user_id_idx on public.farmers (auth_user_id);
+create index farmers_farmer_code_idx on public.farmers (farmer_code);
+create index farmers_phone_idx on public.farmers (phone);
 create index farmers_region_idx on public.farmers (region);
 
 create trigger farmers_set_updated_at

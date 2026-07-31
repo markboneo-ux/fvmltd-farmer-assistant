@@ -2,7 +2,7 @@
 
 Mobile-first web application for an AI crop assistant aimed at tropical smallholder farmers.
 
-This version includes the visual app shell plus **Supabase client configuration and the initial database schema**. OpenAI is not wired yet. UI screens still use placeholder data until authentication and data queries are connected.
+This version includes the visual app shell, **Supabase client configuration**, the initial database schema, and a working **farmer registration** flow that saves profiles to Supabase. OpenAI is not wired yet. Most other UI screens still use placeholder data until authentication and live queries are connected.
 
 ## Stack
 
@@ -16,8 +16,8 @@ This version includes the visual app shell plus **Supabase client configuration 
 | Route | Purpose |
 | --- | --- |
 | `/` | Welcome page |
-| `/register` | Farmer registration (placeholder form) |
-| `/dashboard` | Farmer dashboard |
+| `/register` | Farmer registration (validated form → Supabase) |
+| `/dashboard` | Farmer dashboard (shows registered farmer when available) |
 | `/crop-check` | Start a crop check |
 | `/chat` | AI crop assistant chat (demo messages) |
 | `/upload` | Upload crop photographs (placeholder states) |
@@ -28,21 +28,35 @@ This version includes the visual app shell plus **Supabase client configuration 
 
 ```text
 src/
-  app/                  # Next.js App Router pages and global styles
+  app/                  # Next.js App Router pages, API routes, global styles
   components/           # Shared mobile UI building blocks
   data/
     placeholder.ts      # Demo farmer, checks, chat, and staff data
   lib/
+    farmers/            # Registration validation, Farmer ID, local session
     supabase/
       client.ts         # Browser client (anon key only)
       server.ts         # Server client (anon key + cookies)
       admin.ts          # Service-role client (server-only)
       env.ts            # Environment variable helpers
 supabase/
-  migrations/           # SQL migrations for the initial schema
-  config.toml
+  migrations/           # SQL migrations for the schema
 .env.example            # Template for required environment variables
 ```
+
+## Farmer registration
+
+The `/register` page collects:
+
+- Full name
+- WhatsApp number
+- Country
+- District or region
+- Farm size and preferred unit (acres or hectares)
+- Main crops
+- Consent to store farm information and crop photographs
+
+On submit, `POST /api/farmers/register` validates the payload, generates a unique Farmer ID (`FVM-XXXXXX`), and inserts a row into the Supabase `farmers` table using the **service role** client (RLS is enabled with no public insert policy yet). After success, the farmer is sent to `/dashboard`, which shows their name, Farmer ID, location, farm size, and crops.
 
 ## Supabase setup
 
@@ -56,10 +70,15 @@ supabase/
 
 ### 2. Apply the database migration
 
-Run the SQL in `supabase/migrations/20260731180000_initial_schema.sql` against your project, either:
+Run the SQL migrations in `supabase/migrations/` against your project **in filename order**, either:
 
-- Supabase Dashboard → **SQL Editor** → paste and run the file, or
+- Supabase Dashboard → **SQL Editor** → paste and run each file, or
 - with the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase link` then `supabase db push`
+
+| Migration | Purpose |
+| --- | --- |
+| `20260731180000_initial_schema.sql` | Core tables including `farmers` |
+| `20260731190000_farmer_registration_fields.sql` | Adds Farmer ID / farm size / crops / consent columns if upgrading an older schema |
 
 ### 3. Local environment variables
 
@@ -139,11 +158,11 @@ Open [http://localhost:3000](http://localhost:3000).
 - OpenAI or other AI providers
 - Authentication and authorization policies
 - Payments
-- Live data binding on UI screens (still placeholder)
+- Live data binding on crop-check / chat / upload / results / staff screens (still placeholder)
 
 ## Suggested next steps
 
 1. Add Supabase Auth for farmers and staff; write RLS policies.
-2. Replace placeholder data with queries against the new tables.
+2. Replace remaining placeholder screens with queries against the new tables.
 3. Connect photo upload to a Supabase Storage bucket (`case-photos`).
 4. Add OpenAI (or another model) for `ai_assessments` generation.
