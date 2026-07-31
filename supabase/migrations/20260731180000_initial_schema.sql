@@ -246,11 +246,58 @@ create table public.crop_cases (
   title text,
   crop_name text not null,
   description text,
-  status text not null default 'open'
-    check (status in ('open', 'in_review', 'resolved', 'closed')),
+  first_observed_on date,
+  symptom_location text
+    check (
+      symptom_location is null
+      or symptom_location in (
+        'young_leaves',
+        'old_leaves',
+        'fruit',
+        'stem',
+        'roots',
+        'whole_plant'
+      )
+    ),
+  is_spreading boolean,
+  percent_affected numeric(5, 2)
+    check (
+      percent_affected is null
+      or (percent_affected >= 0 and percent_affected <= 100)
+    ),
+  recent_fertilizer text,
+  recent_spray text,
+  irrigation_frequency text
+    check (
+      irrigation_frequency is null
+      or irrigation_frequency in (
+        'daily',
+        'every_2_3_days',
+        'weekly',
+        'rarely',
+        'rainfed_only',
+        'unknown'
+      )
+    ),
+  drainage_condition text
+    check (
+      drainage_condition is null
+      or drainage_condition in (
+        'well_drained',
+        'moderately_drained',
+        'poorly_drained',
+        'waterlogged',
+        'unknown'
+      )
+    ),
+  recent_heavy_rainfall boolean,
+  guided_step text,
+  status text not null default 'draft'
+    check (status in ('draft', 'open', 'in_review', 'resolved', 'closed')),
   severity text
     check (severity is null or severity in ('low', 'mild', 'moderate', 'high', 'critical')),
   submitted_at timestamptz not null default timezone('utc', now()),
+  completed_at timestamptz,
   resolved_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
