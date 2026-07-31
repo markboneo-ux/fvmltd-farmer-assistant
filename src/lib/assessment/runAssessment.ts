@@ -7,6 +7,7 @@ import { tryCreateOpenAIClient } from "@/lib/openai/client";
 import { buildCaseContextForModel } from "./buildCaseContext";
 import { ASSESSMENT_SELECT, mapAssessmentRow } from "./map";
 import { parseAssessmentJson } from "./parse";
+import { applySafetyRules } from "./safetyRules";
 import {
   ASSESSMENT_JSON_SCHEMA,
   type AssessmentRecord,
@@ -25,7 +26,14 @@ Hard rules:
 5. Prefer human_review_required=true when photos are incomplete, confidence is modest, or symptoms could be several diseases/pests.
 6. Use the photographs when present. If photos are missing, say so in missing_information.
 7. Be practical for smallholder tropical farms (Tomato, Pepper, Cucumber and related crops).
-8. Return ONLY JSON matching the required schema.`;
+8. Populate safety_signals honestly:
+   - plants_dying_quickly
+   - unknown_products_mixed
+   - herbicide_damage_suspected
+   - multiple_unsuccessful_treatments
+   - severe_bacterial_or_viral_suspected
+   - approved_protocol_exists (false when no FVMLTD-approved protocol clearly applies)
+9. Return ONLY JSON matching the required schema.`;
 
 export type RunAssessmentResult =
   | { ok: true; assessment: AssessmentRecord; created: boolean }
@@ -138,10 +146,55 @@ export async function runPreliminaryAssessment(options: {
     };
   }
 
+  const payload = context.textPayload;
+  const safety = applySafetyRules(parsed, {
+    percentAffected:
+      typeof payload.affected_area_percent === "number"
+        ? payload.affected_area_percent
+        : payload.affected_area_percent != null
+          ? Number(payload.affected_area_percent)
+          : null,
+    problemDescription:
+      typeof payload.problem_description === "string"
+        ? payload.problem_description
+        : null,
+    fertilizerHistory:
+      typeof payload.fertilizer_history === "string"
+        ? payload.fertilizer_history
+        : null,
+    sprayHistory:
+      typeof payload.spray_history === "string" ? payload.spray_history : null,
+    likelyCauses: parsed.likely_causes,
+    caseSummary: parsed.case_summary,
+    urgencyLevel: parsed.urgency_level,
+    approvedProtocolExists: parsed.safety_signals.approved_protocol_exists,
+    plantsDyingQuickly: parsed.safety_signals.plants_dying_quickly,
+    unknownProductsMixed: parsed.safety_signals.unknown_products_mixed,
+    herbicideDamageSuspected: parsed.safety_signals.herbicide_damage_suspected,
+    multipleUnsuccessfulTreatments:
+      parsed.safety_signals.multiple_unsuccessful_treatments,
+    severeBacterialOrViralSuspected:
+      parsed.safety_signals.severe_bacterial_or_viral_suspected,
+  });
+
   const likelyIssue = parsed.likely_causes[0] ?? "Undetermined";
-  const nextStep = parsed.human_review_required
-    ? "FVMLTD staff review is recommended before any pesticide or product use."
-    : "Continue monitoring and follow the immediate safe actions listed.";
+  const nextStep =
+    safety.guidanceMode === "human_review"
+      ? "Case sent for FVMLTD human technical review. Do not use a final product recommendation yet."
+      : safety.guidanceMode === "needs_more_info"
+        ? "Confidence is moderate — provide missing information or additional photographs before relying on this guidance."
+        : "Approved preliminary guidance may be shown. Continue monitoring and follow immediate safe actions.";
+
+  const rawResponse = {
+    ...parsed,
+    missing_information: safety.missingInformation,
+    immediate_safe_actions: safety.immediateSafeActions,
+    human_review_required: safety.humanReviewRequired,
+    product_recommendation_allowed: safety.productRecommendationAllowed,
+    confidence_band: safety.confidenceBand,
+    guidance_mode: safety.guidanceMode,
+    human_review_reasons: safety.humanReviewReasons,
+  };
 
   const insertRow = {
     crop_case_id: caseId,
@@ -152,15 +205,15 @@ export async function runPreliminaryAssessment(options: {
     likely_issue: likelyIssue,
     confidence_score: parsed.confidence_score,
     confidence: parsed.confidence_score,
-    missing_information: parsed.missing_information,
-    immediate_safe_actions: parsed.immediate_safe_actions,
-    human_review_required: parsed.human_review_required,
+    missing_information: safety.missingInformation,
+    immediate_safe_actions: safety.immediateSafeActions,
+    human_review_required: safety.humanReviewRequired,
     laboratory_test_needed: parsed.laboratory_test_needed,
-    product_recommendation_allowed: false,
+    product_recommendation_allowed: safety.productRecommendationAllowed,
     urgency_level: parsed.urgency_level,
     severity: parsed.urgency_level,
     next_step: nextStep,
-    raw_response: parsed,
+    raw_response: rawResponse,
     assessed_at: new Date().toISOString(),
   };
 
@@ -177,6 +230,26 @@ export async function runPreliminaryAssessment(options: {
       error: "Assessment succeeded but could not be saved.",
       status: 500,
     };
+  }
+
+  if (safety.humanReviewRequired) {
+    await client
+      .from("crop_cases")
+      .update({ status: "in_review" })
+      .eq("id", caseId)
+      .eq("farmer_id", farmerId);
+
+    const reasonSummary =
+      safety.humanReviewReasons.slice(0, 3).join(" ") ||
+      "Automatic safety rules require technical review.";
+
+    await client.from("follow_ups").insert({
+      crop_case_id: caseId,
+      farmer_id: farmerId,
+      title: "Human technical review required",
+      notes: reasonSummary,
+      status: "pending",
+    });
   }
 
   return {
