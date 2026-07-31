@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const farmerId = searchParams.get("farmerId")?.trim();
   const status = searchParams.get("status")?.trim() || "active";
+  const crop = searchParams.get("crop")?.trim();
 
   if (!farmerId) {
     return NextResponse.json(
@@ -49,6 +50,10 @@ export async function GET(request: Request) {
 
   if (status !== "all") {
     query = query.eq("status", status);
+  }
+
+  if (crop) {
+    query = query.ilike("crop_name", crop);
   }
 
   const { data, error } = await query;

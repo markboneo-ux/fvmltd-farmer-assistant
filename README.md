@@ -2,7 +2,7 @@
 
 Mobile-first web application for an AI crop assistant aimed at tropical smallholder farmers.
 
-This version includes the visual app shell, **Supabase client configuration**, the database schema, **farmer registration**, and **farm / crop-cycle management**. OpenAI is not wired yet. Crop-check, chat, upload, results, and staff screens still use placeholder data.
+This version includes the visual app shell, **Supabase client configuration**, the database schema, **farmer registration**, **farm / crop-cycle management**, and a **guided Crop Check** workflow for Tomato, Pepper, and Cucumber. OpenAI is not wired yet. Chat, upload, results, and staff screens still use placeholder data.
 
 ## Stack
 
@@ -20,7 +20,7 @@ This version includes the visual app shell, **Supabase client configuration**, t
 | `/dashboard` | Farmer dashboard with active crops |
 | `/farms/new` | Add a farm plot |
 | `/crop-cycles/new` | Create a crop cycle |
-| `/crop-check` | Start a crop check |
+| `/crop-check` | Guided crop check (Tomato, Pepper, Cucumber) |
 | `/chat` | AI crop assistant chat (demo messages) |
 | `/upload` | Upload crop photographs (placeholder states) |
 | `/results` | Assessment results |
@@ -38,6 +38,7 @@ src/
     farmers/            # Registration validation, Farmer ID, local session
     farms/              # Farm form types and validation
     crop-cycles/        # Crop-cycle form types and validation
+    crop-check/         # Guided crop-check steps and validation
     supabase/
       client.ts         # Browser client (anon key only)
       server.ts         # Server client (anon key + cookies)
@@ -78,6 +79,37 @@ API routes:
 
 Active crop cycles appear on the Farmer Dashboard.
 
+## Guided Crop Check
+
+`/crop-check` walks the farmer through a **chat-style, one-question-at-a-time** workflow for:
+
+- Tomato
+- Pepper
+- Cucumber
+
+Flow:
+
+1. Select the crop
+2. Select an existing crop cycle **or** create a new one (inline)
+3. Answer guided questions:
+   - Problem description
+   - Date first observed
+   - Where symptoms began (young leaves, old leaves, fruit, stem, roots, whole plant)
+   - Whether the problem is spreading
+   - Percentage of the crop affected
+   - Recent fertilizer applications
+   - Recent spray applications
+   - Irrigation frequency
+   - Drainage condition
+   - Recent heavy rainfall
+
+Cases are saved to Supabase `crop_cases` as `draft` while in progress and `open` when complete. AI diagnosis is intentionally not included yet.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` / `GET` | `/api/crop-cases` | Start / list crop check cases |
+| `PATCH` / `GET` | `/api/crop-cases/[id]` | Save the next guided answer / load a case |
+
 ## Supabase setup
 
 ### 1. Create a Supabase project
@@ -100,6 +132,7 @@ Run the SQL migrations in `supabase/migrations/` against your project **in filen
 | `20260731180000_initial_schema.sql` | Core tables including `farmers`, `farms`, `crop_cycles` |
 | `20260731190000_farmer_registration_fields.sql` | Adds Farmer ID / farm size / crops / consent columns if upgrading an older schema |
 | `20260731193000_farm_crop_cycle_fields.sql` | Adds farm location/water/drainage/system and crop-cycle planting fields |
+| `20260731200000_crop_check_guided_fields.sql` | Adds guided crop-check fields and `draft` status on `crop_cases` |
 
 ### 3. Local environment variables
 
