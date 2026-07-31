@@ -262,6 +262,31 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Vercel deployment
+
+The Next.js app lives at the **repository root** (`package.json`, `next.config.ts`, and `src/app/page.tsx`).
+
+| Setting | Required value |
+| --- | --- |
+| **Framework Preset** | Next.js (pinned in `vercel.json`) |
+| **Root Directory** | Leave empty / `.` (do **not** set a nested folder) |
+| **Output Directory** | Leave as the Next.js default (do **not** override) |
+| **Build Command** | `npm run build` |
+| **Install Command** | `npm install` |
+
+### Production URL note
+
+This repository is currently linked to **two** Vercel projects:
+
+| Project | Production URL | Status |
+| --- | --- | --- |
+| `fvmltd-farmer-assistant-nxmi` | https://fvmltd-farmer-assistant-nxmi.vercel.app | Serves the app (`/` returns 200) |
+| `fvmltd-farmer-assistant` | https://fvmltd-farmer-assistant.vercel.app | Platform `404: NOT_FOUND` |
+
+**Root cause of the advertised-domain 404:** the homepage route exists in code and builds correctly, but `fvmltd-farmer-assistant.vercel.app` is not serving a production deployment of this Next.js app. Use the working `-nxmi` project, or in the Vercel dashboard assign the production domain to that project / remove the duplicate project so only one project deploys `main`.
+
+No Root Directory change is required in the working project (keep it at the repository root).
+
 ## Scripts
 
 | Command | Description |
