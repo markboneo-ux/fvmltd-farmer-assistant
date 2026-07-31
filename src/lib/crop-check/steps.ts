@@ -93,7 +93,7 @@ export function promptForStep(
     case "completed":
       return {
         assistantText:
-          "Thanks — your crop check and photographs are saved. AI diagnosis is not connected yet. You can return to your dashboard.",
+          "Thanks — your crop check and photographs are saved. A preliminary AI assessment will open next when available.",
         inputKind: "none",
       };
   }

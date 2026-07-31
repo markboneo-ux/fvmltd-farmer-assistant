@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/Button";
+import type { AssessmentRecord } from "@/lib/assessment/types";
 import { compressImageForUpload } from "@/lib/crop-check/compressImage";
 import {
   PHOTO_SLOTS,
@@ -24,6 +25,8 @@ type Props = {
   farmerId: string;
   onCompleted?: (result: {
     missingSlots: PhotoSlotKey[];
+    assessment: AssessmentRecord | null;
+    assessmentError: string | null;
   }) => void;
   completeLabel?: string;
 };
@@ -186,12 +189,18 @@ export function CasePhotoUploader({
       });
       const payload = (await response.json()) as {
         missingSlots?: PhotoSlotKey[];
+        assessment?: AssessmentRecord | null;
+        assessmentError?: string | null;
         error?: string;
       };
       if (!response.ok) {
         throw new Error(payload.error ?? "Could not finish crop check.");
       }
-      onCompleted?.({ missingSlots: payload.missingSlots ?? [] });
+      onCompleted?.({
+        missingSlots: payload.missingSlots ?? [],
+        assessment: payload.assessment ?? null,
+        assessmentError: payload.assessmentError ?? null,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not finish.");
     } finally {
@@ -318,7 +327,7 @@ export function CasePhotoUploader({
         disabled={finishing || Boolean(busySlot)}
         onClick={() => void handleFinish()}
       >
-        {finishing ? "Saving…" : completeLabel}
+        {finishing ? "Saving & assessing…" : completeLabel}
       </Button>
       {(missingRequired.length > 0 || skippedRequired.length > 0) && (
         <p className="text-center text-xs text-muted">

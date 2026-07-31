@@ -2,14 +2,15 @@
 
 Mobile-first web application for an AI crop assistant aimed at tropical smallholder farmers.
 
-This version includes the visual app shell, **Supabase client configuration**, the database schema, **farmer registration**, **farm / crop-cycle management**, and a **guided Crop Check** workflow for Tomato, Pepper, and Cucumber. OpenAI is not wired yet. Chat, upload, results, and staff screens still use placeholder data.
+This version includes the visual app shell, **Supabase**, **farmer registration**, **farm / crop-cycle management**, a **guided Crop Check** (with photographs), and a **server-side OpenAI preliminary assessment**. Chat and staff screens still use placeholder data.
 
 ## Stack
 
 - [Next.js](https://nextjs.org/) (App Router)
 - [TypeScript](https://www.typescriptlang.org/)
 - [Tailwind CSS](https://tailwindcss.com/)
-- [Supabase](https://supabase.com/) (Postgres + Auth-ready clients)
+- [Supabase](https://supabase.com/) (Postgres + Storage + Auth-ready clients)
+- [OpenAI](https://openai.com/) (server-only preliminary assessments)
 
 ## Pages
 
@@ -23,7 +24,7 @@ This version includes the visual app shell, **Supabase client configuration**, t
 | `/crop-check` | Guided crop check (Tomato, Pepper, Cucumber) |
 | `/chat` | AI crop assistant chat (demo messages) |
 | `/upload` | Upload / review crop photographs for a case |
-| `/results` | Assessment results |
+| `/results` | Preliminary AI assessment results (`?caseId=`) |
 | `/staff` | Staff review dashboard |
 
 ## Project structure
@@ -39,6 +40,8 @@ src/
     farms/              # Farm form types and validation
     crop-cycles/        # Crop-cycle form types and validation
     crop-check/         # Guided crop-check steps and validation
+    assessment/         # OpenAI preliminary assessment (server-only)
+    openai/             # OpenAI client + env helpers (server-only)
     supabase/
       client.ts         # Browser client (anon key only)
       server.ts         # Server client (anon key + cookies)
@@ -124,7 +127,30 @@ Photos are compressed on-device when practical, stored in a **private** Supabase
 | `PATCH` / `GET` | `/api/crop-cases/[id]` | Save the next guided answer / load a case |
 | `POST` / `GET` | `/api/crop-cases/[id]/photos` | Upload / list case photographs |
 | `POST` | `/api/crop-cases/[id]/photos/skip` | Skip a required photograph slot |
-| `POST` | `/api/crop-cases/[id]/complete` | Finish check (auto-marks remaining gaps as skipped) |
+| `POST` | `/api/crop-cases/[id]/complete` | Finish check, then run preliminary OpenAI assessment |
+| `POST` / `GET` | `/api/crop-cases/[id]/assess` | Run / load preliminary assessment |
+
+## Preliminary OpenAI assessment
+
+When a crop check is completed, **server-only** code calls OpenAI with case context:
+
+- Crop, variety, crop age, location
+- Problem description, symptom location, affected area
+- Fertilizer / spray history, irrigation, drainage
+- Soil pH and EC when a `soil_tests` row exists
+- Uploaded crop photographs (downloaded server-side from private Storage)
+
+The model must return structured JSON:
+
+`case_summary`, `likely_causes`, `confidence_score`, `missing_information`, `immediate_safe_actions`, `human_review_required`, `laboratory_test_needed`, `product_recommendation_allowed`, `urgency_level`
+
+Safety controls:
+
+- OpenAI is only used from Route Handlers under `src/lib/openai` and `src/lib/assessment` (`server-only`)
+- Prompt forbids unrestricted pesticide rates and invented products
+- `product_recommendation_allowed` is forced to `false` when saving
+- Immediate actions are sanitized to strip rate-like patterns
+- Results are stored in Supabase `ai_assessments`
 
 ## Supabase setup
 
@@ -150,6 +176,7 @@ Run the SQL migrations in `supabase/migrations/` against your project **in filen
 | `20260731193000_farm_crop_cycle_fields.sql` | Adds farm location/water/drainage/system and crop-cycle planting fields |
 | `20260731200000_crop_check_guided_fields.sql` | Adds guided crop-check fields and `draft` status on `crop_cases` |
 | `20260731210000_case_photo_slots_and_storage.sql` | Photo slot keys, skip support, private `case-photos` Storage bucket |
+| `20260731220000_ai_assessment_structured_fields.sql` | Structured AI assessment columns + soil EC |
 
 ### 3. Local environment variables
 
@@ -168,18 +195,19 @@ In the Vercel project: **Settings → Environment Variables**, add:
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server | No | Supabase project URL. Safe to expose; required at build and runtime. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server | No | Public anon key. Safe for Client Components. Protected by Row Level Security. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). |
+| `OPENAI_API_KEY` | Server only | **Yes** | OpenAI API key. **Never** prefix with `NEXT_PUBLIC_`. Used only in `src/lib/openai` / assessment routes. |
+| `OPENAI_MODEL` | Server only | No | Optional. Defaults to `gpt-4o`. |
 
 Recommended Vercel settings for each variable:
 
 - Environments: Production, Preview, and Development (as needed)
-- For `SUPABASE_SERVICE_ROLE_KEY`, mark as **Sensitive** / encrypted if your Vercel plan supports it
-
-Do **not** add OpenAI keys yet — AI integration is intentionally out of scope for this step.
+- For `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`, mark as **Sensitive** / encrypted if your Vercel plan supports it
 
 ### Security notes
 
 - Browser code (`src/lib/supabase/client.ts`) uses only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - The service role client lives in `src/lib/supabase/admin.ts` and imports `server-only` so it cannot be bundled into the browser.
+- The OpenAI client lives in `src/lib/openai/client.ts` with `server-only` — never call OpenAI from Client Components.
 - Initial RLS is enabled on all application tables with no public policies yet. Until auth policies are added, prefer the server admin client for trusted backend writes.
 
 ## Initial database tables
@@ -192,7 +220,7 @@ Do **not** add OpenAI keys yet — AI integration is intentionally out of scope 
 | `crop_cases` | Crop health check cases |
 | `case_photos` | Photos attached to cases (Storage paths) |
 | `soil_tests` | Soil test results |
-| `ai_assessments` | AI assessment records (no OpenAI yet) |
+| `ai_assessments` | Preliminary OpenAI assessment records |
 | `recommendations` | Case recommendations, optional product link |
 | `products` | Product catalog |
 | `follow_ups` | Follow-up tasks for staff / farmers |
@@ -226,14 +254,13 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Out of scope (for this version)
 
-- OpenAI or other AI providers
 - Authentication and authorization policies
 - Payments
-- Live data binding on crop-check / chat / upload / results / staff screens (still placeholder)
+- Catalog-backed product recommendations (AI product recommendations stay disabled)
+- Live staff queue binding (still placeholder)
 
 ## Suggested next steps
 
 1. Add Supabase Auth for farmers and staff; write RLS policies.
-2. Replace remaining placeholder screens with queries against the new tables.
-3. Connect photo upload to a Supabase Storage bucket (`case-photos`).
-4. Add OpenAI (or another model) for `ai_assessments` generation.
+2. Wire staff review to approve assessments and catalog products.
+3. Collect soil pH/EC in the crop-check flow when available.

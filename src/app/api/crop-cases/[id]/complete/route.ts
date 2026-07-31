@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runPreliminaryAssessment } from "@/lib/assessment/runAssessment";
 import { CROP_CASE_SELECT, mapCropCaseRow } from "@/lib/crop-check/map";
 import { CASE_PHOTO_SELECT, mapCasePhotoRow } from "@/lib/crop-check/photoMap";
 import {
@@ -9,6 +10,7 @@ import {
 import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -68,9 +70,19 @@ export async function POST(request: Request, context: RouteContext) {
       .select(CROP_CASE_SELECT)
       .eq("id", id)
       .single();
+
+    const assessmentResult = await runPreliminaryAssessment({
+      client: admin.client,
+      caseId: id,
+      farmerId,
+      force: false,
+    });
+
     return NextResponse.json({
       cropCase: data ? mapCropCaseRow(data) : null,
       missingSlots: [],
+      assessment: assessmentResult.ok ? assessmentResult.assessment : null,
+      assessmentError: assessmentResult.ok ? null : assessmentResult.error,
     });
   }
 
@@ -155,9 +167,18 @@ export async function POST(request: Request, context: RouteContext) {
     .eq("crop_case_id", id)
     .order("sort_order", { ascending: true });
 
+  const assessmentResult = await runPreliminaryAssessment({
+    client: admin.client,
+    caseId: id,
+    farmerId,
+    force: false,
+  });
+
   return NextResponse.json({
     cropCase: mapCropCaseRow(updated),
     missingSlots,
     photos: (finalPhotos ?? []).map((row) => mapCasePhotoRow(row, null)),
+    assessment: assessmentResult.ok ? assessmentResult.assessment : null,
+    assessmentError: assessmentResult.ok ? null : assessmentResult.error,
   });
 }
