@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/Button";
@@ -17,6 +18,7 @@ import {
   type GuidedQuestionStep,
   type PreCaseStep,
 } from "@/lib/crop-check/types";
+import type { AssessmentRecord } from "@/lib/assessment/types";
 import { PHOTO_SLOTS, type PhotoSlotKey } from "@/lib/crop-check/photos";
 import type { CropCycleRecord } from "@/lib/crop-cycles/types";
 import {
@@ -46,6 +48,7 @@ function messageId() {
 
 export function CropCheckChat() {
   const farmer = useRegisteredFarmer();
+  const router = useRouter();
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   const [step, setStep] = useState<PreCaseStep | GuidedQuestionStep>("select_crop");
@@ -302,7 +305,11 @@ export function CropCheckChat() {
     }
   }
 
-  function handlePhotosCompleted(result: { missingSlots: PhotoSlotKey[] }) {
+  function handlePhotosCompleted(result: {
+    missingSlots: PhotoSlotKey[];
+    assessment: AssessmentRecord | null;
+    assessmentError: string | null;
+  }) {
     setStep("completed");
     setCropCase((prev) =>
       prev
@@ -322,10 +329,28 @@ export function CropCheckChat() {
         )
         .join(", ");
       pushAssistant(
-        `Crop check saved. These required photographs are still missing or were skipped: ${labels}. AI diagnosis is not connected yet.`,
+        `Crop check saved. These required photographs are still missing or were skipped: ${labels}.`,
+      );
+    }
+
+    if (result.assessment) {
+      pushAssistant(
+        "A preliminary AI assessment is ready. Opening your results now. This is not a final diagnosis — no pesticide rates or invented products are allowed.",
+      );
+      router.push(`/results?caseId=${cropCase?.id ?? ""}`);
+      return;
+    }
+
+    if (result.assessmentError) {
+      pushAssistant(
+        `Crop check saved, but the preliminary assessment could not run yet: ${result.assessmentError}. You can retry from the results screen.`,
       );
     } else {
       pushAssistant(promptForStep("completed", crop ?? "crop").assistantText);
+    }
+
+    if (cropCase?.id) {
+      router.push(`/results?caseId=${cropCase.id}`);
     }
   }
 

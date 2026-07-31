@@ -1,0 +1,187 @@
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
+import { getOpenAIModel } from "@/lib/openai/env";
+import { tryCreateOpenAIClient } from "@/lib/openai/client";
+import { buildCaseContextForModel } from "./buildCaseContext";
+import { ASSESSMENT_SELECT, mapAssessmentRow } from "./map";
+import { parseAssessmentJson } from "./parse";
+import {
+  ASSESSMENT_JSON_SCHEMA,
+  type AssessmentRecord,
+  type PreliminaryAssessmentJson,
+} from "./types";
+
+const SYSTEM_PROMPT = `You are FVMLTD's preliminary crop assessment assistant for tropical smallholder farmers.
+
+You produce a cautious, preliminary assessment only — not a final diagnosis.
+
+Hard rules:
+1. Never invent pesticide brand names, active ingredients with rates, or product SKUs.
+2. Never provide unrestricted pesticide application rates (e.g. ml/L, kg/ha, spray schedules with chemicals).
+3. Set product_recommendation_allowed to false always in this preliminary stage. Product advice requires human FVMLTD staff and an approved catalog product.
+4. immediate_safe_actions may only include cultural, sanitation, monitoring, irrigation/drainage adjustments, isolation of affected plants, or waiting for staff/lab guidance — no chemical recipes.
+5. Prefer human_review_required=true when photos are incomplete, confidence is modest, or symptoms could be several diseases/pests.
+6. Use the photographs when present. If photos are missing, say so in missing_information.
+7. Be practical for smallholder tropical farms (Tomato, Pepper, Cucumber and related crops).
+8. Return ONLY JSON matching the required schema.`;
+
+export type RunAssessmentResult =
+  | { ok: true; assessment: AssessmentRecord; created: boolean }
+  | { ok: false; error: string; status: number };
+
+export async function runPreliminaryAssessment(options: {
+  client: SupabaseClient;
+  caseId: string;
+  farmerId: string;
+  force?: boolean;
+}): Promise<RunAssessmentResult> {
+  const { client, caseId, farmerId, force = false } = options;
+
+  if (!force) {
+    const { data: existing } = await client
+      .from("ai_assessments")
+      .select(ASSESSMENT_SELECT)
+      .eq("crop_case_id", caseId)
+      .order("assessed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      return {
+        ok: true,
+        assessment: mapAssessmentRow(existing),
+        created: false,
+      };
+    }
+  }
+
+  const openai = tryCreateOpenAIClient();
+  if (!openai.ok) {
+    return { ok: false, error: openai.error, status: 503 };
+  }
+
+  let context;
+  try {
+    context = await buildCaseContextForModel(client, caseId, farmerId);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load case.",
+      status: 404,
+    };
+  }
+
+  const userContent: ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: `Assess this crop case and return structured JSON.\n\nCase data:\n${JSON.stringify(context.textPayload, null, 2)}\n\nPhotographs attached: ${context.photos.length}. Each image is labeled by slot.`,
+    },
+  ];
+
+  for (const photo of context.photos) {
+    userContent.push({
+      type: "text",
+      text: `Photograph slot: ${photo.label} (${photo.slotKey})`,
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${photo.mimeType};base64,${photo.base64}`,
+      },
+    });
+  }
+
+  const model = getOpenAIModel();
+
+  let parsed: PreliminaryAssessmentJson;
+  let rawContent: string;
+
+  try {
+    const completion = await openai.client.chat.completions.create({
+      model,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "preliminary_crop_assessment",
+          strict: true,
+          schema: ASSESSMENT_JSON_SCHEMA as unknown as Record<string, unknown>,
+        },
+      },
+    });
+
+    rawContent = completion.choices[0]?.message?.content ?? "";
+    if (!rawContent) {
+      return {
+        ok: false,
+        error: "OpenAI returned an empty assessment.",
+        status: 502,
+      };
+    }
+
+    parsed = parseAssessmentJson(JSON.parse(rawContent));
+  } catch (error) {
+    console.error("OpenAI assessment failed:", error);
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "OpenAI assessment request failed.",
+      status: 502,
+    };
+  }
+
+  const likelyIssue = parsed.likely_causes[0] ?? "Undetermined";
+  const nextStep = parsed.human_review_required
+    ? "FVMLTD staff review is recommended before any pesticide or product use."
+    : "Continue monitoring and follow the immediate safe actions listed.";
+
+  const insertRow = {
+    crop_case_id: caseId,
+    model_name: model,
+    case_summary: parsed.case_summary,
+    summary: parsed.case_summary,
+    likely_causes: parsed.likely_causes,
+    likely_issue: likelyIssue,
+    confidence_score: parsed.confidence_score,
+    confidence: parsed.confidence_score,
+    missing_information: parsed.missing_information,
+    immediate_safe_actions: parsed.immediate_safe_actions,
+    human_review_required: parsed.human_review_required,
+    laboratory_test_needed: parsed.laboratory_test_needed,
+    product_recommendation_allowed: false,
+    urgency_level: parsed.urgency_level,
+    severity: parsed.urgency_level,
+    next_step: nextStep,
+    raw_response: parsed,
+    assessed_at: new Date().toISOString(),
+  };
+
+  const { data: saved, error: saveError } = await client
+    .from("ai_assessments")
+    .insert(insertRow)
+    .select(ASSESSMENT_SELECT)
+    .single();
+
+  if (saveError || !saved) {
+    console.error("Save ai_assessment failed:", saveError);
+    return {
+      ok: false,
+      error: "Assessment succeeded but could not be saved.",
+      status: 500,
+    };
+  }
+
+  return {
+    ok: true,
+    assessment: mapAssessmentRow(saved),
+    created: true,
+  };
+}

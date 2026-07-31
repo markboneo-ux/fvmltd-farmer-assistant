@@ -62,9 +62,9 @@ function UploadPageContent() {
       <CasePhotoUploader
         caseId={caseId}
         farmerId={farmer.id}
-        completeLabel="Save and continue"
+        completeLabel="Save and assess"
         onCompleted={() => {
-          router.push("/dashboard");
+          router.push(`/results?caseId=${caseId}`);
         }}
       />
       <p className="mt-4 text-center text-xs text-muted">

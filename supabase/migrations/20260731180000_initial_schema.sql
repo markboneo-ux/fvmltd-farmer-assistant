@@ -365,6 +365,7 @@ create table public.soil_tests (
   sampled_at date not null,
   lab_name text,
   ph numeric(4, 2),
+  electrical_conductivity numeric(10, 3),
   nitrogen numeric(10, 3),
   phosphorus numeric(10, 3),
   potassium numeric(10, 3),
@@ -395,7 +396,24 @@ create table public.ai_assessments (
   model_name text,
   confidence numeric(5, 2)
     check (confidence is null or (confidence >= 0 and confidence <= 100)),
+  confidence_score numeric(5, 2)
+    check (
+      confidence_score is null
+      or (confidence_score >= 0 and confidence_score <= 100)
+    ),
   likely_issue text,
+  case_summary text,
+  likely_causes jsonb not null default '[]'::jsonb,
+  missing_information jsonb not null default '[]'::jsonb,
+  immediate_safe_actions jsonb not null default '[]'::jsonb,
+  human_review_required boolean not null default true,
+  laboratory_test_needed boolean not null default false,
+  product_recommendation_allowed boolean not null default false,
+  urgency_level text
+    check (
+      urgency_level is null
+      or urgency_level in ('low', 'moderate', 'high', 'critical')
+    ),
   severity text
     check (severity is null or severity in ('low', 'mild', 'moderate', 'high', 'critical')),
   summary text,
