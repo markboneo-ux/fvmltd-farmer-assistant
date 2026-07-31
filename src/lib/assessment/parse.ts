@@ -1,4 +1,8 @@
-import type { PreliminaryAssessmentJson, UrgencyLevel } from "./types";
+import type {
+  AssessmentSafetySignals,
+  PreliminaryAssessmentJson,
+  UrgencyLevel,
+} from "./types";
 
 const URGENCY: UrgencyLevel[] = ["low", "moderate", "high", "critical"];
 
@@ -8,6 +12,29 @@ function asStringArray(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function parseSafetySignals(raw: unknown): AssessmentSafetySignals {
+  const data =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+
+  return {
+    plants_dying_quickly: asBoolean(data.plants_dying_quickly),
+    unknown_products_mixed: asBoolean(data.unknown_products_mixed),
+    herbicide_damage_suspected: asBoolean(data.herbicide_damage_suspected),
+    multiple_unsuccessful_treatments: asBoolean(
+      data.multiple_unsuccessful_treatments,
+    ),
+    severe_bacterial_or_viral_suspected: asBoolean(
+      data.severe_bacterial_or_viral_suspected,
+    ),
+    // Default true only when the model omitted the field; false means no protocol.
+    approved_protocol_exists: asBoolean(data.approved_protocol_exists, true),
+  };
 }
 
 /**
@@ -61,11 +88,11 @@ export function parseAssessmentJson(raw: unknown): PreliminaryAssessmentJson {
     // Hard safety gate — never allow invented product recommendations from the model.
     product_recommendation_allowed: false,
     urgency_level: urgency as UrgencyLevel,
+    safety_signals: parseSafetySignals(data.safety_signals),
   };
 }
 
 function sanitizeActionText(text: string): string {
-  // Strip common rate patterns the model might still emit despite instructions.
   return text
     .replace(
       /\b\d+(\.\d+)?\s?(ml|mL|L|l|g|kg|oz|lb)\s*\/\s*(ha|acre|L|l|plant|litre|liter)\b/gi,

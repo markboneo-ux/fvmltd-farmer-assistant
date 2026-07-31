@@ -1,5 +1,23 @@
 export type UrgencyLevel = "low" | "moderate" | "high" | "critical";
 
+/** Confidence-only band before safety-trigger overrides. */
+export type ConfidenceBand =
+  | "approved_guidance"
+  | "needs_more_info"
+  | "human_review";
+
+/** Farmer-facing display mode after confidence + safety rules. */
+export type GuidanceMode = ConfidenceBand;
+
+export type AssessmentSafetySignals = {
+  plants_dying_quickly: boolean;
+  unknown_products_mixed: boolean;
+  herbicide_damage_suspected: boolean;
+  multiple_unsuccessful_treatments: boolean;
+  severe_bacterial_or_viral_suspected: boolean;
+  approved_protocol_exists: boolean;
+};
+
 export type PreliminaryAssessmentJson = {
   case_summary: string;
   likely_causes: string[];
@@ -10,6 +28,17 @@ export type PreliminaryAssessmentJson = {
   laboratory_test_needed: boolean;
   product_recommendation_allowed: boolean;
   urgency_level: UrgencyLevel;
+  safety_signals: AssessmentSafetySignals;
+};
+
+export type SafetyEvaluation = {
+  confidenceBand: ConfidenceBand;
+  guidanceMode: GuidanceMode;
+  humanReviewRequired: boolean;
+  humanReviewReasons: string[];
+  productRecommendationAllowed: boolean;
+  missingInformation: string[];
+  immediateSafeActions: string[];
 };
 
 export type AssessmentRecord = {
@@ -26,6 +55,9 @@ export type AssessmentRecord = {
   productRecommendationAllowed: boolean;
   urgencyLevel: UrgencyLevel;
   assessedAt: string;
+  confidenceBand: ConfidenceBand;
+  guidanceMode: GuidanceMode;
+  humanReviewReasons: string[];
 };
 
 export const ASSESSMENT_JSON_SCHEMA = {
@@ -41,6 +73,7 @@ export const ASSESSMENT_JSON_SCHEMA = {
     "laboratory_test_needed",
     "product_recommendation_allowed",
     "urgency_level",
+    "safety_signals",
   ],
   properties: {
     case_summary: { type: "string" },
@@ -63,6 +96,26 @@ export const ASSESSMENT_JSON_SCHEMA = {
     urgency_level: {
       type: "string",
       enum: ["low", "moderate", "high", "critical"],
+    },
+    safety_signals: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "plants_dying_quickly",
+        "unknown_products_mixed",
+        "herbicide_damage_suspected",
+        "multiple_unsuccessful_treatments",
+        "severe_bacterial_or_viral_suspected",
+        "approved_protocol_exists",
+      ],
+      properties: {
+        plants_dying_quickly: { type: "boolean" },
+        unknown_products_mixed: { type: "boolean" },
+        herbicide_damage_suspected: { type: "boolean" },
+        multiple_unsuccessful_treatments: { type: "boolean" },
+        severe_bacterial_or_viral_suspected: { type: "boolean" },
+        approved_protocol_exists: { type: "boolean" },
+      },
     },
   },
 } as const;

@@ -142,13 +142,35 @@ When a crop check is completed, **server-only** code calls OpenAI with case cont
 
 The model must return structured JSON:
 
-`case_summary`, `likely_causes`, `confidence_score`, `missing_information`, `immediate_safe_actions`, `human_review_required`, `laboratory_test_needed`, `product_recommendation_allowed`, `urgency_level`
+`case_summary`, `likely_causes`, `confidence_score`, `missing_information`, `immediate_safe_actions`, `human_review_required`, `laboratory_test_needed`, `product_recommendation_allowed`, `urgency_level`, `safety_signals`
 
-Safety controls:
+### Confidence bands
+
+| Confidence | Farmer-facing outcome |
+| --- | --- |
+| **≥ 80%** | Display approved preliminary guidance |
+| **60–79%** | Ask for missing information or additional photographs |
+| **< 60%** | Send the case for human technical review |
+
+### Automatic human review
+
+Human review is required automatically when any of these apply:
+
+- Most of the crop is affected (≥ 50%)
+- Plants are dying quickly
+- Unknown products were mixed
+- Herbicide damage is suspected
+- Multiple unsuccessful treatments were already applied
+- The AI identifies a possible severe bacterial or viral issue
+- No approved protocol exists
+
+When human review is required, the case status becomes `in_review`, a staff follow-up is created, and **no final product recommendation is displayed**.
+
+### Safety controls
 
 - OpenAI is only used from Route Handlers under `src/lib/openai` and `src/lib/assessment` (`server-only`)
 - Prompt forbids unrestricted pesticide rates and invented products
-- `product_recommendation_allowed` is forced to `false` when saving
+- `product_recommendation_allowed` stays `false` when human review is required
 - Immediate actions are sanitized to strip rate-like patterns
 - Results are stored in Supabase `ai_assessments`
 
