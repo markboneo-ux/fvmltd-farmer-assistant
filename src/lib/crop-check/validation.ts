@@ -177,18 +177,21 @@ export function validateGuidedAnswer(
       if (typeof raw !== "boolean") {
         return { ok: false, error: "Choose Yes or No." };
       }
-      const completedAt = new Date().toISOString();
       return {
         ok: true,
         patch: {
           recent_heavy_rainfall: raw,
-          guided_step: "completed",
-          status: "open",
-          completed_at: completedAt,
+          guided_step: "photos",
+          status: "draft",
         },
-        nextStep: "completed",
+        nextStep: "photos",
         displayValue: raw,
       };
     }
+    case "photos":
+      return {
+        ok: false,
+        error: "Use the photograph uploader to continue this step.",
+      };
   }
 }

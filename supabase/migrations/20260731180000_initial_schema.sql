@@ -322,15 +322,32 @@ comment on table public.crop_cases is 'Crop health check / issue cases submitted
 create table public.case_photos (
   id uuid primary key default gen_random_uuid(),
   crop_case_id uuid not null references public.crop_cases (id) on delete cascade,
-  storage_path text not null,
+  slot_key text not null
+    check (
+      slot_key in (
+        'whole_field',
+        'whole_plant',
+        'leaf_front',
+        'leaf_back',
+        'damage_detail',
+        'healthy_comparison'
+      )
+    ),
+  storage_path text,
   storage_bucket text not null default 'case-photos',
   label text,
   caption text,
   mime_type text,
   file_size_bytes bigint,
   sort_order integer not null default 0,
+  is_skipped boolean not null default false,
   uploaded_at timestamptz not null default timezone('utc', now()),
-  created_at timestamptz not null default timezone('utc', now())
+  created_at timestamptz not null default timezone('utc', now()),
+  check (
+    (is_skipped = true and storage_path is null)
+    or (is_skipped = false and storage_path is not null)
+  ),
+  unique (crop_case_id, slot_key)
 );
 
 create index case_photos_crop_case_id_idx on public.case_photos (crop_case_id);

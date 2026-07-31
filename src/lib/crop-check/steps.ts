@@ -84,10 +84,16 @@ export function promptForStep(
         assistantText: "Has there been heavy rainfall recently?",
         inputKind: "boolean",
       };
+    case "photos":
+      return {
+        assistantText:
+          "Next, add the required crop photographs. You may skip a photo if you cannot take it, but missing required photos will be listed clearly.",
+        inputKind: "none",
+      };
     case "completed":
       return {
         assistantText:
-          "Thanks — your crop check is saved. AI diagnosis is not connected yet. You can add photos next or return to your dashboard.",
+          "Thanks — your crop check and photographs are saved. AI diagnosis is not connected yet. You can return to your dashboard.",
         inputKind: "none",
       };
   }

@@ -22,7 +22,7 @@ This version includes the visual app shell, **Supabase client configuration**, t
 | `/crop-cycles/new` | Create a crop cycle |
 | `/crop-check` | Guided crop check (Tomato, Pepper, Cucumber) |
 | `/chat` | AI crop assistant chat (demo messages) |
-| `/upload` | Upload crop photographs (placeholder states) |
+| `/upload` | Upload / review crop photographs for a case |
 | `/results` | Assessment results |
 | `/staff` | Staff review dashboard |
 
@@ -103,12 +103,28 @@ Flow:
    - Drainage condition
    - Recent heavy rainfall
 
-Cases are saved to Supabase `crop_cases` as `draft` while in progress and `open` when complete. AI diagnosis is intentionally not included yet.
+Cases are saved to Supabase `crop_cases` as `draft` while in progress and `open` when complete. After the questions, farmers upload required photographs. AI diagnosis is intentionally not included yet.
+
+### Crop Check photographs
+
+Required slots (skippable, but clearly marked when missing):
+
+1. Whole field or crop area  
+2. Whole affected plant  
+3. Front of affected leaf  
+4. Back of affected leaf  
+5. Stem, fruit, root, insect or damaged area  
+6. Healthy comparison plant  
+
+Photos are compressed on-device when practical, stored in a **private** Supabase Storage bucket (`case-photos`), and recorded in `case_photos`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` / `GET` | `/api/crop-cases` | Start / list crop check cases |
 | `PATCH` / `GET` | `/api/crop-cases/[id]` | Save the next guided answer / load a case |
+| `POST` / `GET` | `/api/crop-cases/[id]/photos` | Upload / list case photographs |
+| `POST` | `/api/crop-cases/[id]/photos/skip` | Skip a required photograph slot |
+| `POST` | `/api/crop-cases/[id]/complete` | Finish check (auto-marks remaining gaps as skipped) |
 
 ## Supabase setup
 
@@ -133,6 +149,7 @@ Run the SQL migrations in `supabase/migrations/` against your project **in filen
 | `20260731190000_farmer_registration_fields.sql` | Adds Farmer ID / farm size / crops / consent columns if upgrading an older schema |
 | `20260731193000_farm_crop_cycle_fields.sql` | Adds farm location/water/drainage/system and crop-cycle planting fields |
 | `20260731200000_crop_check_guided_fields.sql` | Adds guided crop-check fields and `draft` status on `crop_cases` |
+| `20260731210000_case_photo_slots_and_storage.sql` | Photo slot keys, skip support, private `case-photos` Storage bucket |
 
 ### 3. Local environment variables
 

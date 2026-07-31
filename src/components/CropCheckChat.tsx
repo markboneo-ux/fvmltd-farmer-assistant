@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/Button";
 import { AppShell } from "@/components/AppShell";
+import { CasePhotoUploader } from "@/components/CasePhotoUploader";
 import { labelForAnswer, promptForStep } from "@/lib/crop-check/steps";
 import {
   CROP_CHECK_CROPS,
@@ -16,6 +17,7 @@ import {
   type GuidedQuestionStep,
   type PreCaseStep,
 } from "@/lib/crop-check/types";
+import { PHOTO_SLOTS, type PhotoSlotKey } from "@/lib/crop-check/photos";
 import type { CropCycleRecord } from "@/lib/crop-cycles/types";
 import {
   GROWING_ENVIRONMENT_OPTIONS,
@@ -300,9 +302,43 @@ export function CropCheckChat() {
     }
   }
 
+  function handlePhotosCompleted(result: { missingSlots: PhotoSlotKey[] }) {
+    setStep("completed");
+    setCropCase((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "open",
+            guidedStep: "completed",
+            completedAt: new Date().toISOString(),
+          }
+        : prev,
+    );
+
+    if (result.missingSlots.length > 0) {
+      const labels = result.missingSlots
+        .map(
+          (key) => PHOTO_SLOTS.find((slot) => slot.key === key)?.label ?? key,
+        )
+        .join(", ");
+      pushAssistant(
+        `Crop check saved. These required photographs are still missing or were skipped: ${labels}. AI diagnosis is not connected yet.`,
+      );
+    } else {
+      pushAssistant(promptForStep("completed", crop ?? "crop").assistantText);
+    }
+  }
+
   async function submitGuidedAnswer(answer: string | boolean | number) {
     if (!farmer?.id || !cropCase || !crop || busy) return;
-    if (step === "select_crop" || step === "select_cycle" || step === "create_cycle_farm" || step === "create_cycle_details" || step === "completed") {
+    if (
+      step === "select_crop" ||
+      step === "select_cycle" ||
+      step === "create_cycle_farm" ||
+      step === "create_cycle_details" ||
+      step === "photos" ||
+      step === "completed"
+    ) {
       return;
     }
 
@@ -382,7 +418,8 @@ export function CropCheckChat() {
     step !== "select_crop" &&
     step !== "select_cycle" &&
     step !== "create_cycle_farm" &&
-    step !== "create_cycle_details"
+    step !== "create_cycle_details" &&
+    step !== "photos"
       ? promptForStep(step, crop ?? "crop")
       : null;
 
@@ -715,11 +752,22 @@ export function CropCheckChat() {
             </form>
           ) : null}
 
+          {step === "photos" && cropCase && farmer ? (
+            <CasePhotoUploader
+              caseId={cropCase.id}
+              farmerId={farmer.id}
+              onCompleted={handlePhotosCompleted}
+            />
+          ) : null}
+
           {step === "completed" ? (
             <div className="grid grid-cols-1 gap-2">
-              <Button href="/upload">Add crop photographs</Button>
-              <Button href="/dashboard" variant="secondary">
-                Back to dashboard
+              <Button href="/dashboard">Back to dashboard</Button>
+              <Button
+                href={`/upload?caseId=${cropCase?.id ?? ""}`}
+                variant="secondary"
+              >
+                Review photographs
               </Button>
             </div>
           ) : null}
