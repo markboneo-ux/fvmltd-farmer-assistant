@@ -93,9 +93,51 @@ create table public.farms (
   location_description text,
   village text,
   region text,
+  country text,
+  district text,
   latitude numeric(9, 6),
   longitude numeric(9, 6),
+  farm_size numeric(10, 3)
+    check (farm_size is null or farm_size > 0),
+  farm_size_unit text
+    check (farm_size_unit is null or farm_size_unit in ('acres', 'hectares')),
   size_hectares numeric(10, 3),
+  water_source text
+    check (
+      water_source is null
+      or water_source in (
+        'rainfed',
+        'river',
+        'borehole',
+        'well',
+        'irrigation_canal',
+        'dam',
+        'municipal',
+        'other'
+      )
+    ),
+  drainage_condition text
+    check (
+      drainage_condition is null
+      or drainage_condition in (
+        'well_drained',
+        'moderately_drained',
+        'poorly_drained',
+        'waterlogged',
+        'unknown'
+      )
+    ),
+  growing_system text
+    check (
+      growing_system is null
+      or growing_system in (
+        'open_field',
+        'shade_house',
+        'greenhouse',
+        'mixed',
+        'other'
+      )
+    ),
   primary_crops text[] not null default '{}',
   soil_type text,
   notes text,
@@ -105,6 +147,8 @@ create table public.farms (
 
 create index farms_farmer_id_idx on public.farms (farmer_id);
 create index farms_region_idx on public.farms (region);
+create index farms_country_idx on public.farms (country);
+create index farms_district_idx on public.farms (district);
 
 create trigger farms_set_updated_at
 before update on public.farms
@@ -146,10 +190,35 @@ create table public.crop_cycles (
   variety text,
   planting_date date,
   expected_harvest_date date,
-  growth_stage text,
+  growth_stage text
+    check (
+      growth_stage is null
+      or growth_stage in (
+        'nursery',
+        'transplanting',
+        'vegetative',
+        'flowering',
+        'fruiting',
+        'maturity',
+        'harvest',
+        'other'
+      )
+    ),
   status text not null default 'active'
     check (status in ('planned', 'active', 'harvested', 'abandoned')),
+  area_planted numeric(10, 3)
+    check (area_planted is null or area_planted > 0),
+  area_unit text
+    check (area_unit is null or area_unit in ('acres', 'hectares')),
   area_hectares numeric(10, 3),
+  plant_count integer
+    check (plant_count is null or plant_count > 0),
+  growing_environment text
+    check (
+      growing_environment is null
+      or growing_environment in ('open_field', 'shade_house', 'greenhouse')
+    ),
+  previous_crop text,
   notes text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
