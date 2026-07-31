@@ -2,7 +2,7 @@
 
 Mobile-first web application for an AI crop assistant aimed at tropical smallholder farmers.
 
-This version includes the visual app shell, **Supabase client configuration**, the initial database schema, and a working **farmer registration** flow that saves profiles to Supabase. OpenAI is not wired yet. Most other UI screens still use placeholder data until authentication and live queries are connected.
+This version includes the visual app shell, **Supabase client configuration**, the database schema, **farmer registration**, and **farm / crop-cycle management**. OpenAI is not wired yet. Crop-check, chat, upload, results, and staff screens still use placeholder data.
 
 ## Stack
 
@@ -17,7 +17,9 @@ This version includes the visual app shell, **Supabase client configuration**, t
 | --- | --- |
 | `/` | Welcome page |
 | `/register` | Farmer registration (validated form → Supabase) |
-| `/dashboard` | Farmer dashboard (shows registered farmer when available) |
+| `/dashboard` | Farmer dashboard with active crops |
+| `/farms/new` | Add a farm plot |
+| `/crop-cycles/new` | Create a crop cycle |
 | `/crop-check` | Start a crop check |
 | `/chat` | AI crop assistant chat (demo messages) |
 | `/upload` | Upload crop photographs (placeholder states) |
@@ -34,6 +36,8 @@ src/
     placeholder.ts      # Demo farmer, checks, chat, and staff data
   lib/
     farmers/            # Registration validation, Farmer ID, local session
+    farms/              # Farm form types and validation
+    crop-cycles/        # Crop-cycle form types and validation
     supabase/
       client.ts         # Browser client (anon key only)
       server.ts         # Server client (anon key + cookies)
@@ -58,6 +62,22 @@ The `/register` page collects:
 
 On submit, `POST /api/farmers/register` validates the payload, generates a unique Farmer ID (`FVM-XXXXXX`), and inserts a row into the Supabase `farmers` table using the **service role** client (RLS is enabled with no public insert policy yet). After success, the farmer is sent to `/dashboard`, which shows their name, Farmer ID, location, farm size, and crops.
 
+## Farm and crop-cycle management
+
+Registered farmers can:
+
+1. **Add a farm** at `/farms/new` — country, district, farm size, GPS/manual location, water source, drainage condition, growing system  
+2. **Create a crop cycle** at `/crop-cycles/new` — crop, variety, planting date, area planted, plant count (optional), open field / shade house / greenhouse, previous crop, current stage  
+
+API routes:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` / `GET` | `/api/farms` | Create or list farms for a farmer |
+| `POST` / `GET` | `/api/crop-cycles` | Create or list crop cycles (`status=active` for the dashboard) |
+
+Active crop cycles appear on the Farmer Dashboard.
+
 ## Supabase setup
 
 ### 1. Create a Supabase project
@@ -77,8 +97,9 @@ Run the SQL migrations in `supabase/migrations/` against your project **in filen
 
 | Migration | Purpose |
 | --- | --- |
-| `20260731180000_initial_schema.sql` | Core tables including `farmers` |
+| `20260731180000_initial_schema.sql` | Core tables including `farmers`, `farms`, `crop_cycles` |
 | `20260731190000_farmer_registration_fields.sql` | Adds Farmer ID / farm size / crops / consent columns if upgrading an older schema |
+| `20260731193000_farm_crop_cycle_fields.sql` | Adds farm location/water/drainage/system and crop-cycle planting fields |
 
 ### 3. Local environment variables
 
