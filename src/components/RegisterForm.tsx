@@ -1,13 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/Button";
+import { RegistrationSuccess } from "@/components/RegistrationSuccess";
 import {
   COUNTRY_OPTIONS,
   DEFAULT_COUNTRY,
   isOtherCountryOption,
 } from "@/data/countries";
+import {
+  FARMER_DASHBOARD_PATH,
+  markJustRegistered,
+  navigateInternal,
+} from "@/lib/farmers/paths";
 import { saveRegisteredFarmer } from "@/lib/farmers/session";
 import {
   CROP_OPTIONS,
@@ -66,17 +72,29 @@ async function readErrorPayload(response: Response): Promise<{
   }
 }
 
-export function RegisterForm() {
+type RegisterFormProps = {
+  onSuccessChange?: (succeeded: boolean) => void;
+};
+
+export function RegisterForm({ onSuccessChange }: RegisterFormProps = {}) {
   const router = useRouter();
   const [values, setValues] = useState<FarmerRegistrationInput>(initialValues);
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [isPending, startTransition] = useTransition();
   const [submitting, setSubmitting] = useState(false);
-  const [succeeded, setSucceeded] = useState(false);
+  const [registered, setRegistered] = useState<RegisteredFarmer | null>(null);
+  const [navigating, setNavigating] = useState(false);
   const inFlight = useRef(false);
 
-  const busy = isPending || submitting || succeeded;
+  const busy = submitting || Boolean(registered);
   const showOtherCountry = isOtherCountryOption(values.country);
+
+  function goToDashboard() {
+    if (navigating) return;
+    setNavigating(true);
+    markJustRegistered();
+    // Relative App Router route only — never absolute deploy/preview URLs.
+    navigateInternal(router, FARMER_DASHBOARD_PATH, "replace");
+  }
 
   function updateField<K extends keyof FarmerRegistrationInput>(
     key: K,
@@ -142,12 +160,13 @@ export function RegisterForm() {
         return;
       }
 
+      // Persist via the existing localStorage session pattern (no secrets in the URL).
       saveRegisteredFarmer(payload.farmer);
-      setSucceeded(true);
-
-      startTransition(() => {
-        router.push("/dashboard");
-      });
+      markJustRegistered();
+      setRegistered(payload.farmer);
+      onSuccessChange?.(true);
+      // Stay on the success screen — navigate when the farmer taps Continue.
+      // Immediate soft-nav after a long POST is what produced "page couldn't load".
     } catch (error) {
       const message =
         error instanceof Error && error.message
@@ -158,6 +177,26 @@ export function RegisterForm() {
       inFlight.current = false;
       setSubmitting(false);
     }
+  }
+
+  if (registered) {
+    return (
+      <div className="space-y-3">
+        <RegistrationSuccess
+          farmerCode={registered.farmerCode}
+          fullName={registered.fullName}
+          onContinue={goToDashboard}
+          continueLabel={
+            navigating ? "Opening dashboard…" : "Continue to dashboard"
+          }
+        />
+        {navigating ? (
+          <p className="text-center text-xs text-muted">
+            If the dashboard does not open, tap Continue again.
+          </p>
+        ) : null}
+      </div>
+    );
   }
 
   const inputClass =
