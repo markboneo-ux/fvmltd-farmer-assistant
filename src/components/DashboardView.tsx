@@ -14,6 +14,7 @@ import {
 } from "@/lib/crop-cycles/labels";
 import type { CropCycleRecord } from "@/lib/crop-cycles/types";
 import { farmer as demoFarmer, recentChecks } from "@/data/placeholder";
+import type { CropCaseRecord } from "@/lib/crop-check/types";
 import {
   clearJustRegistered,
   peekJustRegistered,
@@ -26,6 +27,12 @@ const severityTone = {
   mild: "mild",
   moderate: "moderate",
 } as const;
+
+type ChecksResult = {
+  farmerId: string;
+  checks: CropCaseRecord[];
+  error: string | null;
+};
 
 function formatFarmSize(farmer: RegisteredFarmer): string {
   const size = Number.isInteger(farmer.farmSize)
@@ -43,6 +50,7 @@ type CropsResult = {
 export function DashboardView() {
   const farmer = useRegisteredFarmer();
   const [cropsResult, setCropsResult] = useState<CropsResult | null>(null);
+  const [checksResult, setChecksResult] = useState<ChecksResult | null>(null);
   const [showRegistrationSuccess, setShowRegistrationSuccess] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -85,6 +93,37 @@ export function DashboardView() {
             farmerId,
             crops: [],
             error: "Could not load active crops.",
+          });
+        }
+      });
+
+    fetch(`/api/crop-cases?farmerId=${farmerId}`)
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          cropCases?: CropCaseRecord[];
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!response.ok) {
+          setChecksResult({
+            farmerId,
+            checks: [],
+            error: payload.error ?? "Could not load recent checks.",
+          });
+          return;
+        }
+        setChecksResult({
+          farmerId,
+          checks: (payload.cropCases ?? []).slice(0, 5),
+          error: null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setChecksResult({
+            farmerId,
+            checks: [],
+            error: "Could not load recent checks.",
           });
         }
       });
@@ -135,6 +174,13 @@ export function DashboardView() {
   const activeCrops = cropsMatch ? cropsResult!.crops : [];
   const cropsError = cropsMatch ? cropsResult!.error : null;
   const cropsLoading = Boolean(farmer?.id) && !cropsMatch;
+
+  const checksMatch = Boolean(
+    farmer?.id && checksResult?.farmerId === farmer.id,
+  );
+  const recentFarmerChecks = checksMatch ? checksResult!.checks : [];
+  const checksError = checksMatch ? checksResult!.error : null;
+  const checksLoading = Boolean(farmer?.id) && !checksMatch;
 
   return (
     <AppShell bare>
@@ -288,12 +334,51 @@ export function DashboardView() {
             </Link>
           </div>
           {farmer ? (
-            <div className="rounded-2xl bg-surface/90 px-4 py-4 ring-1 ring-line">
-              <p className="text-sm font-semibold text-ink">No crop checks yet</p>
-              <p className="mt-1 text-sm text-muted">
-                Start your first check to see results and recommendations here.
-              </p>
-            </div>
+            checksLoading ? (
+              <p className="text-sm text-muted">Loading recent checks…</p>
+            ) : checksError ? (
+              <div className="rounded-2xl bg-danger/10 px-4 py-4 text-sm text-danger ring-1 ring-danger/30">
+                {checksError}
+              </div>
+            ) : recentFarmerChecks.length === 0 ? (
+              <div className="rounded-2xl bg-surface/90 px-4 py-4 ring-1 ring-line">
+                <p className="text-sm font-semibold text-ink">No crop checks yet</p>
+                <p className="mt-1 text-sm text-muted">
+                  Start your first check to see results and recommendations here.
+                </p>
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {recentFarmerChecks.map((check) => (
+                  <li key={check.id}>
+                    <Link
+                      href={`/results?caseId=${check.id}`}
+                      className="block rounded-2xl bg-surface/90 px-4 py-3 ring-1 ring-line transition hover:ring-leaf-bright"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-ink">{check.cropName}</p>
+                          <p className="mt-0.5 text-xs text-muted">
+                            {check.completedAt
+                              ? new Date(check.completedAt).toLocaleDateString()
+                              : check.guidedStep === "completed"
+                                ? "Completed"
+                                : "In progress"}
+                          </p>
+                        </div>
+                        <StatusPill
+                          label={check.status.replaceAll("_", " ")}
+                          tone="mild"
+                        />
+                      </div>
+                      <p className="mt-2 text-sm leading-relaxed text-muted">
+                        {check.title || check.description || "Guided crop check"}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )
           ) : (
             <ul className="space-y-3">
               {recentChecks.map((check) => (

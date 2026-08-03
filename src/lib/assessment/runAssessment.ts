@@ -5,7 +5,7 @@ import type { ChatCompletionContentPart } from "openai/resources/chat/completion
 import { getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
 import { buildCaseContextForModel } from "./buildCaseContext";
-import { ASSESSMENT_SELECT, mapAssessmentRow } from "./map";
+import { mapAssessmentRow } from "./map";
 import { parseAssessmentJson } from "./parse";
 import { applySafetyRules } from "./safetyRules";
 import {
@@ -48,13 +48,21 @@ export async function runPreliminaryAssessment(options: {
   const { client, caseId, farmerId, force = false } = options;
 
   if (!force) {
-    const { data: existing } = await client
-      .from("assessment_results")
-      .select(ASSESSMENT_SELECT)
-      .eq("crop_check_id", caseId)
-      .order("assessed_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: existing, error: existingError } = await client.rpc(
+      "get_assessment_for_farmer",
+      {
+        p_farmer_id: farmerId,
+        p_check_id: caseId,
+      },
+    );
+
+    if (existingError) {
+      return {
+        ok: false,
+        error: existingError.message || "Could not load assessment.",
+        status: 500,
+      };
+    }
 
     if (existing) {
       return {
@@ -196,35 +204,39 @@ export async function runPreliminaryAssessment(options: {
     human_review_reasons: safety.humanReviewReasons,
   };
 
-  const insertRow = {
-    crop_check_id: caseId,
-    farmer_id: farmerId,
-    model_name: model,
-    case_summary: parsed.case_summary,
-    summary: parsed.case_summary,
-    likely_causes: parsed.likely_causes,
-    likely_issue: likelyIssue,
-    confidence_score: parsed.confidence_score,
-    confidence: parsed.confidence_score,
-    missing_information: safety.missingInformation,
-    immediate_safe_actions: safety.immediateSafeActions,
-    human_review_required: safety.humanReviewRequired,
-    laboratory_test_needed: parsed.laboratory_test_needed,
-    product_recommendation_allowed: safety.productRecommendationAllowed,
-    urgency_level: parsed.urgency_level,
-    severity: parsed.urgency_level,
-    next_step: nextStep,
-    raw_response: rawResponse,
-    assessed_at: new Date().toISOString(),
-    review_status: "pending",
-    staff_status: "pending",
-  };
+  const reasonSummary =
+    safety.humanReviewReasons.slice(0, 3).join(" ") ||
+    "Automatic safety rules require technical review.";
 
-  const { data: saved, error: saveError } = await client
-    .from("assessment_results")
-    .upsert(insertRow, { onConflict: "crop_check_id" })
-    .select(ASSESSMENT_SELECT)
-    .single();
+  const { data: saved, error: saveError } = await client.rpc(
+    "upsert_assessment_for_farmer",
+    {
+      p_farmer_id: farmerId,
+      p_check_id: caseId,
+      p_payload: {
+        model_name: model,
+        case_summary: parsed.case_summary,
+        summary: parsed.case_summary,
+        likely_causes: parsed.likely_causes,
+        likely_issue: likelyIssue,
+        confidence_score: parsed.confidence_score,
+        confidence: parsed.confidence_score,
+        missing_information: safety.missingInformation,
+        immediate_safe_actions: safety.immediateSafeActions,
+        human_review_required: safety.humanReviewRequired,
+        laboratory_test_needed: parsed.laboratory_test_needed,
+        product_recommendation_allowed: safety.productRecommendationAllowed,
+        urgency_level: parsed.urgency_level,
+        severity: parsed.urgency_level,
+        next_step: nextStep,
+        raw_response: rawResponse,
+        assessed_at: new Date().toISOString(),
+        review_status: "pending",
+        staff_status: "pending",
+        follow_up_notes: reasonSummary,
+      },
+    },
+  );
 
   if (saveError || !saved) {
     console.error("Save assessment_results failed:", saveError);
@@ -233,26 +245,6 @@ export async function runPreliminaryAssessment(options: {
       error: "Assessment succeeded but could not be saved.",
       status: 500,
     };
-  }
-
-  if (safety.humanReviewRequired) {
-    await client
-      .from("crop_checks")
-      .update({ status: "in_review" })
-      .eq("id", caseId)
-      .eq("farmer_id", farmerId);
-
-    const reasonSummary =
-      safety.humanReviewReasons.slice(0, 3).join(" ") ||
-      "Automatic safety rules require technical review.";
-
-    await client.from("follow_ups").insert({
-      crop_check_id: caseId,
-      farmer_id: farmerId,
-      title: "Human technical review required",
-      notes: reasonSummary,
-      status: "pending",
-    });
   }
 
   return {

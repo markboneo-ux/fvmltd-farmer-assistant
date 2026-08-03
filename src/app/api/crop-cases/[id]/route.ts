@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { CROP_CASE_SELECT, mapCropCaseRow } from "@/lib/crop-check/map";
+import { mapCropCaseRow } from "@/lib/crop-check/map";
 import type { GuidedQuestionStep } from "@/lib/crop-check/types";
 import { GUIDED_QUESTION_STEPS } from "@/lib/crop-check/types";
 import { validateGuidedAnswer } from "@/lib/crop-check/validation";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+import {
+  asString,
+  describeFarmerRpcError,
+  firstRpcRow,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
 
@@ -26,31 +31,30 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data, error } = await admin.client
-    .from("crop_checks")
-    .select(CROP_CASE_SELECT)
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
+  const { data, error } = await anon.client.rpc("get_crop_check_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
 
   if (error) {
     console.error("Get crop case failed:", error);
     return NextResponse.json(
-      { error: "Could not load crop case." },
+      { error: describeFarmerRpcError(error, "Could not load crop case.") },
       { status: 500 },
     );
   }
 
-  if (!data) {
+  const row = firstRpcRow<Parameters<typeof mapCropCaseRow>[0]>(data);
+  if (!row) {
     return NextResponse.json({ error: "Crop case not found." }, { status: 404 });
   }
 
-  return NextResponse.json({ cropCase: mapCropCaseRow(data) });
+  return NextResponse.json({ cropCase: mapCropCaseRow(row) });
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
@@ -88,64 +92,37 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data: existing, error: existingError } = await admin.client
-    .from("crop_checks")
-    .select("id, farmer_id, status, guided_step")
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
+  const { data, error } = await anon.client.rpc("save_crop_check_guided_answer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+    p_expected_step: step,
+    p_patch: validation.patch,
+  });
 
-  if (existingError) {
-    console.error("Crop case lookup failed:", existingError);
-    return NextResponse.json(
-      { error: "Could not update crop case." },
-      { status: 500 },
-    );
-  }
-
-  if (!existing) {
-    return NextResponse.json({ error: "Crop case not found." }, { status: 404 });
-  }
-
-  if (existing.status !== "draft" || existing.guided_step === "completed") {
-    return NextResponse.json(
-      { error: "This crop check is already complete." },
-      { status: 409 },
-    );
-  }
-
-  if (existing.guided_step && existing.guided_step !== step) {
-    return NextResponse.json(
-      {
-        error: `Expected step "${existing.guided_step}", not "${step}".`,
-      },
-      { status: 409 },
-    );
-  }
-
-  const { data, error } = await admin.client
-    .from("crop_checks")
-    .update(validation.patch)
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .select(CROP_CASE_SELECT)
-    .single();
-
-  if (error || !data) {
+  const row = firstRpcRow<Parameters<typeof mapCropCaseRow>[0]>(data);
+  if (error || !row) {
     console.error("Update crop case failed:", error);
+    const message = describeFarmerRpcError(
+      error,
+      "Could not save your answer.",
+    );
+    const conflict =
+      message.toLowerCase().includes("already complete") ||
+      message.toLowerCase().includes("expected step");
+    const notFound = message.toLowerCase().includes("not found");
     return NextResponse.json(
-      { error: "Could not save your answer." },
-      { status: 500 },
+      { error: message },
+      { status: notFound ? 404 : conflict ? 409 : 500 },
     );
   }
 
   return NextResponse.json({
-    cropCase: mapCropCaseRow(data),
+    cropCase: mapCropCaseRow(row),
     displayValue: validation.displayValue,
     nextStep: validation.nextStep,
   });

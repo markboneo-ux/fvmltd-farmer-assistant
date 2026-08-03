@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { CASE_PHOTO_SELECT, mapCasePhotoRow } from "@/lib/crop-check/photoMap";
+import { mapCasePhotoRow } from "@/lib/crop-check/photoMap";
 import {
   CASE_PHOTO_BUCKET,
   isPhotoSlotKey,
   slotMeta,
 } from "@/lib/crop-check/photos";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+import {
+  asString,
+  describeFarmerRpcError,
+  firstRpcRow,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
 
@@ -42,84 +47,67 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data: cropCase, error: caseError } = await admin.client
-    .from("crop_checks")
-    .select("id, status, guided_step")
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
-
-  if (caseError) {
-    console.error("Crop case lookup for skip failed:", caseError);
-    return NextResponse.json(
-      { error: "Could not verify crop case." },
-      { status: 500 },
+  const existingList = await anon.client.rpc("list_crop_photos_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
+  if (existingList.error) {
+    const message = describeFarmerRpcError(
+      existingList.error,
+      "Could not verify crop case.",
     );
-  }
-  if (!cropCase) {
-    return NextResponse.json({ error: "Crop case not found." }, { status: 404 });
-  }
-  if (cropCase.status !== "draft" && cropCase.guided_step === "completed") {
     return NextResponse.json(
-      { error: "This crop check is already complete." },
-      { status: 409 },
+      { error: message },
+      { status: message.toLowerCase().includes("not found") ? 404 : 500 },
     );
   }
 
-  const meta = slotMeta(slotKey);
-  const { data: existing } = await admin.client
-    .from("crop_photos")
-    .select("id, storage_path, storage_bucket")
-    .eq("crop_check_id", id)
-    .eq("slot_key", slotKey)
-    .maybeSingle();
+  const existing = (Array.isArray(existingList.data) ? existingList.data : []).find(
+    (photo: { slot_key?: string }) => photo.slot_key === slotKey,
+  ) as
+    | { storage_path: string | null; storage_bucket: string | null }
+    | undefined;
 
   if (existing?.storage_path) {
-    await admin.client.storage
+    await anon.client.storage
       .from(existing.storage_bucket ?? CASE_PHOTO_BUCKET)
       .remove([existing.storage_path]);
   }
 
-  const row = {
-    crop_check_id: id,
-    farmer_id: farmerId,
-    slot_key: slotKey,
-    storage_path: null,
-    storage_bucket: CASE_PHOTO_BUCKET,
-    label: meta.label,
-    mime_type: null,
-    file_size_bytes: null,
-    sort_order: meta.sortOrder,
-    is_skipped: true,
-    uploaded_at: new Date().toISOString(),
-    photo_type: "other",
-  };
+  const meta = slotMeta(slotKey);
+  const result = await anon.client.rpc("upsert_crop_photo_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+    p_slot_key: slotKey,
+    p_storage_path: null,
+    p_storage_bucket: CASE_PHOTO_BUCKET,
+    p_label: meta.label,
+    p_mime_type: null,
+    p_file_size_bytes: null,
+    p_sort_order: meta.sortOrder,
+    p_is_skipped: true,
+  });
 
-  const result = existing
-    ? await admin.client
-        .from("crop_photos")
-        .update(row)
-        .eq("id", existing.id)
-        .select(CASE_PHOTO_SELECT)
-        .single()
-    : await admin.client
-        .from("crop_photos")
-        .insert(row)
-        .select(CASE_PHOTO_SELECT)
-        .single();
-
-  if (result.error || !result.data) {
+  const row = firstRpcRow<Parameters<typeof mapCasePhotoRow>[0]>(result.data);
+  if (result.error || !row) {
     console.error("Skip photo failed:", result.error);
     return NextResponse.json(
-      { error: "Could not skip this photograph." },
+      {
+        error: describeFarmerRpcError(
+          result.error,
+          "Could not skip this photograph.",
+        ),
+      },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ photo: mapCasePhotoRow(result.data, null) });
+  return NextResponse.json({
+    photo: mapCasePhotoRow(row, null),
+  });
 }

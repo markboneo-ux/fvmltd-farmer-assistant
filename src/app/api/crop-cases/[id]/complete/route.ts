@@ -1,19 +1,26 @@
 import { NextResponse } from "next/server";
 import { runPreliminaryAssessment } from "@/lib/assessment/runAssessment";
-import { CROP_CASE_SELECT, mapCropCaseRow } from "@/lib/crop-check/map";
-import { CASE_PHOTO_SELECT, mapCasePhotoRow } from "@/lib/crop-check/photoMap";
+import { mapCropCaseRow } from "@/lib/crop-check/map";
+import { mapCasePhotoRow } from "@/lib/crop-check/photoMap";
+import type { PhotoSlotKey } from "@/lib/crop-check/photos";
 import {
-  CASE_PHOTO_BUCKET,
-  PHOTO_SLOTS,
-  type PhotoSlotKey,
-} from "@/lib/crop-check/photos";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+  asString,
+  describeFarmerRpcError,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
+};
+
+type CompletePayload = {
+  crop_check: Parameters<typeof mapCropCaseRow>[0] | null;
+  missing_slots: string[];
+  photos: Parameters<typeof mapCasePhotoRow>[0][];
+  already_complete?: boolean;
 };
 
 /**
@@ -42,144 +49,42 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data: cropCase, error: caseError } = await admin.client
-    .from("crop_checks")
-    .select("id, status, guided_step")
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
+  const { data, error } = await anon.client.rpc("complete_crop_check_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
 
-  if (caseError) {
-    console.error("Complete case lookup failed:", caseError);
+  if (error || !data) {
+    console.error("Complete crop case failed:", error);
+    const message = describeFarmerRpcError(
+      error,
+      "Could not complete the crop check.",
+    );
     return NextResponse.json(
-      { error: "Could not complete crop check." },
-      { status: 500 },
-    );
-  }
-  if (!cropCase) {
-    return NextResponse.json({ error: "Crop case not found." }, { status: 404 });
-  }
-  if (cropCase.status !== "draft") {
-    const { data } = await admin.client
-      .from("crop_checks")
-      .select(CROP_CASE_SELECT)
-      .eq("id", id)
-      .single();
-
-    const assessmentResult = await runPreliminaryAssessment({
-      client: admin.client,
-      caseId: id,
-      farmerId,
-      force: false,
-    });
-
-    return NextResponse.json({
-      cropCase: data ? mapCropCaseRow(data) : null,
-      missingSlots: [],
-      assessment: assessmentResult.ok ? assessmentResult.assessment : null,
-      assessmentError: assessmentResult.ok ? null : assessmentResult.error,
-    });
-  }
-
-  const { data: photos, error: photosError } = await admin.client
-    .from("crop_photos")
-    .select(CASE_PHOTO_SELECT)
-    .eq("crop_check_id", id);
-
-  if (photosError) {
-    console.error("Complete case photos lookup failed:", photosError);
-    return NextResponse.json(
-      { error: "Could not read photograph status." },
-      { status: 500 },
+      { error: message },
+      { status: message.toLowerCase().includes("not found") ? 404 : 500 },
     );
   }
 
-  const bySlot = new Map(
-    (photos ?? []).map((photo) => [photo.slot_key as PhotoSlotKey, photo]),
-  );
-  const missingSlots: PhotoSlotKey[] = [];
-
-  for (const slot of PHOTO_SLOTS) {
-    const existing = bySlot.get(slot.key);
-    if (existing && !existing.is_skipped && existing.storage_path) {
-      continue;
-    }
-    if (existing?.is_skipped) {
-      missingSlots.push(slot.key);
-      continue;
-    }
-
-    missingSlots.push(slot.key);
-    const { error: skipError } = await admin.client.from("crop_photos").upsert(
-      {
-        crop_check_id: id,
-        farmer_id: farmerId,
-        slot_key: slot.key,
-        storage_path: null,
-        storage_bucket: CASE_PHOTO_BUCKET,
-        label: slot.label,
-        mime_type: null,
-        file_size_bytes: null,
-        sort_order: slot.sortOrder,
-        is_skipped: true,
-        uploaded_at: new Date().toISOString(),
-        photo_type: "other",
-      },
-      { onConflict: "crop_check_id,slot_key" },
-    );
-
-    if (skipError) {
-      console.error("Auto-skip missing photo failed:", skipError);
-      return NextResponse.json(
-        { error: "Could not finalize missing photographs." },
-        { status: 500 },
-      );
-    }
-  }
-
-  const completedAt = new Date().toISOString();
-  const { data: updated, error: updateError } = await admin.client
-    .from("crop_checks")
-    .update({
-      status: "open",
-      guided_step: "completed",
-      completed_at: completedAt,
-    })
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .select(CROP_CASE_SELECT)
-    .single();
-
-  if (updateError || !updated) {
-    console.error("Complete crop case failed:", updateError);
-    return NextResponse.json(
-      { error: "Could not complete the crop check." },
-      { status: 500 },
-    );
-  }
-
-  const { data: finalPhotos } = await admin.client
-    .from("crop_photos")
-    .select(CASE_PHOTO_SELECT)
-    .eq("crop_check_id", id)
-    .order("sort_order", { ascending: true });
+  const payload = data as CompletePayload;
+  const missingSlots = (payload.missing_slots ?? []) as PhotoSlotKey[];
 
   const assessmentResult = await runPreliminaryAssessment({
-    client: admin.client,
+    client: anon.client,
     caseId: id,
     farmerId,
     force: false,
   });
 
   return NextResponse.json({
-    cropCase: mapCropCaseRow(updated),
+    cropCase: payload.crop_check ? mapCropCaseRow(payload.crop_check) : null,
     missingSlots,
-    photos: (finalPhotos ?? []).map((row) => mapCasePhotoRow(row, null)),
+    photos: (payload.photos ?? []).map((row) => mapCasePhotoRow(row, null)),
     assessment: assessmentResult.ok ? assessmentResult.assessment : null,
     assessmentError: assessmentResult.ok ? null : assessmentResult.error,
   });

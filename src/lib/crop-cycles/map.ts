@@ -8,6 +8,7 @@ import type {
 type CropCycleRow = {
   id: string;
   farm_id: string;
+  farm_name?: string | null;
   crop_name: string;
   variety: string | null;
   planting_date: string | null;
@@ -33,7 +34,7 @@ export function mapCropCycleRow(row: CropCycleRow): CropCycleRecord {
   return {
     id: row.id,
     farmId: row.farm_id,
-    farmName: farmNameFromJoin(row.farms),
+    farmName: row.farm_name?.trim() || farmNameFromJoin(row.farms),
     cropName: row.crop_name,
     variety: row.variety,
     plantingDate: row.planting_date,
