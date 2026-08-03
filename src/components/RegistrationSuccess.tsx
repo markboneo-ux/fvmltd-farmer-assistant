@@ -55,9 +55,14 @@ export function RegistrationSuccess({
         FVMLTD staff.
       </p>
 
-      <Button type="button" onClick={onContinue} disabled={pending && !farmerCode}>
+      <Button type="button" onClick={onContinue}>
         {continueLabel}
       </Button>
+      {pending && !farmerCode ? (
+        <p className="text-center text-xs text-muted">
+          Loading your Farmer ID…
+        </p>
+      ) : null}
     </div>
   );
 }

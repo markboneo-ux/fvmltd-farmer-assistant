@@ -9,7 +9,11 @@ import {
   DEFAULT_COUNTRY,
   isOtherCountryOption,
 } from "@/data/countries";
-import { farmerDashboardHref } from "@/lib/farmers/paths";
+import {
+  FARMER_DASHBOARD_PATH,
+  markJustRegistered,
+  navigateInternal,
+} from "@/lib/farmers/paths";
 import { saveRegisteredFarmer } from "@/lib/farmers/session";
 import {
   CROP_OPTIONS,
@@ -21,9 +25,6 @@ import {
   validateFarmerRegistration,
   type FieldErrors,
 } from "@/lib/farmers/validation";
-
-/** Relative App Router destination after a successful registration. */
-const POST_REGISTER_HREF = farmerDashboardHref({ registered: true });
 
 const initialValues: FarmerRegistrationInput = {
   fullName: "",
@@ -81,14 +82,18 @@ export function RegisterForm({ onSuccessChange }: RegisterFormProps = {}) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [registered, setRegistered] = useState<RegisteredFarmer | null>(null);
+  const [navigating, setNavigating] = useState(false);
   const inFlight = useRef(false);
 
   const busy = submitting || Boolean(registered);
   const showOtherCountry = isOtherCountryOption(values.country);
 
   function goToDashboard() {
-    // Internal relative route only — never absolute deploy/preview URLs.
-    router.replace(POST_REGISTER_HREF);
+    if (navigating) return;
+    setNavigating(true);
+    markJustRegistered();
+    // Relative App Router route only — never absolute deploy/preview URLs.
+    navigateInternal(router, FARMER_DASHBOARD_PATH, "replace");
   }
 
   function updateField<K extends keyof FarmerRegistrationInput>(
@@ -157,12 +162,11 @@ export function RegisterForm({ onSuccessChange }: RegisterFormProps = {}) {
 
       // Persist via the existing localStorage session pattern (no secrets in the URL).
       saveRegisteredFarmer(payload.farmer);
+      markJustRegistered();
       setRegistered(payload.farmer);
       onSuccessChange?.(true);
-
-      // Soft navigate to the in-app dashboard. Success UI stays mounted as a
-      // fallback if the client transition is slow or interrupted (e.g. Safari).
-      router.replace(POST_REGISTER_HREF);
+      // Stay on the success screen — navigate when the farmer taps Continue.
+      // Immediate soft-nav after a long POST is what produced "page couldn't load".
     } catch (error) {
       const message =
         error instanceof Error && error.message
@@ -177,11 +181,21 @@ export function RegisterForm({ onSuccessChange }: RegisterFormProps = {}) {
 
   if (registered) {
     return (
-      <RegistrationSuccess
-        farmerCode={registered.farmerCode}
-        fullName={registered.fullName}
-        onContinue={goToDashboard}
-      />
+      <div className="space-y-3">
+        <RegistrationSuccess
+          farmerCode={registered.farmerCode}
+          fullName={registered.fullName}
+          onContinue={goToDashboard}
+          continueLabel={
+            navigating ? "Opening dashboard…" : "Continue to dashboard"
+          }
+        />
+        {navigating ? (
+          <p className="text-center text-xs text-muted">
+            If the dashboard does not open, tap Continue again.
+          </p>
+        ) : null}
+      </div>
     );
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { BottomNav } from "@/components/BottomNav";
@@ -16,8 +15,8 @@ import {
 import type { CropCycleRecord } from "@/lib/crop-cycles/types";
 import { farmer as demoFarmer, recentChecks } from "@/data/placeholder";
 import {
-  FARMER_DASHBOARD_PATH,
-  REGISTERED_QUERY,
+  clearJustRegistered,
+  peekJustRegistered,
 } from "@/lib/farmers/paths";
 import { useRegisteredFarmer } from "@/lib/farmers/useRegisteredFarmer";
 import type { RegisteredFarmer } from "@/lib/farmers/types";
@@ -42,19 +41,16 @@ type CropsResult = {
 };
 
 export function DashboardView() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const farmer = useRegisteredFarmer();
   const [cropsResult, setCropsResult] = useState<CropsResult | null>(null);
-  const [showRegistrationSuccess, setShowRegistrationSuccess] = useState(
-    () => searchParams.get(REGISTERED_QUERY) === "1",
-  );
+  const [showRegistrationSuccess, setShowRegistrationSuccess] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get(REGISTERED_QUERY) === "1") {
-      setShowRegistrationSuccess(true);
-    }
-  }, [searchParams]);
+    // Read the just-registered flag after mount (sessionStorage is client-only).
+    setShowRegistrationSuccess(peekJustRegistered());
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (!farmer?.id) return;
@@ -99,9 +95,16 @@ export function DashboardView() {
   }, [farmer?.id]);
 
   function dismissRegistrationSuccess() {
+    clearJustRegistered();
     setShowRegistrationSuccess(false);
-    // Drop the query flag with a relative replace so refresh/back stay clean.
-    router.replace(FARMER_DASHBOARD_PATH);
+  }
+
+  if (!hydrated) {
+    return (
+      <AppShell bare>
+        <div className="px-4 pt-6 text-sm text-muted">Loading dashboard…</div>
+      </AppShell>
+    );
   }
 
   if (showRegistrationSuccess) {
