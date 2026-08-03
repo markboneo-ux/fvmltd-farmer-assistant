@@ -1,3 +1,7 @@
+import {
+  isOtherCountryOption,
+  resolveStoredCountry,
+} from "@/data/countries";
 import type { FarmSizeUnit, FarmerRegistrationInput } from "./types";
 
 export type FieldErrors = Partial<
@@ -30,13 +34,20 @@ export function validateFarmerRegistration(
     errors.whatsappNumber = "Enter your WhatsApp number.";
   } else if (!WHATSAPP_PATTERN.test(whatsappRaw) || whatsappNumber.length < 8) {
     errors.whatsappNumber =
-      "Enter a valid WhatsApp number, including country code (e.g. +255712555014).";
+      "Enter a valid WhatsApp number, including country code (e.g. +18681234567).";
   }
 
-  const country = input.country.trim();
-  if (!country) {
+  const countrySelected = input.country.trim();
+  const countryOther = (input.countryOther ?? "").trim();
+  if (!countrySelected) {
     errors.country = "Select your country.";
+  } else if (isOtherCountryOption(countrySelected) && !countryOther) {
+    errors.countryOther = "Enter your country name.";
+  } else if (isOtherCountryOption(countrySelected) && countryOther.length > 120) {
+    errors.countryOther = "Country name must be 120 characters or fewer.";
   }
+
+  const country = resolveStoredCountry(countrySelected, countryOther);
 
   const district = input.district.trim();
   if (!district) {

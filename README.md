@@ -67,7 +67,9 @@ The `/register` page collects:
 - Main crops
 - Consent to store farm information and crop photographs
 
-On submit, `POST /api/farmers/register` validates the payload, generates a unique Farmer ID (`FVM-XXXXXX`), and inserts a row into the Supabase `farmers` table using the **service role** client (RLS is enabled with no public insert policy yet). After success, the farmer is sent to `/dashboard`, which shows their name, Farmer ID, location, farm size, and crops.
+On submit, `POST /api/farmers/register` validates the payload and inserts a row into the Supabase `farmers` table by calling the `register_farmer` SECURITY DEFINER RPC with the **anon** key (so registration works under RLS without exposing the service-role key). If that migration is not applied yet, the route falls back to a server-only service-role insert. A unique Farmer ID (`FVM-XXXXXX`) is generated. After success, the farmer is sent to `/dashboard`, which shows their name, Farmer ID, location, farm size, and crops.
+
+Country options are Caribbean-focused (default: Trinidad and Tobago) and live in `src/data/countries.ts`.
 
 ## Farm and crop-cycle management
 
@@ -274,8 +276,9 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Design notes
 
 - Layout is constrained to a phone-width column (`max-w-md`) for a mobile-first experience.
-- Visual language uses canopy green, leaf accents, soft field gradients, and warm harvest yellow.
+- Visual language uses FVMLTD green, white backgrounds, and dark charcoal text.
 - Display type: Fraunces. Interface type: Figtree.
+- Public homepage tagline: Farming Forward.
 - Navigation between farmer screens uses a compact bottom nav on key pages.
 
 ## Staff Review Dashboard

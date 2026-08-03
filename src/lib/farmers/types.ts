@@ -4,6 +4,8 @@ export type FarmerRegistrationInput = {
   fullName: string;
   whatsappNumber: string;
   country: string;
+  /** Required when country is an "Other…" option. */
+  countryOther: string;
   district: string;
   farmSize: string;
   farmSizeUnit: FarmSizeUnit | "";
@@ -35,14 +37,10 @@ export const CROP_OPTIONS = [
   "Other",
 ] as const;
 
-export const COUNTRY_OPTIONS = [
-  "Tanzania",
-  "Kenya",
-  "Uganda",
-  "Rwanda",
-  "Burundi",
-  "Malawi",
-  "Zambia",
-  "Mozambique",
-  "Other",
-] as const;
+/** Re-export shared country list for convenience. */
+export {
+  COUNTRY_OPTIONS,
+  DEFAULT_COUNTRY,
+  isOtherCountryOption,
+  resolveStoredCountry,
+} from "@/data/countries";

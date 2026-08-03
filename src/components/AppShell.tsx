@@ -35,18 +35,18 @@ export function AppShell({
             {showBack ? (
               <Link
                 href={backHref}
-                className="inline-flex items-center gap-1 text-sm font-medium text-leaf transition hover:text-canopy"
+                className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-canopy transition hover:text-leaf"
               >
                 <span aria-hidden>←</span>
                 Back
               </Link>
             ) : (
-              <span className="text-xs font-semibold tracking-[0.14em] text-leaf uppercase">
-                FVMLTD
+              <span className="text-xs font-semibold tracking-[0.14em] text-canopy uppercase">
+                Farmers Value Mart Ltd
               </span>
             )}
-            <span className="rounded-md bg-canopy/10 px-2 py-1 text-[11px] font-medium text-canopy">
-              Preview
+            <span className="rounded-md bg-canopy px-2.5 py-1 text-[11px] font-semibold tracking-wide text-white">
+              Farming Forward
             </span>
           </div>
           {title ? (

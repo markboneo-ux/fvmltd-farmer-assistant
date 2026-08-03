@@ -1,11 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { Button } from "@/components/Button";
-import { saveRegisteredFarmer } from "@/lib/farmers/session";
 import {
   COUNTRY_OPTIONS,
+  DEFAULT_COUNTRY,
+  isOtherCountryOption,
+} from "@/data/countries";
+import { saveRegisteredFarmer } from "@/lib/farmers/session";
+import {
   CROP_OPTIONS,
   type FarmSizeUnit,
   type FarmerRegistrationInput,
@@ -19,7 +23,8 @@ import {
 const initialValues: FarmerRegistrationInput = {
   fullName: "",
   whatsappNumber: "",
-  country: "Tanzania",
+  country: DEFAULT_COUNTRY,
+  countryOther: "",
   district: "",
   farmSize: "",
   farmSizeUnit: "hectares",
@@ -36,14 +41,42 @@ function FieldError({ message }: { message?: string }) {
   );
 }
 
+async function readErrorPayload(response: Response): Promise<{
+  farmer?: RegisteredFarmer;
+  error?: string;
+  errors?: FieldErrors;
+}> {
+  const text = await response.text();
+  if (!text) {
+    return {
+      error: `Registration failed (HTTP ${response.status}).`,
+    };
+  }
+
+  try {
+    return JSON.parse(text) as {
+      farmer?: RegisteredFarmer;
+      error?: string;
+      errors?: FieldErrors;
+    };
+  } catch {
+    return {
+      error: text.slice(0, 280) || `Registration failed (HTTP ${response.status}).`,
+    };
+  }
+}
+
 export function RegisterForm() {
   const router = useRouter();
   const [values, setValues] = useState<FarmerRegistrationInput>(initialValues);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [isPending, startTransition] = useTransition();
   const [submitting, setSubmitting] = useState(false);
+  const [succeeded, setSucceeded] = useState(false);
+  const inFlight = useRef(false);
 
-  const busy = isPending || submitting;
+  const busy = isPending || submitting || succeeded;
+  const showOtherCountry = isOtherCountryOption(values.country);
 
   function updateField<K extends keyof FarmerRegistrationInput>(
     key: K,
@@ -77,6 +110,7 @@ export function RegisterForm() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (inFlight.current || busy) return;
 
     const local = validateFarmerRegistration(values);
     if (!local.ok) {
@@ -84,6 +118,7 @@ export function RegisterForm() {
       return;
     }
 
+    inFlight.current = true;
     setSubmitting(true);
     setErrors({});
 
@@ -94,31 +129,33 @@ export function RegisterForm() {
         body: JSON.stringify(values),
       });
 
-      const payload = (await response.json()) as {
-        farmer?: RegisteredFarmer;
-        error?: string;
-        errors?: FieldErrors;
-      };
+      const payload = await readErrorPayload(response);
 
       if (!response.ok || !payload.farmer) {
         setErrors(
           payload.errors ?? {
-            form: payload.error ?? "Registration failed. Please try again.",
+            form:
+              payload.error ??
+              `Registration failed (HTTP ${response.status}). Please try again.`,
           },
         );
         return;
       }
 
       saveRegisteredFarmer(payload.farmer);
+      setSucceeded(true);
 
       startTransition(() => {
         router.push("/dashboard");
       });
-    } catch {
-      setErrors({
-        form: "Network error. Check your connection and try again.",
-      });
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Network error. Check your connection and try again.";
+      setErrors({ form: message });
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   }
@@ -148,7 +185,7 @@ export function RegisterForm() {
           autoComplete="name"
           value={values.fullName}
           onChange={(event) => updateField("fullName", event.target.value)}
-          placeholder="Amina Okello"
+          placeholder="Maria Persad"
           aria-invalid={Boolean(errors.fullName)}
           aria-describedby={errors.fullName ? "fullName-error" : undefined}
           className={`${inputClass} ${errors.fullName ? errorBorder : normalBorder}`}
@@ -169,7 +206,7 @@ export function RegisterForm() {
           autoComplete="tel"
           value={values.whatsappNumber}
           onChange={(event) => updateField("whatsappNumber", event.target.value)}
-          placeholder="+255 712 555 014"
+          placeholder="+1 868 555 0142"
           aria-invalid={Boolean(errors.whatsappNumber)}
           aria-describedby={
             errors.whatsappNumber ? "whatsappNumber-error" : undefined
@@ -188,7 +225,22 @@ export function RegisterForm() {
           id="country"
           name="country"
           value={values.country}
-          onChange={(event) => updateField("country", event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setValues((prev) => ({
+              ...prev,
+              country: next,
+              countryOther: isOtherCountryOption(next) ? prev.countryOther : "",
+            }));
+            setErrors((prev) => {
+              if (!prev.country && !prev.countryOther && !prev.form) return prev;
+              const nextErrors = { ...prev };
+              delete nextErrors.country;
+              delete nextErrors.countryOther;
+              delete nextErrors.form;
+              return nextErrors;
+            });
+          }}
           aria-invalid={Boolean(errors.country)}
           aria-describedby={errors.country ? "country-error" : undefined}
           className={`${inputClass} ${errors.country ? errorBorder : normalBorder}`}
@@ -208,6 +260,31 @@ export function RegisterForm() {
         </span>
       </label>
 
+      {showOtherCountry ? (
+        <label className="block space-y-1.5" htmlFor="countryOther">
+          <span className="text-sm font-medium text-ink">
+            Enter your country
+          </span>
+          <input
+            id="countryOther"
+            name="countryOther"
+            type="text"
+            value={values.countryOther}
+            onChange={(event) => updateField("countryOther", event.target.value)}
+            placeholder="Type your country name"
+            aria-invalid={Boolean(errors.countryOther)}
+            aria-describedby={
+              errors.countryOther ? "countryOther-error" : undefined
+            }
+            className={`${inputClass} ${errors.countryOther ? errorBorder : normalBorder}`}
+            disabled={busy}
+          />
+          <span id="countryOther-error">
+            <FieldError message={errors.countryOther} />
+          </span>
+        </label>
+      ) : null}
+
       <label className="block space-y-1.5" htmlFor="district">
         <span className="text-sm font-medium text-ink">District or region</span>
         <input
@@ -216,7 +293,7 @@ export function RegisterForm() {
           type="text"
           value={values.district}
           onChange={(event) => updateField("district", event.target.value)}
-          placeholder="Mtwara"
+          placeholder="Couva"
           aria-invalid={Boolean(errors.district)}
           aria-describedby={errors.district ? "district-error" : undefined}
           className={`${inputClass} ${errors.district ? errorBorder : normalBorder}`}

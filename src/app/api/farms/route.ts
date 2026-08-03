@@ -55,6 +55,7 @@ export async function POST(request: Request) {
     farmerId: asString(body.farmerId),
     name: asString(body.name),
     country: asString(body.country),
+    countryOther: asString(body.countryOther),
     district: asString(body.district),
     farmSize: asString(body.farmSize),
     farmSizeUnit: asString(body.farmSizeUnit) as FarmFormInput["farmSizeUnit"],
