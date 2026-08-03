@@ -25,7 +25,7 @@ const QUEUE_CASE_SELECT = `
   percent_affected,
   submitted_at,
   completed_at,
-  farmers!inner (
+  farmer_profiles!inner (
     full_name,
     farmer_code,
     phone,
@@ -42,7 +42,7 @@ const QUEUE_CASE_SELECT = `
   crop_cycles (
     variety
   ),
-  ai_assessments (
+  assessment_results (
     confidence_score,
     confidence,
     urgency_level,
@@ -90,10 +90,10 @@ type QueueRow = {
   percent_affected: number | string | null;
   submitted_at: string;
   completed_at: string | null;
-  farmers: NestedFarmer | NestedFarmer[];
+  farmer_profiles: NestedFarmer | NestedFarmer[];
   farms: NestedFarm | NestedFarm[];
   crop_cycles: NestedCycle | NestedCycle[];
-  ai_assessments: NestedAssessment[] | null;
+  assessment_results: NestedAssessment[] | null;
 };
 
 function one<T>(value: T | T[] | null | undefined): T | null {
@@ -122,10 +122,10 @@ function latestAssessment(
 }
 
 function mapQueueRow(row: QueueRow): StaffQueueCase {
-  const farmer = one(row.farmers)!;
+  const farmer = one(row.farmer_profiles)!;
   const farm = one(row.farms);
   const cycle = one(row.crop_cycles);
-  const assessment = latestAssessment(row.ai_assessments);
+  const assessment = latestAssessment(row.assessment_results);
   const confidence = Number(
     assessment?.confidence_score ?? assessment?.confidence ?? NaN,
   );
@@ -214,7 +214,7 @@ export async function listStaffQueueCases(
   filter: StaffCaseFilter = "in_review",
 ): Promise<{ cases: StaffQueueCase[]; stats: StaffQueueStats }> {
   const { data, error } = await client
-    .from("crop_cases")
+    .from("crop_checks")
     .select(QUEUE_CASE_SELECT)
     .neq("status", "draft")
     .order("submitted_at", { ascending: false })
@@ -296,7 +296,7 @@ export async function getStaffCaseDetail(
   const staffCaseSelect = `${CROP_CASE_SELECT}, is_urgent, awaiting_farmer_reply, staff_notes, closed_reason, reviewed_at, submitted_at, severity`;
 
   const { data: cropCase, error } = await client
-    .from("crop_cases")
+    .from("crop_checks")
     .select(staffCaseSelect)
     .eq("id", caseId)
     .maybeSingle();
@@ -331,9 +331,9 @@ export async function getStaffCaseDetail(
     labRes,
   ] = await Promise.all([
     client
-      .from("farmers")
+      .from("farmer_profiles")
       .select(
-        "id, farmer_code, full_name, phone, village, region, country, farm_size, farm_size_unit, main_crops",
+        "id, farmer_code, full_name, phone, village, region, country, farm_size, farm_size_unit, primary_crops",
       )
       .eq("id", cropCase.farmer_id)
       .maybeSingle(),
@@ -354,9 +354,9 @@ export async function getStaffCaseDetail(
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     client
-      .from("case_photos")
+      .from("crop_photos")
       .select(CASE_PHOTO_SELECT)
-      .eq("crop_case_id", caseId)
+      .eq("crop_check_id", caseId)
       .order("sort_order", { ascending: true }),
     client
       .from("soil_tests")
@@ -367,23 +367,23 @@ export async function getStaffCaseDetail(
       .order("sampled_at", { ascending: false })
       .limit(10),
     client
-      .from("ai_assessments")
+      .from("assessment_results")
       .select(STAFF_ASSESSMENT_SELECT)
-      .eq("crop_case_id", caseId)
+      .eq("crop_check_id", caseId)
       .order("assessed_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
     client
-      .from("case_messages")
+      .from("chat_messages")
       .select(
-        "id, author_type, staff_user_id, body, requires_reply, answered_at, created_at",
+        "id, author_type, staff_profile_id, body, requires_reply, answered_at, created_at",
       )
-      .eq("crop_case_id", caseId)
+      .eq("crop_check_id", caseId)
       .order("created_at", { ascending: true }),
     client
       .from("lab_test_requests")
       .select("id, request_type, status, notes, created_at, due_at")
-      .eq("crop_case_id", caseId)
+      .eq("crop_check_id", caseId)
       .order("created_at", { ascending: false }),
   ]);
 
@@ -397,7 +397,7 @@ export async function getStaffCaseDetail(
     (row) => ({
       id: row.id,
       authorType: row.author_type as CaseMessageRecord["authorType"],
-      staffUserId: row.staff_user_id,
+      staffUserId: row.staff_profile_id,
       body: row.body,
       requiresReply: row.requires_reply,
       answeredAt: row.answered_at,
@@ -434,7 +434,7 @@ export async function getStaffCaseDetail(
           ? null
           : Number(farmerRes.data.farm_size),
       farmSizeUnit: farmerRes.data.farm_size_unit,
-      mainCrops: asStringArray(farmerRes.data.main_crops),
+      mainCrops: asStringArray(farmerRes.data.primary_crops),
     },
     farm: farm
       ? {

@@ -37,7 +37,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase } = await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, farmer_id, farm_id")
     .eq("id", id)
     .maybeSingle();
@@ -49,7 +49,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { data: labRequest, error } = await auth.client
     .from("lab_test_requests")
     .insert({
-      crop_case_id: id,
+      crop_check_id: id,
       farmer_id: cropCase.farmer_id,
       farm_id: cropCase.farm_id,
       requested_by_staff_id: auth.staff.id,
@@ -70,13 +70,13 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (requestType === "laboratory") {
     await auth.client
-      .from("ai_assessments")
+      .from("assessment_results")
       .update({ laboratory_test_needed: true })
-      .eq("crop_case_id", id);
+      .eq("crop_check_id", id);
   }
 
   await auth.client.from("follow_ups").insert({
-    crop_case_id: id,
+    crop_check_id: id,
     farmer_id: cropCase.farmer_id,
     assigned_staff_id: auth.staff.id,
     title:
@@ -88,11 +88,16 @@ export async function POST(request: Request, context: RouteContext) {
     status: "pending",
   });
 
-  await auth.client.from("case_messages").insert({
-    crop_case_id: id,
+  await auth.client.from("chat_messages").insert({
+    crop_check_id: id,
     farmer_id: cropCase.farmer_id,
+    role: "system",
+    content:
+      requestType === "soil"
+        ? "FVMLTD staff requested a soil test for this farm."
+        : "FVMLTD staff requested a laboratory test for this case.",
     author_type: "system",
-    staff_user_id: auth.staff.id,
+    staff_profile_id: auth.staff.id,
     body:
       requestType === "soil"
         ? "FVMLTD staff requested a soil test for this farm."
@@ -101,7 +106,7 @@ export async function POST(request: Request, context: RouteContext) {
   });
 
   await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update({
       status: "awaiting_info",
       awaiting_farmer_reply: true,

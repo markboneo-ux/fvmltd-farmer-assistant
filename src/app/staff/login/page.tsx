@@ -33,7 +33,7 @@ export default async function StaffLoginPage({ searchParams }: PageProps) {
         <StaffLoginForm nextPath={params.next ?? "/staff"} />
         <p className="mt-4 text-center text-xs text-muted">
           Need access? Ask an FVMLTD admin to create your staff account in
-          Supabase Auth and link it in <code>staff_users</code>.
+          Supabase Auth and link it in <code>staff_profiles</code>.
         </p>
         <p className="mt-3 text-center text-sm">
           <Link href="/" className="font-medium text-leaf hover:text-canopy">

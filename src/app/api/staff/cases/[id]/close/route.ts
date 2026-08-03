@@ -24,7 +24,7 @@ export async function POST(request: Request, context: RouteContext) {
   const now = new Date().toISOString();
 
   const { data: existing } = await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, farmer_id")
     .eq("id", id)
     .maybeSingle();
@@ -34,7 +34,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase, error } = await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update({
       status: "closed",
       closed_reason: reason || null,
@@ -60,14 +60,18 @@ export async function POST(request: Request, context: RouteContext) {
   await auth.client
     .from("follow_ups")
     .update({ status: "cancelled", completed_at: now })
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .in("status", ["pending", "in_progress"]);
 
-  await auth.client.from("case_messages").insert({
-    crop_case_id: id,
+  await auth.client.from("chat_messages").insert({
+    crop_check_id: id,
     farmer_id: existing.farmer_id,
+    role: "system",
+    content: reason
+      ? `Case closed by FVMLTD staff: ${reason}`
+      : "Case closed by FVMLTD staff.",
     author_type: "system",
-    staff_user_id: auth.staff.id,
+    staff_profile_id: auth.staff.id,
     body: reason
       ? `Case closed by FVMLTD staff: ${reason}`
       : "Case closed by FVMLTD staff.",

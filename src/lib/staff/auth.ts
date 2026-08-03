@@ -14,15 +14,20 @@ type StaffRow = {
   is_active: boolean;
 };
 
-export function mapStaffUser(row: StaffRow): StaffUser | null {
-  if (!row.auth_user_id || !row.is_active) return null;
+export function mapStaffUser(
+  row: StaffRow,
+  sessionAuthUserId: string,
+): StaffUser | null {
+  if (!row.is_active) return null;
+  const linkedAuthId = row.auth_user_id ?? row.id;
+  if (linkedAuthId !== sessionAuthUserId) return null;
   const role = row.role as StaffRole;
   if (role !== "admin" && role !== "agronomist" && role !== "reviewer") {
     return null;
   }
   return {
     id: row.id,
-    authUserId: row.auth_user_id,
+    authUserId: linkedAuthId,
     fullName: row.full_name,
     email: row.email,
     role,
@@ -32,7 +37,7 @@ export function mapStaffUser(row: StaffRow): StaffUser | null {
 
 /**
  * Resolve the authenticated FVMLTD staff user for the current request.
- * Requires a Supabase Auth session linked to an active staff_users row.
+ * Requires a Supabase Auth session linked to an active staff_profiles row.
  */
 export async function getStaffSession(): Promise<
   | { ok: true; staff: StaffUser }
@@ -65,10 +70,10 @@ export async function getStaffSession(): Promise<
   }
 
   const { data, error } = await admin.client
-    .from("staff_users")
+    .from("staff_profiles")
     .select("id, auth_user_id, full_name, email, role, is_active")
-    .eq("auth_user_id", authUserId)
     .eq("is_active", true)
+    .or(`auth_user_id.eq.${authUserId},id.eq.${authUserId}`)
     .maybeSingle();
 
   if (error) {
@@ -80,7 +85,7 @@ export async function getStaffSession(): Promise<
     };
   }
 
-  const staff = data ? mapStaffUser(data) : null;
+  const staff = data ? mapStaffUser(data, authUserId) : null;
   if (!staff) {
     return {
       ok: false,

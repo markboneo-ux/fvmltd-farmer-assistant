@@ -32,7 +32,7 @@ type FarmerRow = {
   region: string | null;
   farm_size: number | string;
   farm_size_unit: "acres" | "hectares";
-  main_crops: string[] | null;
+  primary_crops: string[] | null;
   member_since: string | null;
 };
 
@@ -77,7 +77,7 @@ function mapInsertedFarmer(
     district: inserted.region ?? fallbackDistrict,
     farmSize: Number(inserted.farm_size),
     farmSizeUnit: inserted.farm_size_unit,
-    mainCrops: inserted.main_crops ?? fallbackCrops,
+    mainCrops: inserted.primary_crops ?? fallbackCrops,
     memberSince: inserted.member_since ?? fallbackDate,
   };
 }
@@ -157,22 +157,24 @@ async function insertWithAdmin(
     const farmerCode = generateFarmerCode();
 
     const { data: inserted, error } = await supabase
-      .from("farmers")
+      .from("farmer_profiles")
       .insert({
         farmer_code: farmerCode,
         full_name: data.fullName,
         phone: data.whatsappNumber,
         country: data.country,
         region: data.district,
+        district: data.district,
         farm_size: data.farmSize,
         farm_size_unit: data.farmSizeUnit,
-        main_crops: data.mainCrops,
+        primary_crops: data.mainCrops,
         consent_store_data: true,
         consent_at: consentAt,
         member_since: consentAt.slice(0, 10),
+        is_active: true,
       })
       .select(
-        "id, farmer_code, full_name, phone, country, region, farm_size, farm_size_unit, main_crops, member_since",
+        "id, farmer_code, full_name, phone, country, region, farm_size, farm_size_unit, primary_crops, member_since",
       )
       .single();
 
@@ -262,7 +264,7 @@ export async function POST(request: Request) {
       p_district: data.district,
       p_farm_size: data.farmSize,
       p_farm_size_unit: data.farmSizeUnit,
-      p_main_crops: data.mainCrops,
+      p_primary_crops: data.mainCrops,
       p_consent: true,
     });
 

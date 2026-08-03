@@ -29,7 +29,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase } = await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, farmer_id, status")
     .eq("id", id)
     .maybeSingle();
@@ -39,17 +39,19 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: message, error } = await auth.client
-    .from("case_messages")
+    .from("chat_messages")
     .insert({
-      crop_case_id: id,
+      crop_check_id: id,
       farmer_id: cropCase.farmer_id,
+      role: "staff",
+      content: question,
       author_type: "staff",
-      staff_user_id: auth.staff.id,
+      staff_profile_id: auth.staff.id,
       body: question,
       requires_reply: true,
     })
     .select(
-      "id, author_type, staff_user_id, body, requires_reply, answered_at, created_at",
+      "id, author_type, staff_profile_id, body, requires_reply, answered_at, created_at",
     )
     .single();
 
@@ -62,7 +64,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update({
       status: "awaiting_info",
       awaiting_farmer_reply: true,
@@ -71,7 +73,7 @@ export async function POST(request: Request, context: RouteContext) {
     .eq("id", id);
 
   await auth.client.from("follow_ups").insert({
-    crop_case_id: id,
+    crop_check_id: id,
     farmer_id: cropCase.farmer_id,
     assigned_staff_id: auth.staff.id,
     title: "Awaiting farmer reply",
@@ -85,7 +87,7 @@ export async function POST(request: Request, context: RouteContext) {
       message: {
         id: message.id,
         authorType: message.author_type,
-        staffUserId: message.staff_user_id,
+        staffUserId: message.staff_profile_id,
         body: message.body,
         requiresReply: message.requires_reply,
         answeredAt: message.answered_at,

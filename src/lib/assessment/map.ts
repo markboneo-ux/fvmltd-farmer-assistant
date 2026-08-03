@@ -8,7 +8,7 @@ import type {
 
 type AssessmentRow = {
   id: string;
-  crop_case_id: string;
+  crop_check_id: string;
   model_name: string | null;
   case_summary: string | null;
   summary: string | null;
@@ -28,7 +28,7 @@ type AssessmentRow = {
 };
 
 export const ASSESSMENT_SELECT =
-  "id, crop_case_id, model_name, case_summary, summary, likely_causes, likely_issue, confidence_score, confidence, missing_information, immediate_safe_actions, human_review_required, laboratory_test_needed, product_recommendation_allowed, urgency_level, severity, assessed_at, raw_response";
+  "id, crop_check_id, model_name, case_summary, summary, likely_causes, likely_issue, confidence_score, confidence, missing_information, immediate_safe_actions, human_review_required, laboratory_test_needed, product_recommendation_allowed, urgency_level, severity, assessed_at, raw_response";
 
 function asStringArray(value: unknown, fallback: string[] = []): string[] {
   if (!Array.isArray(value)) return fallback;
@@ -95,7 +95,7 @@ export function mapAssessmentRow(row: AssessmentRow): AssessmentRecord {
 
   return {
     id: row.id,
-    cropCaseId: row.crop_case_id,
+    cropCaseId: row.crop_check_id,
     modelName: row.model_name,
     caseSummary: row.case_summary ?? row.summary ?? "",
     likelyCauses,

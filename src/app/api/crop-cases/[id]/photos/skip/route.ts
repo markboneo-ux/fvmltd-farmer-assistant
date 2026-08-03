@@ -48,7 +48,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase, error: caseError } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, status, guided_step")
     .eq("id", id)
     .eq("farmer_id", farmerId)
@@ -73,9 +73,9 @@ export async function POST(request: Request, context: RouteContext) {
 
   const meta = slotMeta(slotKey);
   const { data: existing } = await admin.client
-    .from("case_photos")
+    .from("crop_photos")
     .select("id, storage_path, storage_bucket")
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .eq("slot_key", slotKey)
     .maybeSingle();
 
@@ -86,7 +86,8 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const row = {
-    crop_case_id: id,
+    crop_check_id: id,
+    farmer_id: farmerId,
     slot_key: slotKey,
     storage_path: null,
     storage_bucket: CASE_PHOTO_BUCKET,
@@ -96,17 +97,18 @@ export async function POST(request: Request, context: RouteContext) {
     sort_order: meta.sortOrder,
     is_skipped: true,
     uploaded_at: new Date().toISOString(),
+    photo_type: "other",
   };
 
   const result = existing
     ? await admin.client
-        .from("case_photos")
+        .from("crop_photos")
         .update(row)
         .eq("id", existing.id)
         .select(CASE_PHOTO_SELECT)
         .single()
     : await admin.client
-        .from("case_photos")
+        .from("crop_photos")
         .insert(row)
         .select(CASE_PHOTO_SELECT)
         .single();

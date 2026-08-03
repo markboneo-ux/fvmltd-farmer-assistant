@@ -49,9 +49,9 @@ export async function runPreliminaryAssessment(options: {
 
   if (!force) {
     const { data: existing } = await client
-      .from("ai_assessments")
+      .from("assessment_results")
       .select(ASSESSMENT_SELECT)
-      .eq("crop_case_id", caseId)
+      .eq("crop_check_id", caseId)
       .order("assessed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -197,7 +197,8 @@ export async function runPreliminaryAssessment(options: {
   };
 
   const insertRow = {
-    crop_case_id: caseId,
+    crop_check_id: caseId,
+    farmer_id: farmerId,
     model_name: model,
     case_summary: parsed.case_summary,
     summary: parsed.case_summary,
@@ -215,16 +216,18 @@ export async function runPreliminaryAssessment(options: {
     next_step: nextStep,
     raw_response: rawResponse,
     assessed_at: new Date().toISOString(),
+    review_status: "pending",
+    staff_status: "pending",
   };
 
   const { data: saved, error: saveError } = await client
-    .from("ai_assessments")
-    .insert(insertRow)
+    .from("assessment_results")
+    .upsert(insertRow, { onConflict: "crop_check_id" })
     .select(ASSESSMENT_SELECT)
     .single();
 
   if (saveError || !saved) {
-    console.error("Save ai_assessment failed:", saveError);
+    console.error("Save assessment_results failed:", saveError);
     return {
       ok: false,
       error: "Assessment succeeded but could not be saved.",
@@ -234,7 +237,7 @@ export async function runPreliminaryAssessment(options: {
 
   if (safety.humanReviewRequired) {
     await client
-      .from("crop_cases")
+      .from("crop_checks")
       .update({ status: "in_review" })
       .eq("id", caseId)
       .eq("farmer_id", farmerId);
@@ -244,7 +247,7 @@ export async function runPreliminaryAssessment(options: {
       "Automatic safety rules require technical review.";
 
     await client.from("follow_ups").insert({
-      crop_case_id: caseId,
+      crop_check_id: caseId,
       farmer_id: farmerId,
       title: "Human technical review required",
       notes: reasonSummary,

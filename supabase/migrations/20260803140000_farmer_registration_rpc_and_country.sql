@@ -1,17 +1,14 @@
--- Repair farmer registration for public (anon) access under RLS,
--- and set the default country to Trinidad and Tobago.
+-- Register farmer against canonical public.farmer_profiles (not public.farmers).
+-- Callable with the anon key via SECURITY DEFINER — no service-role key required.
 
--- ---------------------------------------------------------------------------
--- Default country
--- ---------------------------------------------------------------------------
-alter table public.farmers
+alter table public.farmer_profiles
   alter column country set default 'Trinidad and Tobago';
 
--- ---------------------------------------------------------------------------
--- Public registration function (SECURITY DEFINER bypasses RLS safely)
--- Callable with the anon key from the Next.js API route — does not require
--- the service-role key in the browser or for this specific operation.
--- ---------------------------------------------------------------------------
+-- Drop prior signatures so return-type changes (main_crops → primary_crops) apply cleanly
+drop function if exists public.register_farmer(
+  text, text, text, text, numeric, text, text[], boolean
+);
+
 create or replace function public.register_farmer(
   p_full_name text,
   p_phone text,
@@ -31,7 +28,7 @@ returns table (
   region text,
   farm_size numeric,
   farm_size_unit text,
-  main_crops text[],
+  primary_crops text[],
   member_since date
 )
 language plpgsql
@@ -43,6 +40,7 @@ declare
   v_attempt integer := 0;
   v_name text := trim(coalesce(p_full_name, ''));
   v_phone text := trim(coalesce(p_phone, ''));
+  v_phone_e164 text;
   v_country text := trim(coalesce(p_country, ''));
   v_district text := trim(coalesce(p_district, ''));
   v_unit text := trim(coalesce(p_farm_size_unit, ''));
@@ -88,49 +86,61 @@ begin
       using errcode = '22023';
   end if;
 
+  -- Normalize to digits with leading + for E.164-ish storage when possible
+  v_phone_e164 := regexp_replace(v_phone, '[^0-9+]', '', 'g');
+  if v_phone_e164 !~ '^\+' and v_phone_e164 ~ '^[0-9]+$' then
+    v_phone_e164 := '+' || v_phone_e164;
+  end if;
+
   loop
     v_attempt := v_attempt + 1;
     v_code := 'FVM-' || upper(substr(encode(gen_random_bytes(3), 'hex'), 1, 6));
 
     begin
       return query
-      insert into public.farmers (
+      insert into public.farmer_profiles (
         farmer_code,
         full_name,
         phone,
+        phone_e164,
         country,
         region,
+        district,
         farm_size,
         farm_size_unit,
-        main_crops,
+        primary_crops,
         consent_store_data,
         consent_at,
-        member_since
+        member_since,
+        is_active
       )
       values (
         v_code,
         v_name,
         v_phone,
+        nullif(v_phone_e164, ''),
         v_country,
+        v_district,
         v_district,
         p_farm_size,
         v_unit,
         v_crops,
         true,
         timezone('utc', now()),
-        current_date
+        current_date,
+        true
       )
       returning
-        farmers.id,
-        farmers.farmer_code,
-        farmers.full_name,
-        farmers.phone,
-        farmers.country,
-        farmers.region,
-        farmers.farm_size,
-        farmers.farm_size_unit,
-        farmers.main_crops,
-        farmers.member_since;
+        farmer_profiles.id,
+        farmer_profiles.farmer_code,
+        farmer_profiles.full_name,
+        farmer_profiles.phone,
+        farmer_profiles.country,
+        farmer_profiles.region,
+        farmer_profiles.farm_size,
+        farmer_profiles.farm_size_unit,
+        farmer_profiles.primary_crops,
+        farmer_profiles.member_since;
 
       return;
     exception
@@ -153,12 +163,23 @@ $$;
 comment on function public.register_farmer(
   text, text, text, text, numeric, text, text[], boolean
 ) is
-  'Registers a farmer under RLS using SECURITY DEFINER. Called by POST /api/farmers/register with the anon key.';
+  'Registers a farmer into public.farmer_profiles under RLS using SECURITY DEFINER. Called by POST /api/farmers/register with the anon key.';
 
 revoke all on function public.register_farmer(
   text, text, text, text, numeric, text, text[], boolean
 ) from public;
 
-grant execute on function public.register_farmer(
-  text, text, text, text, numeric, text, text[], boolean
-) to anon, authenticated;
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    grant execute on function public.register_farmer(
+      text, text, text, text, numeric, text, text[], boolean
+    ) to anon;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    grant execute on function public.register_farmer(
+      text, text, text, text, numeric, text, text[], boolean
+    ) to authenticated;
+  end if;
+end;
+$$;
