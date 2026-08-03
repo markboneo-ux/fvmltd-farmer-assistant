@@ -1,9 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CASE_PHOTO_SELECT } from "@/lib/crop-check/photoMap";
 import { CASE_PHOTO_BUCKET } from "@/lib/crop-check/photos";
-import { CROP_CASE_SELECT } from "@/lib/crop-check/map";
 
 export type CasePhotoForModel = {
   slotKey: string;
@@ -32,58 +30,84 @@ function cropAgeLabel(plantingDate: string | null | undefined): string | null {
   return `${Math.round(days / 30)} month(s) (~${days} days)`;
 }
 
+type ContextPhoto = {
+  slot_key: string;
+  label: string | null;
+  mime_type: string | null;
+  storage_path: string | null;
+  storage_bucket: string | null;
+};
+
+type FarmerCaseContext = {
+  crop_check: {
+    crop_name: string;
+    description: string | null;
+    symptom_location: string | null;
+    is_spreading: boolean | null;
+    percent_affected: number | string | null;
+    recent_fertilizer: string | null;
+    recent_spray: string | null;
+    irrigation_frequency: string | null;
+    drainage_condition: string | null;
+    recent_heavy_rainfall: boolean | null;
+    first_observed_on: string | null;
+    farm_id: string;
+    crop_cycle_id: string | null;
+  };
+  farm: {
+    name?: string | null;
+    country?: string | null;
+    district?: string | null;
+    region?: string | null;
+    village?: string | null;
+    location_description?: string | null;
+    latitude?: number | string | null;
+    longitude?: number | string | null;
+    drainage_condition?: string | null;
+    growing_system?: string | null;
+  } | null;
+  crop_cycle: {
+    crop_name?: string | null;
+    variety?: string | null;
+    planting_date?: string | null;
+    growth_stage?: string | null;
+    area_planted?: number | string | null;
+    area_unit?: string | null;
+    growing_environment?: string | null;
+    previous_crop?: string | null;
+  } | null;
+  soil_test: {
+    ph?: number | string | null;
+    electrical_conductivity?: number | string | null;
+    sampled_at?: string | null;
+    notes?: string | null;
+  } | null;
+  photos: ContextPhoto[];
+};
+
 export async function buildCaseContextForModel(
   client: SupabaseClient,
   caseId: string,
   farmerId: string,
 ): Promise<CaseContextForModel> {
-  const { data: cropCase, error: caseError } = await client
-    .from("crop_checks")
-    .select(CROP_CASE_SELECT)
-    .eq("id", caseId)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
+  const { data, error } = await client.rpc("get_farmer_case_context", {
+    p_farmer_id: farmerId,
+    p_check_id: caseId,
+  });
 
-  if (caseError) {
-    throw new Error(`Could not load crop case: ${caseError.message}`);
+  if (error) {
+    throw new Error(`Could not load crop case: ${error.message}`);
   }
-  if (!cropCase) {
+  if (!data) {
     throw new Error("Crop case not found.");
   }
 
-  const [{ data: farm }, { data: cycle }, { data: soil }, { data: photos }] =
-    await Promise.all([
-      client
-        .from("farms")
-        .select(
-          "id, name, country, district, region, village, location_description, latitude, longitude, water_source, drainage_condition, growing_system",
-        )
-        .eq("id", cropCase.farm_id)
-        .maybeSingle(),
-      cropCase.crop_cycle_id
-        ? client
-            .from("crop_cycles")
-            .select(
-              "id, crop_name, variety, planting_date, growth_stage, area_planted, area_unit, growing_environment, previous_crop",
-            )
-            .eq("id", cropCase.crop_cycle_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      client
-        .from("soil_tests")
-        .select("ph, electrical_conductivity, sampled_at, notes")
-        .eq("farm_id", cropCase.farm_id)
-        .order("sampled_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      client
-        .from("crop_photos")
-        .select(CASE_PHOTO_SELECT)
-        .eq("crop_check_id", caseId)
-        .eq("is_skipped", false)
-        .not("storage_path", "is", null)
-        .order("sort_order", { ascending: true }),
-    ]);
+  const context = data as FarmerCaseContext;
+  const cropCase = context.crop_check;
+  const farm = context.farm;
+  const cycle = context.crop_cycle;
+  const soil = context.soil_test;
+  const photos = context.photos ?? [];
 
   const locationParts = [
     farm?.location_description,
@@ -124,7 +148,7 @@ export async function buildCaseContextForModel(
     soil_test_sampled_at: soil?.sampled_at ?? null,
     soil_test_notes: soil?.notes ?? null,
     first_observed_on: cropCase.first_observed_on,
-    photo_slots_uploaded: (photos ?? []).map((photo) => ({
+    photo_slots_uploaded: photos.map((photo) => ({
       slot_key: photo.slot_key,
       label: photo.label,
     })),
@@ -132,7 +156,7 @@ export async function buildCaseContextForModel(
 
   const photoPayloads: CasePhotoForModel[] = [];
 
-  for (const photo of photos ?? []) {
+  for (const photo of photos) {
     if (!photo.storage_path) continue;
     const bucket = photo.storage_bucket ?? CASE_PHOTO_BUCKET;
     const { data: file, error: downloadError } = await client.storage

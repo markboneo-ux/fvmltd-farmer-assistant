@@ -268,23 +268,30 @@ In the Vercel project: **Settings → Environment Variables**, add:
 | --- | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server | No | Supabase project URL. Safe to expose; required at build and runtime. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server | No | Public anon key. Safe for Client Components. Protected by Row Level Security. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). Still used for farms/crop-check/staff admin paths; **not required for farmer registration** once `register_farmer` is applied. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). **Staff dashboard only.** Not required for farmer registration, farms, crop cycles, or guided crop checks once the farmer-journey RPC migrations are applied. |
 | `OPENAI_API_KEY` | Server only | **Yes** | OpenAI API key. **Never** prefix with `NEXT_PUBLIC_`. Used only in `src/lib/openai` / assessment routes. |
 | `OPENAI_MODEL` | Server only | No | Optional. Defaults to `gpt-4o`. |
 
-No **new** Vercel variable is required for this migration repair.
+No **new** Vercel variable is required for farmer-facing flows. Guest farmer journeys need only the two `NEXT_PUBLIC_SUPABASE_*` values (plus `OPENAI_API_KEY` if preliminary assessments should run).
 
 Recommended Vercel settings for each variable:
 
 - Environments: Production, Preview, and Development (as needed)
 - For `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`, mark as **Sensitive** / encrypted if your Vercel plan supports it
 
+### Farmer journey migrations (apply manually — do not auto-push)
+
+After deploying app code, apply these additive migrations in the Supabase SQL editor or via `supabase db push` when you are ready:
+
+1. `20260803220000_farmer_journey_schema_ready.sql` — farms columns, `crop_cycles`, guided crop-check / photo / assessment columns, storage bucket
+2. `20260803230000_farmer_journey_anon_rpcs.sql` — SECURITY DEFINER RPCs callable with the anon key
+
 ### Security notes
 
 - Browser code (`src/lib/supabase/client.ts`) uses only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - The service role client lives in `src/lib/supabase/admin.ts` and imports `server-only` so it cannot be bundled into the browser.
 - The OpenAI client lives in `src/lib/openai/client.ts` with `server-only` — never call OpenAI from Client Components.
-- RLS is enabled on application tables. Farmer registration uses the `register_farmer` SECURITY DEFINER RPC with the anon key. Other trusted writes continue to use the server admin client.
+- RLS is enabled on application tables. Farmer registration and the guest farmer journey use SECURITY DEFINER RPCs with the anon key. Staff admin paths continue to use the server admin client.
 
 ## Canonical database tables
 

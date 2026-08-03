@@ -1,13 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { CASE_PHOTO_SELECT, mapCasePhotoRow } from "@/lib/crop-check/photoMap";
+import { mapCasePhotoRow } from "@/lib/crop-check/photoMap";
 import {
   CASE_PHOTO_BUCKET,
   isPhotoSlotKey,
   slotMeta,
   type CasePhotoRecord,
 } from "@/lib/crop-check/photos";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+import {
+  asString,
+  describeFarmerRpcError,
+  firstRpcRow,
+  rpcRows,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
@@ -15,44 +22,8 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-async function assertCaseOwned(
-  caseId: string,
-  farmerId: string,
-) {
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return { ok: false as const, status: 503 as const, error: admin.error };
-  }
-
-  const { data, error } = await admin.client
-    .from("crop_checks")
-    .select("id, farmer_id, status, guided_step")
-    .eq("id", caseId)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Crop case lookup for photos failed:", error);
-    return {
-      ok: false as const,
-      status: 500 as const,
-      error: "Could not verify crop case.",
-    };
-  }
-
-  if (!data) {
-    return {
-      ok: false as const,
-      status: 404 as const,
-      error: "Crop case not found.",
-    };
-  }
-
-  return { ok: true as const, client: admin.client, cropCase: data };
-}
-
 async function withPreviewUrls(
-  client: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
+  client: SupabaseClient,
   rows: Parameters<typeof mapCasePhotoRow>[0][],
 ): Promise<CasePhotoRecord[]> {
   return Promise.all(
@@ -79,26 +50,30 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
 
-  const owned = await assertCaseOwned(id, farmerId);
-  if (!owned.ok) {
-    return NextResponse.json({ error: owned.error }, { status: owned.status });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data, error } = await owned.client
-    .from("crop_photos")
-    .select(CASE_PHOTO_SELECT)
-    .eq("crop_check_id", id)
-    .order("sort_order", { ascending: true });
+  const { data, error } = await anon.client.rpc("list_crop_photos_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
 
   if (error) {
     console.error("List case photos failed:", error);
+    const message = describeFarmerRpcError(error, "Could not load photographs.");
+    const notFound = message.toLowerCase().includes("not found");
     return NextResponse.json(
-      { error: "Could not load photographs." },
-      { status: 500 },
+      { error: message },
+      { status: notFound ? 404 : 500 },
     );
   }
 
-  const photos = await withPreviewUrls(owned.client, data ?? []);
+  const photos = await withPreviewUrls(
+    anon.client,
+    rpcRows<Parameters<typeof mapCasePhotoRow>[0]>(data),
+  );
   return NextResponse.json({ photos });
 }
 
@@ -150,17 +125,47 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const owned = await assertCaseOwned(id, farmerId);
-  if (!owned.ok) {
-    return NextResponse.json({ error: owned.error }, { status: owned.status });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  if (owned.cropCase.status !== "draft" && owned.cropCase.guided_step === "completed") {
+  // Confirm ownership before uploading to storage
+  const owned = await anon.client.rpc("get_crop_check_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
+  const cropCase = firstRpcRow<{
+    id: string;
+    status: string;
+    guided_step: string | null;
+  }>(owned.data);
+  if (owned.error || !cropCase) {
+    const message = describeFarmerRpcError(
+      owned.error,
+      "Could not verify crop case.",
+    );
+    return NextResponse.json(
+      { error: message },
+      { status: message.toLowerCase().includes("not found") || !cropCase ? 404 : 500 },
+    );
+  }
+  if (cropCase.status !== "draft" && cropCase.guided_step === "completed") {
     return NextResponse.json(
       { error: "This crop check is already complete." },
       { status: 409 },
     );
   }
+
+  const existingList = await anon.client.rpc("list_crop_photos_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
+  const existing = (Array.isArray(existingList.data) ? existingList.data : []).find(
+    (photo: { slot_key?: string }) => photo.slot_key === slotKey,
+  ) as
+    | { id: string; storage_path: string | null; storage_bucket: string | null }
+    | undefined;
 
   const meta = slotMeta(slotKey);
   const extension =
@@ -172,14 +177,7 @@ export async function POST(request: Request, context: RouteContext) {
   const storagePath = `${farmerId}/${id}/${slotKey}-${randomUUID()}.${extension}`;
   const bytes = Buffer.from(await file.arrayBuffer());
 
-  const { data: existing } = await owned.client
-    .from("crop_photos")
-    .select("id, storage_path, storage_bucket")
-    .eq("crop_check_id", id)
-    .eq("slot_key", slotKey)
-    .maybeSingle();
-
-  const { error: uploadError } = await owned.client.storage
+  const { error: uploadError } = await anon.client.storage
     .from(CASE_PHOTO_BUCKET)
     .upload(storagePath, bytes, {
       contentType: file.type || "image/jpeg",
@@ -194,57 +192,40 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const row = {
-    crop_check_id: id,
-    farmer_id: farmerId,
-    slot_key: slotKey,
-    storage_path: storagePath,
-    storage_bucket: CASE_PHOTO_BUCKET,
-    label: meta.label,
-    mime_type: file.type || "image/jpeg",
-    file_size_bytes: file.size,
-    sort_order: meta.sortOrder,
-    is_skipped: false,
-    uploaded_at: new Date().toISOString(),
-    photo_type: "other",
-  };
+  const upsert = await anon.client.rpc("upsert_crop_photo_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+    p_slot_key: slotKey,
+    p_storage_path: storagePath,
+    p_storage_bucket: CASE_PHOTO_BUCKET,
+    p_label: meta.label,
+    p_mime_type: file.type || "image/jpeg",
+    p_file_size_bytes: file.size,
+    p_sort_order: meta.sortOrder,
+    p_is_skipped: false,
+  });
 
-  const upsert = existing
-    ? await owned.client
-        .from("crop_photos")
-        .update(row)
-        .eq("id", existing.id)
-        .select(CASE_PHOTO_SELECT)
-        .single()
-    : await owned.client
-        .from("crop_photos")
-        .insert(row)
-        .select(CASE_PHOTO_SELECT)
-        .single();
-
-  if (upsert.error || !upsert.data) {
+  const row = firstRpcRow<Parameters<typeof mapCasePhotoRow>[0]>(upsert.data);
+  if (upsert.error || !row) {
     console.error("crop_photos upsert failed:", upsert.error);
-    await owned.client.storage.from(CASE_PHOTO_BUCKET).remove([storagePath]);
+    await anon.client.storage.from(CASE_PHOTO_BUCKET).remove([storagePath]);
     return NextResponse.json(
-      { error: "Could not save the photograph record." },
+      {
+        error: describeFarmerRpcError(
+          upsert.error,
+          "Could not save the photograph record.",
+        ),
+      },
       { status: 500 },
     );
   }
 
   if (existing?.storage_path) {
-    await owned.client.storage
+    await anon.client.storage
       .from(existing.storage_bucket ?? CASE_PHOTO_BUCKET)
       .remove([existing.storage_path]);
   }
 
-  // Keep guided step on photos while uploading
-  if (owned.cropCase.guided_step !== "photos") {
-    await owned.client
-      .from("crop_checks")
-      .update({ guided_step: "photos", status: "draft" })
-      .eq("id", id);
-  }
-
-  const [photo] = await withPreviewUrls(owned.client, [upsert.data]);
+  const [photo] = await withPreviewUrls(anon.client, [row]);
   return NextResponse.json({ photo }, { status: existing ? 200 : 201 });
 }

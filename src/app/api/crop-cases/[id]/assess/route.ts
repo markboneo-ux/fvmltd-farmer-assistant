@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { runPreliminaryAssessment } from "@/lib/assessment/runAssessment";
-import { ASSESSMENT_SELECT, mapAssessmentRow } from "@/lib/assessment/map";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+import { mapAssessmentRow } from "@/lib/assessment/map";
+import {
+  asString,
+  describeFarmerRpcError,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -21,40 +25,30 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data: cropCase } = await admin.client
-    .from("crop_checks")
-    .select("id")
-    .eq("id", id)
-    .eq("farmer_id", farmerId)
-    .maybeSingle();
-
-  if (!cropCase) {
-    return NextResponse.json({ error: "Crop case not found." }, { status: 404 });
-  }
-
-  const { data, error } = await admin.client
-    .from("assessment_results")
-    .select(ASSESSMENT_SELECT)
-    .eq("crop_check_id", id)
-    .order("assessed_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await anon.client.rpc("get_assessment_for_farmer", {
+    p_farmer_id: farmerId,
+    p_check_id: id,
+  });
 
   if (error) {
     console.error("Load assessment failed:", error);
+    const message = describeFarmerRpcError(error, "Could not load assessment.");
     return NextResponse.json(
-      { error: "Could not load assessment." },
-      { status: 500 },
+      { error: message },
+      { status: message.toLowerCase().includes("not found") ? 404 : 500 },
     );
   }
 
   return NextResponse.json({
-    assessment: data ? mapAssessmentRow(data) : null,
+    assessment:
+      data && typeof data === "object"
+        ? mapAssessmentRow(data as Parameters<typeof mapAssessmentRow>[0])
+        : null,
   });
 }
 
@@ -81,13 +75,13 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
   const result = await runPreliminaryAssessment({
-    client: admin.client,
+    client: anon.client,
     caseId: id,
     farmerId,
     force,

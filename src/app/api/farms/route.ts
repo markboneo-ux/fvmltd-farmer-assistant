@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { FARM_SELECT, mapFarmRow } from "@/lib/farms/map";
+import { mapFarmRow } from "@/lib/farms/map";
 import type { FarmFormInput } from "@/lib/farms/types";
 import { validateFarmForm } from "@/lib/farms/validation";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+import {
+  asString,
+  describeFarmerRpcError,
+  firstRpcRow,
+  rpcRows,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
 
@@ -15,27 +21,27 @@ export async function GET(request: Request) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data, error } = await admin.client
-    .from("farms")
-    .select(FARM_SELECT)
-    .eq("farmer_id", farmerId)
-    .order("created_at", { ascending: false });
+  const { data, error } = await anon.client.rpc("list_farms_for_farmer", {
+    p_farmer_id: farmerId,
+  });
 
   if (error) {
     console.error("List farms failed:", error);
     return NextResponse.json(
-      { error: "Could not load farms." },
+      { error: describeFarmerRpcError(error, "Could not load farms.") },
       { status: 500 },
     );
   }
 
   return NextResponse.json({
-    farms: (data ?? []).map((row) => mapFarmRow(row)),
+    farms: rpcRows<Parameters<typeof mapFarmRow>[0]>(data).map((row) =>
+      mapFarmRow(row),
+    ),
   });
 }
 
@@ -77,78 +83,55 @@ export async function POST(request: Request) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
     return NextResponse.json(
       {
-        error: admin.error,
-        errors: { form: admin.error },
+        error: anon.error,
+        errors: { form: anon.error },
       },
       { status: 503 },
     );
   }
 
-  const { data: farmer, error: farmerError } = await admin.client
-    .from("farmer_profiles")
-    .select("id")
-    .eq("id", validation.data.farmerId)
-    .maybeSingle();
-
-  if (farmerError) {
-    console.error("Farmer lookup failed:", farmerError);
-    return NextResponse.json(
-      {
-        error: "Could not verify farmer.",
-        errors: { form: "Could not verify farmer. Please try again." },
-      },
-      { status: 500 },
-    );
-  }
-
-  if (!farmer) {
-    return NextResponse.json(
-      {
-        error: "Farmer not found.",
-        errors: {
-          farmerId: "No registered farmer was found. Please register first.",
-        },
-      },
-      { status: 404 },
-    );
-  }
-
   const payload = validation.data;
-  const { data, error } = await admin.client
-    .from("farms")
-    .insert({
-      farmer_id: payload.farmerId,
-      name: payload.name,
-      country: payload.country,
-      district: payload.district,
-      region: payload.district,
-      farm_size: payload.farmSize,
-      farm_size_unit: payload.farmSizeUnit,
-      size_hectares: payload.sizeHectares,
-      location_description: payload.locationDescription,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
-      water_source: payload.waterSource,
-      drainage_condition: payload.drainageCondition,
-      growing_system: payload.growingSystem,
-    })
-    .select(FARM_SELECT)
-    .single();
+  const { data, error } = await anon.client.rpc("create_farm_for_farmer", {
+    p_farmer_id: payload.farmerId,
+    p_name: payload.name,
+    p_country: payload.country,
+    p_district: payload.district,
+    p_farm_size: payload.farmSize,
+    p_farm_size_unit: payload.farmSizeUnit,
+    p_size_hectares: payload.sizeHectares,
+    p_location_description: payload.locationDescription,
+    p_latitude: payload.latitude,
+    p_longitude: payload.longitude,
+    p_water_source: payload.waterSource,
+    p_drainage_condition: payload.drainageCondition,
+    p_growing_system: payload.growingSystem,
+  });
 
-  if (error || !data) {
+  const row = firstRpcRow<Parameters<typeof mapFarmRow>[0]>(data);
+  if (error || !row) {
     console.error("Create farm failed:", error);
+    const message = describeFarmerRpcError(
+      error,
+      "Could not save the farm. Please try again.",
+    );
+    const notFound = message.toLowerCase().includes("no registered farmer");
     return NextResponse.json(
       {
-        error: "Could not save the farm.",
-        errors: { form: "Could not save the farm. Please try again." },
+        error: message,
+        errors: notFound
+          ? {
+              farmerId:
+                "No registered farmer was found. Please register first.",
+            }
+          : { form: message },
       },
-      { status: 500 },
+      { status: notFound ? 404 : 500 },
     );
   }
 
-  return NextResponse.json({ farm: mapFarmRow(data) }, { status: 201 });
+  return NextResponse.json({ farm: mapFarmRow(row) }, { status: 201 });
 }

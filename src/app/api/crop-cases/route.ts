@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
-import { CROP_CASE_SELECT, mapCropCaseRow } from "@/lib/crop-check/map";
+import { mapCropCaseRow } from "@/lib/crop-check/map";
 import { isCropCheckCrop } from "@/lib/crop-check/validation";
-import { asString, tryCreateAdminClient } from "@/lib/supabase/helpers";
+import {
+  asString,
+  describeFarmerRpcError,
+  firstRpcRow,
+  rpcRows,
+  tryCreateAnonServerClient,
+} from "@/lib/supabase/helpers";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const farmerId = searchParams.get("farmerId")?.trim();
-  const status = searchParams.get("status")?.trim();
-  const id = searchParams.get("id")?.trim();
+  const status = searchParams.get("status")?.trim() || null;
+  const id = searchParams.get("id")?.trim() || null;
 
   if (!farmerId) {
     return NextResponse.json(
@@ -18,36 +24,29 @@ export async function GET(request: Request) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  let query = admin.client
-    .from("crop_checks")
-    .select(CROP_CASE_SELECT)
-    .eq("farmer_id", farmerId)
-    .order("updated_at", { ascending: false });
-
-  if (id) {
-    query = query.eq("id", id);
-  }
-  if (status) {
-    query = query.eq("status", status);
-  }
-
-  const { data, error } = await query;
+  const { data, error } = await anon.client.rpc("list_crop_checks_for_farmer", {
+    p_farmer_id: farmerId,
+    p_status: status,
+    p_id: id,
+  });
 
   if (error) {
     console.error("List crop cases failed:", error);
     return NextResponse.json(
-      { error: "Could not load crop cases." },
+      { error: describeFarmerRpcError(error, "Could not load crop cases.") },
       { status: 500 },
     );
   }
 
   return NextResponse.json({
-    cropCases: (data ?? []).map((row) => mapCropCaseRow(row)),
+    cropCases: rpcRows<Parameters<typeof mapCropCaseRow>[0]>(data).map((row) =>
+      mapCropCaseRow(row),
+    ),
   });
 }
 
@@ -89,83 +88,30 @@ export async function POST(request: Request) {
     );
   }
 
-  const admin = tryCreateAdminClient();
-  if (!admin.ok) {
-    return NextResponse.json({ error: admin.error }, { status: 503 });
+  const anon = tryCreateAnonServerClient();
+  if (!anon.ok) {
+    return NextResponse.json({ error: anon.error }, { status: 503 });
   }
 
-  const { data: cycle, error: cycleError } = await admin.client
-    .from("crop_cycles")
-    .select("id, farm_id, crop_name")
-    .eq("id", cropCycleId)
-    .maybeSingle();
+  const { data, error } = await anon.client.rpc("create_crop_check_for_farmer", {
+    p_farmer_id: farmerId,
+    p_crop_cycle_id: cropCycleId,
+    p_crop_name: cropName,
+  });
 
-  if (cycleError) {
-    console.error("Crop cycle lookup failed:", cycleError);
-    return NextResponse.json(
-      { error: "Could not verify crop cycle." },
-      { status: 500 },
-    );
-  }
-
-  if (!cycle) {
-    return NextResponse.json(
-      { error: "Crop cycle not found for this farmer." },
-      { status: 404 },
-    );
-  }
-
-  const { data: farm, error: farmError } = await admin.client
-    .from("farms")
-    .select("id, farmer_id")
-    .eq("id", cycle.farm_id)
-    .maybeSingle();
-
-  if (farmError) {
-    console.error("Farm lookup for crop case failed:", farmError);
-    return NextResponse.json(
-      { error: "Could not verify farm." },
-      { status: 500 },
-    );
-  }
-
-  if (!farm || farm.farmer_id !== farmerId) {
-    return NextResponse.json(
-      { error: "Crop cycle not found for this farmer." },
-      { status: 404 },
-    );
-  }
-
-  if (cycle.crop_name.toLowerCase() !== cropName.toLowerCase()) {
-    return NextResponse.json(
-      {
-        error: `Selected cycle is for ${cycle.crop_name}, not ${cropName}.`,
-      },
-      { status: 400 },
-    );
-  }
-
-  const { data, error } = await admin.client
-    .from("crop_checks")
-    .insert({
-      farmer_id: farmerId,
-      farm_id: cycle.farm_id,
-      crop_cycle_id: cropCycleId,
-      crop_name: cropName,
-      title: `${cropName} crop check`,
-      status: "draft",
-      guided_step: "problem_description",
-    })
-    .select(CROP_CASE_SELECT)
-    .single();
-
-  if (error || !data) {
+  const row = firstRpcRow<Parameters<typeof mapCropCaseRow>[0]>(data);
+  if (error || !row) {
     console.error("Create crop case failed:", error);
+    const message = describeFarmerRpcError(
+      error,
+      "Could not start the crop check.",
+    );
+    const notFound = message.toLowerCase().includes("not found");
     return NextResponse.json(
-      { error: "Could not start the crop check." },
-      { status: 500 },
+      { error: message },
+      { status: notFound ? 404 : 500 },
     );
   }
 
-  return NextResponse.json({ cropCase: mapCropCaseRow(data) }, { status: 201 });
+  return NextResponse.json({ cropCase: mapCropCaseRow(row) }, { status: 201 });
 }
