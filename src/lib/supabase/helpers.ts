@@ -84,6 +84,13 @@ function sanitizePublicError(message: string, fallback: string): string {
   ) {
     return fallback;
   }
+  if (
+    lower.includes("could not find the function") ||
+    lower.includes("schema cache") ||
+    lower.includes("pgrst202")
+  ) {
+    return "This feature is not available yet on the database. Ask FVMLTD to apply the latest farmer journey migrations, then try again.";
+  }
   // Strip Postgres raise exception prefixes when present
   return message.replace(/^ERROR:\s*/i, "").replace(/\s+CONTEXT:[\s\S]*$/i, "");
 }
