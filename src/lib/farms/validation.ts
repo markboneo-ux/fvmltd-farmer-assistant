@@ -1,3 +1,7 @@
+import {
+  isOtherCountryOption,
+  resolveStoredCountry,
+} from "@/data/countries";
 import type { FarmSizeUnit } from "@/lib/farmers/types";
 import {
   DRAINAGE_OPTIONS,
@@ -65,10 +69,14 @@ export function validateFarmForm(
     errors.name = "Farm name must be 120 characters or fewer.";
   }
 
-  const country = input.country.trim();
-  if (!country) {
+  const countrySelected = input.country.trim();
+  const countryOther = (input.countryOther ?? "").trim();
+  if (!countrySelected) {
     errors.country = "Select the country.";
+  } else if (isOtherCountryOption(countrySelected) && !countryOther) {
+    errors.countryOther = "Enter the country name.";
   }
+  const country = resolveStoredCountry(countrySelected, countryOther);
 
   const district = input.district.trim();
   if (!district) {

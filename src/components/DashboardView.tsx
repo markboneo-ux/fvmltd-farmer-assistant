@@ -99,15 +99,12 @@ export function DashboardView() {
       <div className="flex min-h-dvh flex-col px-4 pt-4">
         <header className="animate-rise mb-5">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold tracking-[0.14em] text-leaf uppercase">
-              FVMLTD
+            <p className="text-xs font-semibold tracking-[0.14em] text-canopy uppercase">
+              Farmers Value Mart Ltd
             </p>
-            <Link
-              href="/staff"
-              className="text-xs font-medium text-muted underline-offset-2 hover:text-canopy hover:underline"
-            >
-              Staff view
-            </Link>
+            <span className="rounded-md bg-canopy px-2.5 py-1 text-[11px] font-semibold tracking-wide text-white">
+              Farming Forward
+            </span>
           </div>
           <p className="text-sm text-muted">
             {farmer ? "Welcome," : "Good morning,"}

@@ -4,10 +4,10 @@ type Variant = "primary" | "secondary" | "ghost";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-canopy text-white shadow-[0_10px_24px_-12px_rgba(27,67,50,0.65)] hover:bg-leaf",
+    "bg-canopy text-white shadow-[0_10px_24px_-12px_rgba(27,67,50,0.55)] hover:bg-leaf",
   secondary:
-    "bg-surface text-canopy ring-1 ring-line hover:bg-sky/60",
-  ghost: "bg-transparent text-leaf hover:bg-canopy/8",
+    "bg-surface text-canopy ring-2 ring-canopy hover:bg-sky",
+  ghost: "bg-transparent text-canopy hover:bg-canopy/8",
 };
 
 type CommonProps = {

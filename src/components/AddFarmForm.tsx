@@ -6,9 +6,10 @@ import { Button } from "@/components/Button";
 import { FieldError } from "@/components/FieldError";
 import {
   COUNTRY_OPTIONS,
-  type FarmSizeUnit,
-  type RegisteredFarmer,
-} from "@/lib/farmers/types";
+  DEFAULT_COUNTRY,
+  isOtherCountryOption,
+} from "@/data/countries";
+import type { FarmSizeUnit, RegisteredFarmer } from "@/lib/farmers/types";
 import { useRegisteredFarmer } from "@/lib/farmers/useRegisteredFarmer";
 import {
   DRAINAGE_OPTIONS,
@@ -28,10 +29,20 @@ const errorBorder = "border-danger";
 const normalBorder = "border-line";
 
 function buildInitialFarmForm(farmer: RegisteredFarmer): FarmFormInput {
+  const knownCountry = COUNTRY_OPTIONS.includes(
+    farmer.country as (typeof COUNTRY_OPTIONS)[number],
+  );
+  const country = knownCountry
+    ? farmer.country
+    : farmer.country
+      ? "Other Country"
+      : DEFAULT_COUNTRY;
+
   return {
     farmerId: farmer.id,
     name: "",
-    country: farmer.country || "Tanzania",
+    country,
+    countryOther: knownCountry ? "" : farmer.country || "",
     district: farmer.district || "",
     farmSize: farmer.farmSize ? String(farmer.farmSize) : "",
     farmSizeUnit: farmer.farmSizeUnit || "hectares",
@@ -71,6 +82,7 @@ function AddFarmFormFields({ farmer }: { farmer: RegisteredFarmer }) {
   const [submitting, setSubmitting] = useState(false);
   const [isPending, startTransition] = useTransition();
   const busy = submitting || isPending || locating;
+  const showOtherCountry = isOtherCountryOption(values.country);
 
   function updateField<K extends keyof FarmFormInput>(
     key: K,
@@ -200,7 +212,22 @@ function AddFarmFormFields({ farmer }: { farmer: RegisteredFarmer }) {
           id="country"
           name="country"
           value={values.country}
-          onChange={(event) => updateField("country", event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setValues((prev) => ({
+              ...prev,
+              country: next,
+              countryOther: isOtherCountryOption(next) ? prev.countryOther : "",
+            }));
+            setErrors((prev) => {
+              if (!prev.country && !prev.countryOther && !prev.form) return prev;
+              const nextErrors = { ...prev };
+              delete nextErrors.country;
+              delete nextErrors.countryOther;
+              delete nextErrors.form;
+              return nextErrors;
+            });
+          }}
           disabled={busy}
           className={`${inputClass} ${errors.country ? errorBorder : normalBorder}`}
         >
@@ -216,6 +243,25 @@ function AddFarmFormFields({ farmer }: { farmer: RegisteredFarmer }) {
         <FieldError message={errors.country} />
       </label>
 
+      {showOtherCountry ? (
+        <label className="block space-y-1.5" htmlFor="countryOther">
+          <span className="text-sm font-medium text-ink">
+            Enter the country
+          </span>
+          <input
+            id="countryOther"
+            name="countryOther"
+            type="text"
+            value={values.countryOther}
+            onChange={(event) => updateField("countryOther", event.target.value)}
+            placeholder="Type the country name"
+            disabled={busy}
+            className={`${inputClass} ${errors.countryOther ? errorBorder : normalBorder}`}
+          />
+          <FieldError message={errors.countryOther} />
+        </label>
+      ) : null}
+
       <label className="block space-y-1.5" htmlFor="district">
         <span className="text-sm font-medium text-ink">District or region</span>
         <input
@@ -224,7 +270,7 @@ function AddFarmFormFields({ farmer }: { farmer: RegisteredFarmer }) {
           type="text"
           value={values.district}
           onChange={(event) => updateField("district", event.target.value)}
-          placeholder="Mtwara"
+          placeholder="Couva"
           disabled={busy}
           className={`${inputClass} ${errors.district ? errorBorder : normalBorder}`}
         />
@@ -299,7 +345,7 @@ function AddFarmFormFields({ farmer }: { farmer: RegisteredFarmer }) {
             onChange={(event) =>
               updateField("locationDescription", event.target.value)
             }
-            placeholder="Near Mtwara Rural market road"
+            placeholder="Near Couva main road, next to the river"
             disabled={busy}
             className={`${inputClass} ${errors.locationDescription ? errorBorder : normalBorder}`}
           />

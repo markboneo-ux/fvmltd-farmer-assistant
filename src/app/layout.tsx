@@ -17,7 +17,7 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "FVMLTD Farmer Crop Assistant",
   description:
-    "Mobile-first AI crop assistant for tropical smallholder farmers. Visual structure preview with placeholder data.",
+    "Practical crop guidance built for Caribbean and tropical farmers by Farmers Value Mart Ltd.",
   applicationName: "FVMLTD Farmer Crop Assistant",
 };
 

@@ -28,6 +28,8 @@ export type FarmFormInput = {
   farmerId: string;
   name: string;
   country: string;
+  /** Required when country is an "Other…" option. */
+  countryOther: string;
   district: string;
   farmSize: string;
   farmSizeUnit: FarmSizeUnit | "";

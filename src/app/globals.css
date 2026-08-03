@@ -1,23 +1,25 @@
 @import "tailwindcss";
 
 :root {
+  /* FVMLTD official palette — green, white, charcoal */
   --canopy: #1b4332;
   --leaf: #2d6a4f;
   --leaf-bright: #40916c;
   --mint: #95d5b2;
-  --field: #e8f5e9;
-  --sky: #d4ebe3;
+  --field: #ffffff;
+  --sky: #eef6f1;
   --sun: #e9b44c;
-  --soil: #3e2723;
-  --ink: #1a2e1f;
-  --muted: #5c7264;
+  --soil: #2a2a2a;
+  --ink: #212121;
+  --charcoal: #2f2f2f;
+  --muted: #5a635e;
   --surface: #ffffff;
-  --line: #c8ddd0;
-  --danger: #c45c26;
-  --warn: #d4a017;
+  --line: #d5e0d9;
+  --danger: #b42318;
+  --warn: #b54708;
   --ok: #2d6a4f;
-  --background: var(--field);
-  --foreground: var(--ink);
+  --background: #ffffff;
+  --foreground: #212121;
 }
 
 @theme inline {
@@ -30,6 +32,7 @@
   --color-sun: var(--sun);
   --color-soil: var(--soil);
   --color-ink: var(--ink);
+  --color-charcoal: var(--charcoal);
   --color-muted: var(--muted);
   --color-surface: var(--surface);
   --color-line: var(--line);
@@ -118,16 +121,16 @@ h3,
 }
 
 .field-pattern {
-  background-color: var(--field);
+  background-color: var(--surface);
   background-image:
-    radial-gradient(circle at 12% 18%, rgba(64, 145, 108, 0.14), transparent 42%),
-    radial-gradient(circle at 88% 8%, rgba(233, 180, 76, 0.18), transparent 36%),
-    linear-gradient(165deg, var(--sky) 0%, var(--field) 48%, #f3faf5 100%);
+    radial-gradient(circle at 12% 18%, rgba(27, 67, 50, 0.06), transparent 42%),
+    radial-gradient(circle at 88% 8%, rgba(45, 106, 79, 0.08), transparent 36%),
+    linear-gradient(180deg, #ffffff 0%, #f7faf8 55%, #ffffff 100%);
 }
 
 .hero-field {
   background:
-    linear-gradient(180deg, rgba(27, 67, 50, 0.18) 0%, rgba(27, 67, 50, 0.55) 55%, rgba(27, 67, 50, 0.82) 100%),
-    radial-gradient(ellipse at 30% 20%, rgba(233, 180, 76, 0.35), transparent 45%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.85) 70%, #ffffff 100%),
+    radial-gradient(ellipse at 30% 20%, rgba(45, 106, 79, 0.18), transparent 45%),
     linear-gradient(160deg, #74c69d 0%, #2d6a4f 45%, #1b4332 100%);
 }
