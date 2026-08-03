@@ -27,7 +27,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id")
     .eq("id", id)
     .eq("farmer_id", farmerId)
@@ -38,9 +38,9 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const { data, error } = await admin.client
-    .from("ai_assessments")
+    .from("assessment_results")
     .select(ASSESSMENT_SELECT)
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .order("assessed_at", { ascending: false })
     .limit(1)
     .maybeSingle();

@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   }
 
   let query = admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select(CROP_CASE_SELECT)
     .eq("farmer_id", farmerId)
     .order("updated_at", { ascending: false });
@@ -146,7 +146,7 @@ export async function POST(request: Request) {
   }
 
   const { data, error } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .insert({
       farmer_id: farmerId,
       farm_id: cycle.farm_id,

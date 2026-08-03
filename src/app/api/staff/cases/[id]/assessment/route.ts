@@ -65,9 +65,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const { data: assessment } = await auth.client
-    .from("ai_assessments")
+    .from("assessment_results")
     .select("id")
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .order("assessed_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -82,7 +82,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const now = new Date().toISOString();
 
   const { data: updated, error } = await auth.client
-    .from("ai_assessments")
+    .from("assessment_results")
     .update({
       staff_status: "edited",
       approved_by_staff_id: auth.staff.id,
@@ -110,7 +110,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update({
       status: "resolved",
       reviewed_at: now,
@@ -125,7 +125,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   await auth.client
     .from("follow_ups")
     .update({ status: "completed", completed_at: now })
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .eq("status", "pending");
 
   return NextResponse.json({

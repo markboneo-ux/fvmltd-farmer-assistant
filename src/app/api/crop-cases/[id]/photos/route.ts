@@ -25,7 +25,7 @@ async function assertCaseOwned(
   }
 
   const { data, error } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, farmer_id, status, guided_step")
     .eq("id", caseId)
     .eq("farmer_id", farmerId)
@@ -85,9 +85,9 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const { data, error } = await owned.client
-    .from("case_photos")
+    .from("crop_photos")
     .select(CASE_PHOTO_SELECT)
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .order("sort_order", { ascending: true });
 
   if (error) {
@@ -173,9 +173,9 @@ export async function POST(request: Request, context: RouteContext) {
   const bytes = Buffer.from(await file.arrayBuffer());
 
   const { data: existing } = await owned.client
-    .from("case_photos")
+    .from("crop_photos")
     .select("id, storage_path, storage_bucket")
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .eq("slot_key", slotKey)
     .maybeSingle();
 
@@ -195,7 +195,8 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const row = {
-    crop_case_id: id,
+    crop_check_id: id,
+    farmer_id: farmerId,
     slot_key: slotKey,
     storage_path: storagePath,
     storage_bucket: CASE_PHOTO_BUCKET,
@@ -205,23 +206,24 @@ export async function POST(request: Request, context: RouteContext) {
     sort_order: meta.sortOrder,
     is_skipped: false,
     uploaded_at: new Date().toISOString(),
+    photo_type: "other",
   };
 
   const upsert = existing
     ? await owned.client
-        .from("case_photos")
+        .from("crop_photos")
         .update(row)
         .eq("id", existing.id)
         .select(CASE_PHOTO_SELECT)
         .single()
     : await owned.client
-        .from("case_photos")
+        .from("crop_photos")
         .insert(row)
         .select(CASE_PHOTO_SELECT)
         .single();
 
   if (upsert.error || !upsert.data) {
-    console.error("case_photos upsert failed:", upsert.error);
+    console.error("crop_photos upsert failed:", upsert.error);
     await owned.client.storage.from(CASE_PHOTO_BUCKET).remove([storagePath]);
     return NextResponse.json(
       { error: "Could not save the photograph record." },
@@ -238,7 +240,7 @@ export async function POST(request: Request, context: RouteContext) {
   // Keep guided step on photos while uploading
   if (owned.cropCase.guided_step !== "photos") {
     await owned.client
-      .from("crop_cases")
+      .from("crop_checks")
       .update({ guided_step: "photos", status: "draft" })
       .eq("id", id);
   }

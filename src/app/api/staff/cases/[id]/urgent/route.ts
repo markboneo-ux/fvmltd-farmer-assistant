@@ -23,7 +23,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase, error } = await auth.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update({
       is_urgent: urgent,
       assigned_staff_id: auth.staff.id,
@@ -45,9 +45,9 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (urgent) {
     const { data: assessment } = await auth.client
-      .from("ai_assessments")
+      .from("assessment_results")
       .select("id, urgency_level")
-      .eq("crop_case_id", id)
+      .eq("crop_check_id", id)
       .order("assessed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -58,7 +58,7 @@ export async function POST(request: Request, context: RouteContext) {
       assessment.urgency_level !== "critical"
     ) {
       await auth.client
-        .from("ai_assessments")
+        .from("assessment_results")
         .update({ urgency_level: "high" })
         .eq("id", assessment.id);
     }

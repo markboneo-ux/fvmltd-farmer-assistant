@@ -3,7 +3,7 @@ import { CASE_PHOTO_BUCKET } from "./photos";
 
 type CasePhotoRow = {
   id: string;
-  crop_case_id: string;
+  crop_check_id: string;
   slot_key: string;
   storage_path: string | null;
   storage_bucket: string | null;
@@ -16,7 +16,7 @@ type CasePhotoRow = {
 };
 
 export const CASE_PHOTO_SELECT =
-  "id, crop_case_id, slot_key, storage_path, storage_bucket, label, mime_type, file_size_bytes, sort_order, is_skipped, uploaded_at";
+  "id, crop_check_id, slot_key, storage_path, storage_bucket, label, mime_type, file_size_bytes, sort_order, is_skipped, uploaded_at";
 
 export function mapCasePhotoRow(
   row: CasePhotoRow,
@@ -24,7 +24,7 @@ export function mapCasePhotoRow(
 ): CasePhotoRecord {
   return {
     id: row.id,
-    cropCaseId: row.crop_case_id,
+    cropCaseId: row.crop_check_id,
     slotKey: row.slot_key as PhotoSlotKey,
     storagePath: row.storage_path,
     storageBucket: row.storage_bucket ?? CASE_PHOTO_BUCKET,

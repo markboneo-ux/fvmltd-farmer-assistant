@@ -38,7 +38,7 @@ export async function buildCaseContextForModel(
   farmerId: string,
 ): Promise<CaseContextForModel> {
   const { data: cropCase, error: caseError } = await client
-    .from("crop_cases")
+    .from("crop_checks")
     .select(CROP_CASE_SELECT)
     .eq("id", caseId)
     .eq("farmer_id", farmerId)
@@ -77,9 +77,9 @@ export async function buildCaseContextForModel(
         .limit(1)
         .maybeSingle(),
       client
-        .from("case_photos")
+        .from("crop_photos")
         .select(CASE_PHOTO_SELECT)
-        .eq("crop_case_id", caseId)
+        .eq("crop_check_id", caseId)
         .eq("is_skipped", false)
         .not("storage_path", "is", null)
         .order("sort_order", { ascending: true }),

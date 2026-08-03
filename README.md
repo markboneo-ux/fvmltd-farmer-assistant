@@ -67,7 +67,7 @@ The `/register` page collects:
 - Main crops
 - Consent to store farm information and crop photographs
 
-On submit, `POST /api/farmers/register` validates the payload and inserts a row into the Supabase `farmers` table by calling the `register_farmer` SECURITY DEFINER RPC with the **anon** key (so registration works under RLS without exposing the service-role key). If that migration is not applied yet, the route falls back to a server-only service-role insert. A unique Farmer ID (`FVM-XXXXXX`) is generated. After success, the farmer is sent to `/dashboard`, which shows their name, Farmer ID, location, farm size, and crops.
+On submit, `POST /api/farmers/register` validates the payload and inserts a row into the Supabase `farmer_profiles` table by calling the `register_farmer` SECURITY DEFINER RPC with the **anon** key (so registration works under RLS without exposing the service-role key). If that migration is not applied yet, the route falls back to a server-only service-role insert. A unique Farmer ID (`FVM-XXXXXX`) is generated. After success, the farmer is sent to `/dashboard`, which shows their name, Farmer ID, location, farm size, and crops.
 
 Country options are Caribbean-focused (default: Trinidad and Tobago) and live in `src/data/countries.ts`.
 
@@ -111,7 +111,7 @@ Flow:
    - Drainage condition
    - Recent heavy rainfall
 
-Cases are saved to Supabase `crop_cases` as `draft` while in progress and `open` when complete. After the questions, farmers upload required photographs. AI diagnosis is intentionally not included yet.
+Cases are saved to Supabase `crop_checks` as `draft` while in progress and `open` when complete. After the questions, farmers upload required photographs. AI diagnosis is intentionally not included yet.
 
 ### Crop Check photographs
 
@@ -124,7 +124,7 @@ Required slots (skippable, but clearly marked when missing):
 5. Stem, fruit, root, insect or damaged area  
 6. Healthy comparison plant  
 
-Photos are compressed on-device when practical, stored in a **private** Supabase Storage bucket (`case-photos`), and recorded in `case_photos`.
+Photos are compressed on-device when practical, stored in a **private** Supabase Storage bucket (`case-photos`), and recorded in `crop_photos`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -177,7 +177,7 @@ When human review is required, the case status becomes `in_review`, a staff foll
 - Prompt forbids unrestricted pesticide rates and invented products
 - `product_recommendation_allowed` stays `false` when human review is required
 - Immediate actions are sanitized to strip rate-like patterns
-- Results are stored in Supabase `ai_assessments`
+- Results are stored in Supabase `assessment_results`
 
 ## Supabase setup
 
@@ -189,22 +189,68 @@ When human review is required, the case status becomes `in_review`, a staff foll
    - `anon` `public` key
    - `service_role` `secret` key
 
-### 2. Apply the database migration
+### 2. Apply the database migrations
 
-Run the SQL migrations in `supabase/migrations/` against your project **in filename order**, either:
+Canonical schema uses the **existing production table names**:
+
+`farmer_profiles`, `farms`, `crop_checks`, `crop_photos`, `chat_messages`, `assessment_results`, `staff_profiles`
+
+plus extensions `crop_cycles`, `soil_tests`, `follow_ups`, `lab_test_requests`, `products`, `recommendations`.
+
+The baseline migration is **idempotent** (`create table if not exists`, `add column if not exists`, conditional constraints/policies). It is safe for:
+
+- an existing production database whose core tables already exist
+- a clean preview / development database with no tables
+
+Run migrations in filename order:
 
 - Supabase Dashboard → **SQL Editor** → paste and run each file, or
 - with the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase link` then `supabase db push`
 
 | Migration | Purpose |
 | --- | --- |
-| `20260731180000_initial_schema.sql` | Core tables including `farmers`, `farms`, `crop_cycles` |
-| `20260731190000_farmer_registration_fields.sql` | Adds Farmer ID / farm size / crops / consent columns if upgrading an older schema |
-| `20260731193000_farm_crop_cycle_fields.sql` | Adds farm location/water/drainage/system and crop-cycle planting fields |
-| `20260731200000_crop_check_guided_fields.sql` | Adds guided crop-check fields and `draft` status on `crop_cases` |
-| `20260731210000_case_photo_slots_and_storage.sql` | Photo slot keys, skip support, private `case-photos` Storage bucket |
-| `20260731220000_ai_assessment_structured_fields.sql` | Structured AI assessment columns + soil EC |
-| `20260731230000_staff_review_dashboard.sql` | Staff workflow fields, case messages, lab requests, staff RLS helper |
+| `20260731180000_initial_schema.sql` | Idempotent canonical baseline (production table names + app extensions) |
+| `20260731190000` … `20260731230000` | No-ops kept for stable timestamps (folded into the baseline) |
+| `20260803140000_farmer_registration_rpc_and_country.sql` | `register_farmer` RPC → `farmer_profiles` + TT country default |
+
+#### Production migration history repair (required if history is empty)
+
+If the production Supabase project already has the core tables but the **migration history page shows no migrations**, Preview/CI will try to re-apply the chain and previously failed with `relation "farms" already exists`.
+
+Because the rewritten baseline is idempotent, you can either:
+
+**Option A — push the idempotent chain (recommended when history is empty)**
+
+```bash
+supabase link --project-ref <your-project-ref>
+supabase db push
+```
+
+This runs every migration. Existing tables are left in place; missing columns/functions are added. No data is dropped.
+
+**Option B — mark the baseline as already applied, then push only the RPC**
+
+Use this if you prefer not to re-run the baseline SQL on production after manually confirming the schema already matches:
+
+```bash
+supabase link --project-ref <your-project-ref>
+supabase migration repair --status applied 20260731180000
+supabase migration repair --status applied 20260731190000
+supabase migration repair --status applied 20260731193000
+supabase migration repair --status applied 20260731200000
+supabase migration repair --status applied 20260731210000
+supabase migration repair --status applied 20260731220000
+supabase migration repair --status applied 20260731230000
+supabase db push
+```
+
+After Option B, the migration that still needs to run is:
+
+`20260803140000_farmer_registration_rpc_and_country.sql`
+
+(unless you already applied it). That migration creates/replaces `public.register_farmer` against `farmer_profiles`.
+
+Do **not** assume these repair commands have already been run.
 
 ### 3. Local environment variables
 
@@ -222,9 +268,11 @@ In the Vercel project: **Settings → Environment Variables**, add:
 | --- | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server | No | Supabase project URL. Safe to expose; required at build and runtime. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server | No | Public anon key. Safe for Client Components. Protected by Row Level Security. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). Still used for farms/crop-check/staff admin paths; **not required for farmer registration** once `register_farmer` is applied. |
 | `OPENAI_API_KEY` | Server only | **Yes** | OpenAI API key. **Never** prefix with `NEXT_PUBLIC_`. Used only in `src/lib/openai` / assessment routes. |
 | `OPENAI_MODEL` | Server only | No | Optional. Defaults to `gpt-4o`. |
+
+No **new** Vercel variable is required for this migration repair.
 
 Recommended Vercel settings for each variable:
 
@@ -236,23 +284,25 @@ Recommended Vercel settings for each variable:
 - Browser code (`src/lib/supabase/client.ts`) uses only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - The service role client lives in `src/lib/supabase/admin.ts` and imports `server-only` so it cannot be bundled into the browser.
 - The OpenAI client lives in `src/lib/openai/client.ts` with `server-only` — never call OpenAI from Client Components.
-- Initial RLS is enabled on all application tables with no public policies yet. Until auth policies are added, prefer the server admin client for trusted backend writes.
+- RLS is enabled on application tables. Farmer registration uses the `register_farmer` SECURITY DEFINER RPC with the anon key. Other trusted writes continue to use the server admin client.
 
-## Initial database tables
+## Canonical database tables
 
 | Table | Purpose |
 | --- | --- |
-| `farmers` | Farmer profiles |
+| `farmer_profiles` | Canonical farmer records (registration + profile) |
 | `farms` | Farm plots belonging to farmers |
 | `crop_cycles` | Planting seasons / crop cycles |
-| `crop_cases` | Crop health check cases |
-| `case_photos` | Photos attached to cases (Storage paths) |
+| `crop_checks` | Guided crop health checks |
+| `crop_photos` | Photos attached to crop checks (Storage paths) |
+| `chat_messages` | Farmer chat + staff review messages |
+| `assessment_results` | Preliminary OpenAI / staff assessment records |
 | `soil_tests` | Soil test results |
-| `ai_assessments` | Preliminary OpenAI assessment records |
 | `recommendations` | Case recommendations, optional product link |
 | `products` | Product catalog |
 | `follow_ups` | Follow-up tasks for staff / farmers |
-| `staff_users` | FVMLTD staff accounts |
+| `lab_test_requests` | Staff soil / laboratory test requests |
+| `staff_profiles` | FVMLTD staff accounts |
 
 ## Getting started
 
@@ -287,12 +337,12 @@ Only **authenticated FVMLTD staff** can access `/staff` and `/api/staff/*`.
 
 ### Access setup
 
-1. Apply migration `20260731230000_staff_review_dashboard.sql`.
+1. Apply migration `20260803140000_farmer_registration_rpc_and_country.sql` (and the canonical baseline if needed).
 2. In Supabase Auth, create a staff user (email + password).
-3. Insert a matching `staff_users` row:
+3. Insert a matching `staff_profiles` row:
 
 ```sql
-insert into public.staff_users (auth_user_id, full_name, email, role, is_active)
+insert into public.staff_profiles (auth_user_id, full_name, email, role, is_active)
 values (
   '<auth-user-uuid>',
   'Ada Agronomist',
@@ -304,11 +354,11 @@ values (
 
 4. Sign in at `/staff/login`.
 
-Middleware requires a Supabase Auth session for staff routes. Handlers then verify an **active** `staff_users` row linked to `auth.users.id`.
+Middleware requires a Supabase Auth session for staff routes. Handlers then verify an **active** `staff_profiles` row linked to `auth.users.id` via `auth_user_id` (or legacy `id = auth.uid()`).
 
 ### Queue views
 
-- **New cases** — `crop_cases.status = open`
+- **New cases** — `crop_checks.status = open`
 - **Urgent cases** — staff `is_urgent` flag or AI urgency `high` / `critical`
 - **Awaiting review** — `in_review` or `awaiting_info`
 
@@ -322,10 +372,10 @@ Farmer details, farm location, crop/variety, photographs (signed URLs), soil res
 | --- | --- |
 | Approve assessment | Marks assessment approved; case `resolved` |
 | Edit assessment | Saves staff overrides; case `resolved` |
-| Ask farmer another question | Creates `case_messages` row; case `awaiting_info` |
+| Ask farmer another question | Creates `chat_messages` row; case `awaiting_info` |
 | Request soil test | Creates `lab_test_requests` (`soil`) + follow-up |
 | Request laboratory test | Creates `lab_test_requests` (`laboratory`) + follow-up |
-| Mark urgent | Sets `crop_cases.is_urgent` |
+| Mark urgent | Sets `crop_checks.is_urgent` |
 | Close case | Sets status `closed` with optional reason |
 
 Staff API routes (all require staff auth):

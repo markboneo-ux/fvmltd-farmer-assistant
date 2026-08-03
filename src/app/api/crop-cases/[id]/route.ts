@@ -32,7 +32,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const { data, error } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select(CROP_CASE_SELECT)
     .eq("id", id)
     .eq("farmer_id", farmerId)
@@ -94,7 +94,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const { data: existing, error: existingError } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, farmer_id, status, guided_step")
     .eq("id", id)
     .eq("farmer_id", farmerId)
@@ -129,7 +129,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const { data, error } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update(validation.patch)
     .eq("id", id)
     .eq("farmer_id", farmerId)

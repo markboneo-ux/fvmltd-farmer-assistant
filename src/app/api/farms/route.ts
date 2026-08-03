@@ -89,7 +89,7 @@ export async function POST(request: Request) {
   }
 
   const { data: farmer, error: farmerError } = await admin.client
-    .from("farmers")
+    .from("farmer_profiles")
     .select("id")
     .eq("id", validation.data.farmerId)
     .maybeSingle();

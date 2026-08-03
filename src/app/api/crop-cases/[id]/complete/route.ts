@@ -48,7 +48,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: cropCase, error: caseError } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .select("id, status, guided_step")
     .eq("id", id)
     .eq("farmer_id", farmerId)
@@ -66,7 +66,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
   if (cropCase.status !== "draft") {
     const { data } = await admin.client
-      .from("crop_cases")
+      .from("crop_checks")
       .select(CROP_CASE_SELECT)
       .eq("id", id)
       .single();
@@ -87,9 +87,9 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: photos, error: photosError } = await admin.client
-    .from("case_photos")
+    .from("crop_photos")
     .select(CASE_PHOTO_SELECT)
-    .eq("crop_case_id", id);
+    .eq("crop_check_id", id);
 
   if (photosError) {
     console.error("Complete case photos lookup failed:", photosError);
@@ -115,9 +115,10 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     missingSlots.push(slot.key);
-    const { error: skipError } = await admin.client.from("case_photos").upsert(
+    const { error: skipError } = await admin.client.from("crop_photos").upsert(
       {
-        crop_case_id: id,
+        crop_check_id: id,
+        farmer_id: farmerId,
         slot_key: slot.key,
         storage_path: null,
         storage_bucket: CASE_PHOTO_BUCKET,
@@ -127,8 +128,9 @@ export async function POST(request: Request, context: RouteContext) {
         sort_order: slot.sortOrder,
         is_skipped: true,
         uploaded_at: new Date().toISOString(),
+        photo_type: "other",
       },
-      { onConflict: "crop_case_id,slot_key" },
+      { onConflict: "crop_check_id,slot_key" },
     );
 
     if (skipError) {
@@ -142,7 +144,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   const completedAt = new Date().toISOString();
   const { data: updated, error: updateError } = await admin.client
-    .from("crop_cases")
+    .from("crop_checks")
     .update({
       status: "open",
       guided_step: "completed",
@@ -162,9 +164,9 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { data: finalPhotos } = await admin.client
-    .from("case_photos")
+    .from("crop_photos")
     .select(CASE_PHOTO_SELECT)
-    .eq("crop_case_id", id)
+    .eq("crop_check_id", id)
     .order("sort_order", { ascending: true });
 
   const assessmentResult = await runPreliminaryAssessment({
