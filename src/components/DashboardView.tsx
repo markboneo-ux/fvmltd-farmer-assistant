@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/Button";
+import { RegistrationSuccess } from "@/components/RegistrationSuccess";
 import { StatusPill } from "@/components/StatusPill";
 import {
   formatPlantingDate,
@@ -13,6 +15,10 @@ import {
 } from "@/lib/crop-cycles/labels";
 import type { CropCycleRecord } from "@/lib/crop-cycles/types";
 import { farmer as demoFarmer, recentChecks } from "@/data/placeholder";
+import {
+  FARMER_DASHBOARD_PATH,
+  REGISTERED_QUERY,
+} from "@/lib/farmers/paths";
 import { useRegisteredFarmer } from "@/lib/farmers/useRegisteredFarmer";
 import type { RegisteredFarmer } from "@/lib/farmers/types";
 
@@ -36,8 +42,19 @@ type CropsResult = {
 };
 
 export function DashboardView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const farmer = useRegisteredFarmer();
   const [cropsResult, setCropsResult] = useState<CropsResult | null>(null);
+  const [showRegistrationSuccess, setShowRegistrationSuccess] = useState(
+    () => searchParams.get(REGISTERED_QUERY) === "1",
+  );
+
+  useEffect(() => {
+    if (searchParams.get(REGISTERED_QUERY) === "1") {
+      setShowRegistrationSuccess(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!farmer?.id) return;
@@ -80,6 +97,28 @@ export function DashboardView() {
       cancelled = true;
     };
   }, [farmer?.id]);
+
+  function dismissRegistrationSuccess() {
+    setShowRegistrationSuccess(false);
+    // Drop the query flag with a relative replace so refresh/back stay clean.
+    router.replace(FARMER_DASHBOARD_PATH);
+  }
+
+  if (showRegistrationSuccess) {
+    return (
+      <AppShell bare>
+        <div className="flex min-h-dvh flex-col px-4 pt-6 pb-8">
+          <RegistrationSuccess
+            farmerCode={farmer?.farmerCode}
+            fullName={farmer?.fullName}
+            pending={!farmer}
+            onContinue={dismissRegistrationSuccess}
+            continueLabel="Continue"
+          />
+        </div>
+      </AppShell>
+    );
+  }
 
   const displayName = farmer?.fullName ?? demoFarmer.name;
   const locationLine = farmer

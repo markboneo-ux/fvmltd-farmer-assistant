@@ -1,13 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/Button";
+import { RegistrationSuccess } from "@/components/RegistrationSuccess";
 import {
   COUNTRY_OPTIONS,
   DEFAULT_COUNTRY,
   isOtherCountryOption,
 } from "@/data/countries";
+import { farmerDashboardHref } from "@/lib/farmers/paths";
 import { saveRegisteredFarmer } from "@/lib/farmers/session";
 import {
   CROP_OPTIONS,
@@ -19,6 +21,9 @@ import {
   validateFarmerRegistration,
   type FieldErrors,
 } from "@/lib/farmers/validation";
+
+/** Relative App Router destination after a successful registration. */
+const POST_REGISTER_HREF = farmerDashboardHref({ registered: true });
 
 const initialValues: FarmerRegistrationInput = {
   fullName: "",
@@ -66,17 +71,25 @@ async function readErrorPayload(response: Response): Promise<{
   }
 }
 
-export function RegisterForm() {
+type RegisterFormProps = {
+  onSuccessChange?: (succeeded: boolean) => void;
+};
+
+export function RegisterForm({ onSuccessChange }: RegisterFormProps = {}) {
   const router = useRouter();
   const [values, setValues] = useState<FarmerRegistrationInput>(initialValues);
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [isPending, startTransition] = useTransition();
   const [submitting, setSubmitting] = useState(false);
-  const [succeeded, setSucceeded] = useState(false);
+  const [registered, setRegistered] = useState<RegisteredFarmer | null>(null);
   const inFlight = useRef(false);
 
-  const busy = isPending || submitting || succeeded;
+  const busy = submitting || Boolean(registered);
   const showOtherCountry = isOtherCountryOption(values.country);
+
+  function goToDashboard() {
+    // Internal relative route only — never absolute deploy/preview URLs.
+    router.replace(POST_REGISTER_HREF);
+  }
 
   function updateField<K extends keyof FarmerRegistrationInput>(
     key: K,
@@ -142,12 +155,14 @@ export function RegisterForm() {
         return;
       }
 
+      // Persist via the existing localStorage session pattern (no secrets in the URL).
       saveRegisteredFarmer(payload.farmer);
-      setSucceeded(true);
+      setRegistered(payload.farmer);
+      onSuccessChange?.(true);
 
-      startTransition(() => {
-        router.push("/dashboard");
-      });
+      // Soft navigate to the in-app dashboard. Success UI stays mounted as a
+      // fallback if the client transition is slow or interrupted (e.g. Safari).
+      router.replace(POST_REGISTER_HREF);
     } catch (error) {
       const message =
         error instanceof Error && error.message
@@ -158,6 +173,16 @@ export function RegisterForm() {
       inFlight.current = false;
       setSubmitting(false);
     }
+  }
+
+  if (registered) {
+    return (
+      <RegistrationSuccess
+        farmerCode={registered.farmerCode}
+        fullName={registered.fullName}
+        onContinue={goToDashboard}
+      />
+    );
   }
 
   const inputClass =
