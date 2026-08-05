@@ -19,16 +19,17 @@ export type OpenAIClientResult =
  * Privileged OpenAI client for server Route Handlers / Server Actions only.
  * Never import this module from Client Components.
  *
- * Intentionally uncached: serverless warm instances must always re-read
- * process.env.OPENAI_API_KEY so a newly configured key is picked up.
+ * Uncached: always re-read credentials so new Vercel env values apply.
  */
 export function createOpenAIClient(apiKey?: string) {
   const key = apiKey ?? getOpenAIApiKey();
   return new OpenAI({ apiKey: key });
 }
 
-export function tryCreateOpenAIClient(): OpenAIClientResult {
-  const resolved = resolveOpenAIApiKey();
+export function tryCreateOpenAIClient(
+  rawApiKey?: string | undefined,
+): OpenAIClientResult {
+  const resolved = resolveOpenAIApiKey(rawApiKey);
   if (!resolved.ok) {
     return {
       ok: false,
@@ -45,7 +46,6 @@ export function tryCreateOpenAIClient(): OpenAIClientResult {
   } catch (error) {
     console.error("[ai/chat] MODEL_CONFIGURATION_ERROR", {
       name: error instanceof Error ? error.name : "Error",
-      // Message only — never log options that might contain the key.
       message:
         error instanceof Error
           ? error.message

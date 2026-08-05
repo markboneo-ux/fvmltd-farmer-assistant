@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { NextResponse } from "next/server";
 import { parseGuestChatBody, runGuestChat } from "@/lib/ai/guestChat";
 import { getOpenAIEnvDiagnostics } from "@/lib/openai/env";
@@ -16,8 +17,11 @@ export const maxDuration = 60;
  * - MODEL_CONFIGURATION_ERROR
  */
 export async function POST(request: Request) {
-  // Request-time dynamic read (name built at runtime) — value never logged.
-  void process.env[["OPENAI", "API", "KEY"].join("_")];
+  // Wait for the incoming request so env is read at request time, not build time.
+  await connection();
+
+  // Exact required read — process.env.OPENAI_API_KEY
+  const apiKey = process.env.OPENAI_API_KEY;
 
   let body: unknown;
 
@@ -34,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   const { message, history } = parseGuestChatBody(body);
-  const result = await runGuestChat({ message, history });
+  const result = await runGuestChat({ message, history, apiKey });
 
   if (!result.ok) {
     const diagnostics = getOpenAIEnvDiagnostics();
@@ -42,10 +46,15 @@ export async function POST(request: Request) {
       {
         error: result.error,
         code: result.code,
-        // Safe diagnostics only — never the key.
+        // Safe diagnostics only — never the key value.
         diagnostics: {
           keyPresent: diagnostics.keyPresent,
+          keyDefined: diagnostics.keyDefined,
           model: diagnostics.model,
+          serviceRolePresent: diagnostics.serviceRolePresent,
+          publicSupabaseUrlPresent: diagnostics.publicSupabaseUrlPresent,
+          vercelEnv: diagnostics.vercelEnv,
+          nextRuntime: diagnostics.nextRuntime,
         },
       },
       { status: result.status },
