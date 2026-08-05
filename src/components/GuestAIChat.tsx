@@ -97,17 +97,23 @@ export function GuestAIChat({ showProfileLink = true }: GuestAIChatProps) {
       window.clearTimeout(timeout);
 
       const payload = (await response.json()) as {
-        reply?: string;
+        answer?: string | null;
+        reply?: string | null;
         error?: string;
         code?: string;
+        diagnosticCode?: string;
         source?: string;
       };
 
-      if (!response.ok || !payload.reply) {
+      const answer = payload.answer || payload.reply || null;
+      const diagnosticCode = payload.diagnosticCode || payload.code;
+
+      if (!response.ok || !answer) {
         const fallback =
-          payload.code === "OPENAI_KEY_MISSING" ||
-          payload.code === "OPENAI_KEY_FORMAT_INVALID" ||
-          payload.code === "missing_api_key"
+          diagnosticCode === "OPENAI_KEY_MISSING" ||
+          diagnosticCode === "OPENAI_KEY_FORMAT_INVALID" ||
+          diagnosticCode === "OPENAI_AUTH_FAILED" ||
+          diagnosticCode === "missing_api_key"
             ? "The AI assistant is not available yet. Please try again later, or contact FVMLTD support."
             : payload.error ||
               "Could not get an answer right now. Please try again.";
@@ -120,7 +126,7 @@ export function GuestAIChat({ showProfileLink = true }: GuestAIChatProps) {
         {
           id: messageId(),
           role: "assistant",
-          text: payload.reply!,
+          text: answer,
         },
       ]);
     } catch (err) {
