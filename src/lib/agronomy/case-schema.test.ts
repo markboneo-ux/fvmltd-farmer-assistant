@@ -8,6 +8,7 @@ import {
   isInterviewStage,
   parseCasePayload,
   QUICK_HELP_MAX_QUESTIONS,
+  stripMarkdownMarkers,
 } from "./case-schema";
 
 describe("case-schema rapid triage", () => {
@@ -26,10 +27,12 @@ describe("case-schema rapid triage", () => {
     expect(QUICK_HELP_MAX_QUESTIONS).toBe(3);
   });
 
-  it("parses the revised structured payload", () => {
+  it("parses the revised structured payload with questionId/type", () => {
     const payload = parseCasePayload({
       mode: "quick_help",
       stage: "questioning",
+      questionId: "q_1_field_distribution",
+      questionType: "field_distribution",
       preliminaryAssessment: "Tomato whiteflies reported.",
       severity: "unknown",
       nextQuestion:
@@ -44,10 +47,20 @@ describe("case-schema rapid triage", () => {
     });
 
     expect(payload.mode).toBe("quick_help");
+    expect(payload.questionId).toBe("q_1_field_distribution");
+    expect(payload.questionType).toBe("field_distribution");
     expect(payload.photoRecommended).toBe(true);
     expect(payload.internalMissingInformation).toContain("spray history");
+    expect(payload.weatherRisks).toEqual([]);
+    expect(payload.verifiedInputOptions).toEqual([]);
     expect(isInterviewStage(payload.stage)).toBe(true);
     expect(isGuidanceStage(payload.stage)).toBe(false);
+  });
+
+  it("strips Markdown markers from farmer-facing text", () => {
+    expect(stripMarkdownMarkers("### Heading\n**Bold** advice")).toBe(
+      "Heading\nBold advice",
+    );
   });
 
   it("rejects invalid mode or severity", () => {
@@ -55,6 +68,8 @@ describe("case-schema rapid triage", () => {
       parseCasePayload({
         mode: "chat",
         stage: "intake",
+        questionId: "",
+        questionType: "",
         preliminaryAssessment: "x",
         severity: "low",
         nextQuestion: "",

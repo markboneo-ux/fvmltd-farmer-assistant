@@ -13,6 +13,13 @@ export function formatCaseAsPlainText(payload: AgronomicCasePayload): string {
     `Assessment: ${payload.preliminaryAssessment}`,
   ];
 
+  if (payload.questionId) {
+    lines.push(`Question id: ${payload.questionId}`);
+  }
+  if (payload.questionType) {
+    lines.push(`Question type: ${payload.questionType}`);
+  }
+
   if (payload.nextQuestion) {
     lines.push(`Next question: ${payload.nextQuestion}`);
   }
@@ -37,6 +44,24 @@ export function formatCaseAsPlainText(payload: AgronomicCasePayload): string {
   lines.push(
     `Escalation recommended: ${payload.escalationRecommended ? "yes" : "no"}`,
   );
+
+  if (payload.regionalContext.country) {
+    lines.push(`Country: ${payload.regionalContext.country}`);
+  }
+  if (payload.weatherRisks.length > 0) {
+    lines.push(
+      `Weather risks: ${payload.weatherRisks
+        .map((risk) => `${risk.riskLevel} ${risk.diseaseOrPest}`)
+        .join("; ")}`,
+    );
+  }
+  if (payload.verifiedInputOptions.length > 0) {
+    lines.push(
+      `Verified inputs: ${payload.verifiedInputOptions
+        .map((option) => option.activeIngredientOrNutrient)
+        .join("; ")}`,
+    );
+  }
 
   // History-only — never shown in farmer UI components.
   if (payload.internalMissingInformation.length > 0) {

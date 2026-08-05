@@ -11,6 +11,12 @@
 --   crop_cycles, soil_tests, follow_ups, lab_test_requests, products,
 --   recommendations
 --
+-- Regional agri-input + weather risk tables (additive Caribbean catalogue):
+--   countries, agri_inputs, input_registrations, input_crop_uses,
+--   supplier_inventory, input_sources, input_verification_history,
+--   weather_locations, weather_snapshots, disease_risk_models,
+--   disease_risk_rules, disease_risk_assessments, farmer_risk_alerts
+--
 -- Do NOT create parallel tables such as farmers / crop_cases / case_photos /
 -- ai_assessments / case_messages / staff_users.
 --

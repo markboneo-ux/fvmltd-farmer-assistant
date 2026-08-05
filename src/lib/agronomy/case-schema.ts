@@ -1,7 +1,12 @@
 /**
- * Agronomic Case Engine — rapid triage schema (client + server safe).
- * Used by OpenAI Structured Outputs and the farmer-facing UI.
+ * Agronomic Case Engine — farmer-facing structured response schema.
+ * Used by OpenAI Structured Outputs and the farmer UI.
  */
+
+import {
+  isQuestionType,
+  type QuestionType,
+} from "./question-types";
 
 export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
 export type CaseMode = (typeof CASE_MODES)[number];
@@ -21,7 +26,7 @@ export type CaseStage = (typeof CASE_STAGES)[number];
 export const SEVERITY_LEVELS = ["low", "medium", "high", "unknown"] as const;
 export type SeverityLevel = (typeof SEVERITY_LEVELS)[number];
 
-/** Farmer-visible quick-reply chips. */
+/** Farmer-visible quick-reply chips (legacy standard set). */
 export const STANDARD_QUICK_REPLIES = [
   "Few plants",
   "Patches",
@@ -31,32 +36,84 @@ export const STANDARD_QUICK_REPLIES = [
   "Start full crop check",
 ] as const;
 
+export type RegionalContext = {
+  country: string | null;
+  district: string | null;
+  productDataAsOf: string | null;
+  weatherDataAsOf: string | null;
+};
+
+export type WeatherRiskOption = {
+  diseaseOrPest: string;
+  riskLevel: "low" | "moderate" | "high" | "urgent";
+  riskWindow: string;
+  weatherDrivers: string[];
+  cropStage: string | null;
+  recommendedChecks: string[];
+  preventiveActions: string[];
+  confidence: string;
+  dataSource: string;
+  generatedAt: string;
+  disclaimer: string;
+};
+
+export type VerifiedBrandDisplay = {
+  brandName: string;
+  registrationStatus: string;
+  availabilityStatus: string;
+  officialSource: string | null;
+  lastVerifiedAt: string;
+  labelRestrictions: string[];
+  whyConsidered: string;
+  agronomistConfirmationRequired: boolean;
+};
+
+export type VerifiedInputDisplay = {
+  productType: string;
+  activeIngredientOrNutrient: string;
+  verifiedBrands: VerifiedBrandDisplay[];
+  registrationStatus: string;
+  availabilityStatus: string;
+  labelRestrictions: string[];
+  officialSource: string | null;
+  lastVerifiedAt: string | null;
+  agronomistConfirmationRequired: boolean;
+};
+
 export type AgronomicCasePayload = {
   mode: CaseMode;
   stage: CaseStage;
-  preliminaryAssessment: string;
-  severity: SeverityLevel;
+  questionId: string;
+  questionType: QuestionType | "";
   nextQuestion: string;
   quickReplies: string[];
+  preliminaryAssessment: string;
+  severity: SeverityLevel;
   checksToday: string[];
   safeActionsNow: string[];
   actionsToAvoid: string[];
   photoRecommended: boolean;
   escalationRecommended: boolean;
+  regionalContext: RegionalContext;
+  weatherRisks: WeatherRiskOption[];
+  verifiedInputOptions: VerifiedInputDisplay[];
   /** Engine-only — never show in farmer UI. */
   internalMissingInformation: string[];
 };
 
+/** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
 export const CASE_RESPONSE_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
     "mode",
     "stage",
-    "preliminaryAssessment",
-    "severity",
+    "questionId",
+    "questionType",
     "nextQuestion",
     "quickReplies",
+    "preliminaryAssessment",
+    "severity",
     "checksToday",
     "safeActionsNow",
     "actionsToAvoid",
@@ -73,15 +130,31 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
       type: "string",
       enum: [...CASE_STAGES],
     },
-    preliminaryAssessment: { type: "string" },
-    severity: {
+    questionId: { type: "string" },
+    questionType: {
       type: "string",
-      enum: [...SEVERITY_LEVELS],
+      enum: [
+        "field_distribution",
+        "soil_type",
+        "drainage",
+        "production_system",
+        "symptom_location",
+        "recent_spray",
+        "photo_request",
+        "guidance_followup",
+        "open",
+        "",
+      ],
     },
     nextQuestion: { type: "string" },
     quickReplies: {
       type: "array",
       items: { type: "string" },
+    },
+    preliminaryAssessment: { type: "string" },
+    severity: {
+      type: "string",
+      enum: [...SEVERITY_LEVELS],
     },
     checksToday: {
       type: "array",
@@ -106,6 +179,18 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
 
 /** Max assistant questions before Quick Help must give preliminary guidance. */
 export const QUICK_HELP_MAX_QUESTIONS = 3;
+
+export function emptyRegionalContext(
+  overrides: Partial<RegionalContext> = {},
+): RegionalContext {
+  return {
+    country: null,
+    district: null,
+    productDataAsOf: null,
+    weatherDataAsOf: null,
+    ...overrides,
+  };
+}
 
 export function isCaseMode(value: unknown): value is CaseMode {
   return (
@@ -146,6 +231,7 @@ function asBoolean(value: unknown, fallback = false): boolean {
 
 /**
  * Validates and normalizes model JSON into the Agronomic Case payload.
+ * Tool-enriched fields default empty — filled by the case route after tools run.
  */
 export function parseCasePayload(raw: unknown): AgronomicCasePayload {
   if (!raw || typeof raw !== "object") {
@@ -171,18 +257,30 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     throw new Error("Case response missing preliminaryAssessment.");
   }
 
+  const questionTypeRaw = asTrimmedString(data.questionType);
+  const questionType: QuestionType | "" = isQuestionType(questionTypeRaw)
+    ? questionTypeRaw
+    : questionTypeRaw === ""
+      ? ""
+      : "open";
+
   return {
     mode: data.mode,
     stage: data.stage,
-    preliminaryAssessment,
-    severity: data.severity,
+    questionId: asTrimmedString(data.questionId),
+    questionType,
     nextQuestion: asTrimmedString(data.nextQuestion),
     quickReplies: asStringArray(data.quickReplies),
+    preliminaryAssessment,
+    severity: data.severity,
     checksToday: asStringArray(data.checksToday),
     safeActionsNow: asStringArray(data.safeActionsNow),
     actionsToAvoid: asStringArray(data.actionsToAvoid),
     photoRecommended: asBoolean(data.photoRecommended),
     escalationRecommended: asBoolean(data.escalationRecommended),
+    regionalContext: emptyRegionalContext(),
+    weatherRisks: [],
+    verifiedInputOptions: [],
     internalMissingInformation: asStringArray(data.internalMissingInformation),
   };
 }
@@ -201,4 +299,14 @@ export function isGuidanceStage(stage: CaseStage): boolean {
     stage === "human_review" ||
     stage === "resolved"
   );
+}
+
+/** Strip Markdown markers that must never reach the farmer UI. */
+export function stripMarkdownMarkers(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
 }

@@ -47,9 +47,12 @@ export function DashboardView() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    // Read the just-registered flag after mount (sessionStorage is client-only).
-    setShowRegistrationSuccess(peekJustRegistered());
-    setHydrated(true);
+    // Defer client-only sessionStorage read to avoid sync setState-in-effect lint.
+    const frame = window.requestAnimationFrame(() => {
+      setShowRegistrationSuccess(peekJustRegistered());
+      setHydrated(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
