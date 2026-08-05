@@ -1,28 +1,63 @@
 import "server-only";
 
 import OpenAI from "openai";
-import { getOpenAIApiKey } from "./env";
+import {
+  getOpenAIApiKey,
+  resolveOpenAIApiKey,
+  type OpenAIKeyReason,
+} from "./env";
 
-let cached: OpenAI | null = null;
+export type OpenAIClientResult =
+  | { ok: true; client: OpenAI }
+  | {
+      ok: false;
+      reason: OpenAIKeyReason | "MODEL_CONFIGURATION_ERROR";
+      error: string;
+    };
 
 /**
  * Privileged OpenAI client for server Route Handlers / Server Actions only.
  * Never import this module from Client Components.
+ *
+ * Intentionally uncached: serverless warm instances must always re-read
+ * process.env.OPENAI_API_KEY so a newly configured key is picked up.
  */
-export function createOpenAIClient() {
-  if (cached) return cached;
-  cached = new OpenAI({ apiKey: getOpenAIApiKey() });
-  return cached;
+export function createOpenAIClient(apiKey?: string) {
+  const key = apiKey ?? getOpenAIApiKey();
+  return new OpenAI({ apiKey: key });
 }
 
-export function tryCreateOpenAIClient() {
-  try {
-    return { ok: true as const, client: createOpenAIClient() };
-  } catch {
+export function tryCreateOpenAIClient(): OpenAIClientResult {
+  const resolved = resolveOpenAIApiKey();
+  if (!resolved.ok) {
     return {
-      ok: false as const,
+      ok: false,
+      reason: resolved.reason,
       error:
-        "OpenAI is not configured on the server. Add OPENAI_API_KEY and try again.",
+        resolved.reason === "OPENAI_KEY_FORMAT_INVALID"
+          ? "OPENAI_API_KEY looks like a placeholder. Set a real OpenAI secret key on the server."
+          : "OpenAI is not configured on the server. Add OPENAI_API_KEY and try again.",
+    };
+  }
+
+  try {
+    return { ok: true, client: createOpenAIClient(resolved.apiKey) };
+  } catch (error) {
+    console.error("[ai/chat] MODEL_CONFIGURATION_ERROR", {
+      name: error instanceof Error ? error.name : "Error",
+      // Message only — never log options that might contain the key.
+      message:
+        error instanceof Error
+          ? error.message
+              .replace(/\bsk-[^\s"'`,;]+/gi, "[redacted]")
+              .slice(0, 200)
+          : "unknown",
+    });
+    return {
+      ok: false,
+      reason: "MODEL_CONFIGURATION_ERROR",
+      error:
+        "OpenAI client could not be created. Check server configuration and try again.",
     };
   }
 }

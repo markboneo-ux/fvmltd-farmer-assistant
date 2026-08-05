@@ -1,6 +1,9 @@
 import "server-only";
 
-import { getOpenAIModel } from "@/lib/openai/env";
+import {
+  getOpenAIEnvDiagnostics,
+  getOpenAIModel,
+} from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
 
 export const GUEST_ASSISTANT_INSTRUCTIONS = `You are the FVMLTD Farmer Assistant, supporting tropical smallholder farmers. Give practical, clear and cautious crop guidance. Ask one short clarifying question when important information is missing. Do not claim certainty from limited information. Separate likely causes from next actions. Do not recommend restricted pesticides or unsafe mixing. Encourage label compliance and local professional support where appropriate.
@@ -16,12 +19,47 @@ export type GuestChatMessage = {
   content: string;
 };
 
+export type GuestChatReasonCode =
+  | "empty_question"
+  | "OPENAI_KEY_MISSING"
+  | "OPENAI_KEY_FORMAT_INVALID"
+  | "MODEL_CONFIGURATION_ERROR"
+  | "OPENAI_REQUEST_FAILED"
+  | "network_error"
+  | "model_error"
+  | "empty_reply";
+
 export type GuestChatResult =
   | { ok: true; reply: string; model: string }
-  | { ok: false; error: string; status: number; code: string };
+  | {
+      ok: false;
+      error: string;
+      status: number;
+      code: GuestChatReasonCode;
+    };
 
 function asTrimmedString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function sanitizeErrorMessage(message: string) {
+  return message
+    .replace(/\bsk-[^\s"'`,;]+/gi, "[redacted]")
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .slice(0, 200);
+}
+
+function logReason(
+  reason: GuestChatReasonCode,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  const diagnostics = getOpenAIEnvDiagnostics();
+  console.error(`[ai/chat] ${reason}`, {
+    keyPresent: diagnostics.keyPresent,
+    keyLength: diagnostics.keyLength,
+    model: diagnostics.model,
+    ...extra,
+  });
 }
 
 export function parseGuestChatBody(body: unknown): {
@@ -67,13 +105,15 @@ export async function runGuestChat(options: {
     };
   }
 
+  // No Supabase / auth / Farmer ID — guest chat only needs OpenAI.
   const openai = tryCreateOpenAIClient();
   if (!openai.ok) {
+    logReason(openai.reason);
     return {
       ok: false,
       error: openai.error,
       status: 503,
-      code: "missing_api_key",
+      code: openai.reason,
     };
   }
 
@@ -88,6 +128,7 @@ export async function runGuestChat(options: {
   ];
 
   try {
+    // OpenAI Responses API — this is the outgoing network call.
     const response = await openai.client.responses.create({
       model,
       instructions: GUEST_ASSISTANT_INSTRUCTIONS,
@@ -98,18 +139,17 @@ export async function runGuestChat(options: {
 
     const reply = response.output_text?.trim() ?? "";
     if (!reply) {
+      logReason("empty_reply", { model });
       return {
         ok: false,
         error: "The assistant returned an empty reply. Please try again.",
         status: 502,
-        code: "model_error",
+        code: "empty_reply",
       };
     }
 
     return { ok: true, reply, model: response.model || model };
   } catch (error) {
-    console.error("Guest AI chat failed:", error);
-
     const messageText =
       error instanceof Error ? error.message : "OpenAI request failed.";
     const lower = messageText.toLowerCase();
@@ -120,13 +160,23 @@ export async function runGuestChat(options: {
       lower.includes("econn") ||
       lower.includes("enotfound");
 
+    const code: GuestChatReasonCode = isNetwork
+      ? "network_error"
+      : "OPENAI_REQUEST_FAILED";
+
+    logReason(code, {
+      model,
+      errorName: error instanceof Error ? error.name : "Error",
+      errorMessage: sanitizeErrorMessage(messageText),
+    });
+
     return {
       ok: false,
       error: isNetwork
         ? "Could not reach OpenAI. Check your connection and try again."
         : "The AI model could not answer right now. Please try again in a moment.",
       status: 502,
-      code: isNetwork ? "network_error" : "model_error",
+      code,
     };
   }
 }

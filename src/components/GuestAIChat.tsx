@@ -105,6 +105,8 @@ export function GuestAIChat({ showProfileLink = true }: GuestAIChatProps) {
 
       if (!response.ok || !payload.reply) {
         const fallback =
+          payload.code === "OPENAI_KEY_MISSING" ||
+          payload.code === "OPENAI_KEY_FORMAT_INVALID" ||
           payload.code === "missing_api_key"
             ? "The AI assistant is not available yet. Please try again later, or contact FVMLTD support."
             : payload.error ||
