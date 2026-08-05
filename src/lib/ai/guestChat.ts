@@ -51,13 +51,18 @@ function sanitizeErrorMessage(message: string) {
 
 function logReason(
   reason: GuestChatReasonCode,
-  extra?: Record<string, string | number | boolean | undefined>,
+  extra?: Record<string, string | number | boolean | null | undefined>,
 ) {
   const diagnostics = getOpenAIEnvDiagnostics();
   console.error(`[ai/chat] ${reason}`, {
     keyPresent: diagnostics.keyPresent,
+    keyDefined: diagnostics.keyDefined,
     keyLength: diagnostics.keyLength,
     model: diagnostics.model,
+    serviceRolePresent: diagnostics.serviceRolePresent,
+    publicSupabaseUrlPresent: diagnostics.publicSupabaseUrlPresent,
+    vercelEnv: diagnostics.vercelEnv,
+    nextRuntime: diagnostics.nextRuntime,
     ...extra,
   });
 }
@@ -94,6 +99,8 @@ export function parseGuestChatBody(body: unknown): {
 export async function runGuestChat(options: {
   message: string;
   history?: GuestChatMessage[];
+  /** From the Route Handler: process.env.OPENAI_API_KEY */
+  apiKey?: string | undefined;
 }): Promise<GuestChatResult> {
   const message = options.message.trim();
   if (!message) {
@@ -106,7 +113,7 @@ export async function runGuestChat(options: {
   }
 
   // No Supabase / auth / Farmer ID — guest chat only needs OpenAI.
-  const openai = tryCreateOpenAIClient();
+  const openai = tryCreateOpenAIClient(options.apiKey);
   if (!openai.ok) {
     logReason(openai.reason);
     return {
@@ -128,7 +135,7 @@ export async function runGuestChat(options: {
   ];
 
   try {
-    // OpenAI Responses API — this is the outgoing network call.
+    // OpenAI Responses API — outgoing network call.
     const response = await openai.client.responses.create({
       model,
       instructions: GUEST_ASSISTANT_INSTRUCTIONS,
