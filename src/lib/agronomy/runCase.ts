@@ -9,11 +9,17 @@ import { getOpenAIEnvDiagnostics, getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
 import {
   CASE_RESPONSE_JSON_SCHEMA,
+  isCaseMode,
   parseCasePayload,
   type AgronomicCasePayload,
+  type CaseMode,
 } from "./case-schema";
-import { AGRONOMIC_CASE_SYSTEM_INSTRUCTIONS } from "./system-instructions";
-import { applyCommercialSafetyGuards } from "./tomato-protocol";
+import { buildCaseSystemInstructions } from "./system-instructions";
+import {
+  applyCommercialSafetyGuards,
+  countPriorAssistantQuestions,
+  extractKnownFacts,
+} from "./tomato-protocol";
 
 export type CaseChatMessage = GuestChatMessage;
 
@@ -31,6 +37,7 @@ export type AgronomicCaseResult =
       model: string;
       diagnosticCode: "AI_READY";
       requestCompleted: true;
+      questionsAsked: number;
     }
   | {
       ok: false;
@@ -214,6 +221,7 @@ export function parseCaseRequestBody(body: unknown): {
   message: string;
   history: CaseChatMessage[];
   previousResponseId: string | null;
+  mode: CaseMode;
 } {
   const record =
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -225,6 +233,9 @@ export function parseCaseRequestBody(body: unknown): {
     asTrimmedString(record.previousResponseId) ||
     asTrimmedString(record.previous_response_id) ||
     null;
+
+  const modeRaw = asTrimmedString(record.mode).toLowerCase().replace(/\s+/g, "_");
+  const mode: CaseMode = isCaseMode(modeRaw) ? modeRaw : "quick_help";
 
   const historyRaw = Array.isArray(record.messages)
     ? record.messages
@@ -242,7 +253,7 @@ export function parseCaseRequestBody(body: unknown): {
     history.push({ role, content });
   }
 
-  return { message, history, previousResponseId };
+  return { message, history, previousResponseId, mode };
 }
 
 function extractJsonObject(text: string): unknown {
@@ -263,6 +274,30 @@ function extractJsonObject(text: string): unknown {
   }
 }
 
+function summarizeKnownFacts(
+  history: CaseChatMessage[],
+  message: string,
+): ReturnType<typeof extractKnownFacts> {
+  const combined = [
+    ...history.filter((item) => item.role === "user").map((item) => item.content),
+    message,
+  ].join("\n");
+  return extractKnownFacts(combined);
+}
+
+function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string {
+  const lines: string[] = [];
+  if (facts.crop) lines.push(`- crop: ${facts.crop}`);
+  if (facts.suspectedIssue) lines.push(`- suspected issue: ${facts.suspectedIssue}`);
+  if (facts.country) lines.push(`- country/island: ${facts.country}`);
+  if (facts.distributionHint) {
+    lines.push(`- distribution hint: ${facts.distributionHint}`);
+  }
+  if (facts.suddenWilt) lines.push("- sudden wilt reported: yes");
+  if (facts.stuntedWholeField) lines.push("- stunted across whole field: yes");
+  return lines.join("\n");
+}
+
 /**
  * Runs one Agronomic Case Engine turn via the OpenAI Responses API.
  *
@@ -274,6 +309,7 @@ export async function runAgronomicCase(options: {
   message: string;
   history?: CaseChatMessage[];
   previousResponseId?: string | null;
+  mode?: CaseMode;
   apiKey?: string | undefined;
   /** Injected for automated tests — bypasses the network. */
   createResponse?: (
@@ -282,6 +318,7 @@ export async function runAgronomicCase(options: {
 }): Promise<AgronomicCaseResult> {
   const model = getOpenAIModel();
   const message = options.message.trim();
+  const mode: CaseMode = options.mode ?? "quick_help";
 
   if (!message) {
     return {
@@ -294,8 +331,14 @@ export async function runAgronomicCase(options: {
     };
   }
 
+  // Mode switch via quick reply.
+  const effectiveMode: CaseMode =
+    /start full crop check/i.test(message) ? "full_crop_check" : mode;
+
   const history = (options.history ?? []).slice(-24);
   const previousResponseId = options.previousResponseId?.trim() || null;
+  const questionsAskedBeforeThisTurn = countPriorAssistantQuestions(history);
+  const knownFacts = summarizeKnownFacts(history, message);
 
   const createResponse: (
     params: Record<string, unknown>,
@@ -331,6 +374,12 @@ export async function runAgronomicCase(options: {
       };
     });
 
+  const instructions = buildCaseSystemInstructions({
+    mode: effectiveMode,
+    questionsAskedBeforeThisTurn,
+    knownFactsSummary: knownFactsSummary(knownFacts),
+  });
+
   const textFormat = {
     format: {
       type: "json_schema" as const,
@@ -340,26 +389,34 @@ export async function runAgronomicCase(options: {
     },
   };
 
+  const turnContext = [
+    `Farmer mode: ${effectiveMode}.`,
+    `Assistant questions already asked: ${questionsAskedBeforeThisTurn}.`,
+    effectiveMode === "quick_help"
+      ? "If three questions were already asked, return preliminary guidance now."
+      : "Full crop check may continue collecting history one question at a time.",
+    `Farmer message: ${message}`,
+  ].join("\n");
+
   const baseParams: Record<string, unknown> = {
     model,
-    instructions: AGRONOMIC_CASE_SYSTEM_INSTRUCTIONS,
+    instructions,
     temperature: 0.3,
     max_output_tokens: 900,
     store: true,
     text: textFormat,
   };
 
-  // Prefer previous_response_id; fall back to full history for memory.
   if (previousResponseId) {
     baseParams.previous_response_id = previousResponseId;
-    baseParams.input = [{ role: "user", content: message }];
+    baseParams.input = [{ role: "user", content: turnContext }];
   } else {
     baseParams.input = [
       ...history.map((item) => ({
         role: item.role,
         content: item.content,
       })),
-      { role: "user" as const, content: message },
+      { role: "user" as const, content: turnContext },
     ];
   }
 
@@ -369,7 +426,6 @@ export async function runAgronomicCase(options: {
     try {
       response = await createResponse(baseParams);
     } catch (error) {
-      // If previous_response_id is stale, retry once with full history.
       if (
         previousResponseId &&
         history.length > 0 &&
@@ -383,7 +439,7 @@ export async function runAgronomicCase(options: {
               role: item.role,
               content: item.content,
             })),
-            { role: "user" as const, content: message },
+            { role: "user" as const, content: turnContext },
           ],
         };
         delete retryParams.previous_response_id;
@@ -410,6 +466,11 @@ export async function runAgronomicCase(options: {
     try {
       parsed = applyCommercialSafetyGuards(
         parseCasePayload(extractJsonObject(rawText)),
+        {
+          mode: effectiveMode,
+          questionsAskedBeforeThisTurn,
+          knownFacts,
+        },
       );
     } catch (parseError) {
       logReason("OPENAI_REQUEST_FAILED", {
@@ -429,6 +490,13 @@ export async function runAgronomicCase(options: {
       };
     }
 
+    const questionsAsked =
+      questionsAskedBeforeThisTurn +
+      (parsed.nextQuestion &&
+      (parsed.stage === "intake" || parsed.stage === "questioning")
+        ? 1
+        : 0);
+
     return {
       ok: true,
       case: parsed,
@@ -436,6 +504,7 @@ export async function runAgronomicCase(options: {
       model: response.model || model,
       diagnosticCode: "AI_READY",
       requestCompleted: true,
+      questionsAsked,
     };
   } catch (error) {
     const withCode = error as Error & {

@@ -8,10 +8,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Agronomic Case Engine — structured tomato diagnostic interview.
+ * Agronomic Case Engine — farmer-friendly rapid triage.
+ * Quick Help (default, ≤3 questions) or optional Full Crop Check.
  * Uses OpenAI Responses API + Structured Outputs. No Supabase / registration.
- *
- * Memory: previous_response_id and/or conversation history.
  */
 export async function POST(request: Request) {
   await connection();
@@ -37,11 +36,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const { message, history, previousResponseId } = parseCaseRequestBody(body);
+  const { message, history, previousResponseId, mode } =
+    parseCaseRequestBody(body);
   const result = await runAgronomicCase({
     message,
     history,
     previousResponseId,
+    mode,
     apiKey,
   });
 
@@ -65,5 +66,6 @@ export async function POST(request: Request) {
     model: result.model,
     diagnosticCode: result.diagnosticCode,
     requestCompleted: result.requestCompleted,
+    questionsAsked: result.questionsAsked,
   });
 }
