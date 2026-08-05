@@ -2,30 +2,23 @@ import type { AgronomicCasePayload } from "./case-schema";
 
 /**
  * Builds a plain-text assistant line for conversation history / previous_response_id fallback.
+ * Includes internal notes for the model; the farmer UI never renders this string.
  * No Markdown markers.
  */
 export function formatCaseAsPlainText(payload: AgronomicCasePayload): string {
   const lines: string[] = [
+    `Mode: ${payload.mode}`,
     `Stage: ${payload.stage}`,
-    `Summary: ${payload.caseSummary}`,
+    `Severity: ${payload.severity}`,
+    `Assessment: ${payload.preliminaryAssessment}`,
   ];
 
   if (payload.nextQuestion) {
     lines.push(`Next question: ${payload.nextQuestion}`);
   }
 
-  if (payload.missingCriticalInformation.length > 0) {
-    lines.push(
-      `Still needed: ${payload.missingCriticalInformation.join("; ")}`,
-    );
-  }
-
-  if (payload.redFlags.length > 0) {
-    lines.push(`Red flags: ${payload.redFlags.join("; ")}`);
-  }
-
-  if (payload.likelyCauses.length > 0) {
-    lines.push(`Likely causes: ${payload.likelyCauses.join("; ")}`);
+  if (payload.quickReplies.length > 0) {
+    lines.push(`Quick replies: ${payload.quickReplies.join("; ")}`);
   }
 
   if (payload.checksToday.length > 0) {
@@ -40,8 +33,16 @@ export function formatCaseAsPlainText(payload: AgronomicCasePayload): string {
     lines.push(`Actions to avoid: ${payload.actionsToAvoid.join("; ")}`);
   }
 
-  if (payload.escalationReason) {
-    lines.push(`Escalation: ${payload.escalationReason}`);
+  lines.push(`Photo recommended: ${payload.photoRecommended ? "yes" : "no"}`);
+  lines.push(
+    `Escalation recommended: ${payload.escalationRecommended ? "yes" : "no"}`,
+  );
+
+  // History-only — never shown in farmer UI components.
+  if (payload.internalMissingInformation.length > 0) {
+    lines.push(
+      `Internal missing: ${payload.internalMissingInformation.join("; ")}`,
+    );
   }
 
   return lines.join("\n");

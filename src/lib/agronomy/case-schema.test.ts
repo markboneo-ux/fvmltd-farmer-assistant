@@ -1,69 +1,71 @@
 import { describe, expect, it } from "vitest";
 import {
+  CASE_MODES,
   CASE_STAGES,
+  isCaseMode,
   isCaseStage,
+  isGuidanceStage,
   isInterviewStage,
   parseCasePayload,
+  QUICK_HELP_MAX_QUESTIONS,
 } from "./case-schema";
 
-describe("case-schema", () => {
-  it("includes all required stages", () => {
-    expect(CASE_STAGES).toEqual([
-      "intake",
-      "questioning",
-      "assessment",
-      "action_plan",
-      "follow_up",
-      "resolved",
-      "human_review",
-    ]);
+describe("case-schema rapid triage", () => {
+  it("defines quick_help and full_crop_check modes", () => {
+    expect(CASE_MODES).toEqual(["quick_help", "full_crop_check"]);
+    expect(isCaseMode("quick_help")).toBe(true);
+    expect(isCaseMode("full_crop_check")).toBe(true);
   });
 
-  it("validates stages", () => {
-    expect(isCaseStage("intake")).toBe(true);
+  it("keeps all case stages", () => {
+    expect(CASE_STAGES).toContain("assessment");
     expect(isCaseStage("human_review")).toBe(true);
-    expect(isCaseStage("diagnosis")).toBe(false);
   });
 
-  it("marks intake and questioning as interview stages", () => {
-    expect(isInterviewStage("intake")).toBe(true);
-    expect(isInterviewStage("questioning")).toBe(true);
-    expect(isInterviewStage("assessment")).toBe(false);
+  it("caps Quick Help at three questions", () => {
+    expect(QUICK_HELP_MAX_QUESTIONS).toBe(3);
   });
 
-  it("parses a valid structured payload", () => {
+  it("parses the revised structured payload", () => {
     const payload = parseCasePayload({
+      mode: "quick_help",
       stage: "questioning",
-      caseSummary: "Commercial tomato field stunted in Trinidad.",
-      nextQuestion: "How old are the plants?",
-      missingCriticalInformation: ["plant age", "drainage"],
-      redFlags: [],
-      likelyCauses: [],
+      preliminaryAssessment: "Tomato whiteflies reported.",
+      severity: "unknown",
+      nextQuestion:
+        "Are they affecting a few plants, patches, or most of the field?",
+      quickReplies: ["Few plants", "Patches", "Most of field", "Not sure"],
       checksToday: [],
       safeActionsNow: [],
       actionsToAvoid: [],
-      escalationReason: "",
+      photoRecommended: true,
+      escalationRecommended: false,
+      internalMissingInformation: ["spray history"],
     });
 
-    expect(payload.stage).toBe("questioning");
-    expect(payload.nextQuestion).toBe("How old are the plants?");
-    expect(payload.missingCriticalInformation).toContain("plant age");
+    expect(payload.mode).toBe("quick_help");
+    expect(payload.photoRecommended).toBe(true);
+    expect(payload.internalMissingInformation).toContain("spray history");
+    expect(isInterviewStage(payload.stage)).toBe(true);
+    expect(isGuidanceStage(payload.stage)).toBe(false);
   });
 
-  it("rejects invalid stage", () => {
+  it("rejects invalid mode or severity", () => {
     expect(() =>
       parseCasePayload({
-        stage: "guessing",
-        caseSummary: "x",
+        mode: "chat",
+        stage: "intake",
+        preliminaryAssessment: "x",
+        severity: "low",
         nextQuestion: "",
-        missingCriticalInformation: [],
-        redFlags: [],
-        likelyCauses: [],
+        quickReplies: [],
         checksToday: [],
         safeActionsNow: [],
         actionsToAvoid: [],
-        escalationReason: "",
+        photoRecommended: false,
+        escalationRecommended: false,
+        internalMissingInformation: [],
       }),
-    ).toThrow(/invalid stage/i);
+    ).toThrow(/invalid mode/i);
   });
 });

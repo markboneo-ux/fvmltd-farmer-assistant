@@ -1,7 +1,10 @@
 /**
- * Agronomic Case Engine — structured response schema (client + server safe).
- * Used by OpenAI Structured Outputs and the /ai-lab UI.
+ * Agronomic Case Engine — rapid triage schema (client + server safe).
+ * Used by OpenAI Structured Outputs and the farmer-facing UI.
  */
+
+export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
+export type CaseMode = (typeof CASE_MODES)[number];
 
 export const CASE_STAGES = [
   "intake",
@@ -15,50 +18,68 @@ export const CASE_STAGES = [
 
 export type CaseStage = (typeof CASE_STAGES)[number];
 
+export const SEVERITY_LEVELS = ["low", "medium", "high", "unknown"] as const;
+export type SeverityLevel = (typeof SEVERITY_LEVELS)[number];
+
+/** Farmer-visible quick-reply chips. */
+export const STANDARD_QUICK_REPLIES = [
+  "Few plants",
+  "Patches",
+  "Most of field",
+  "Not sure",
+  "Upload a photo",
+  "Start full crop check",
+] as const;
+
 export type AgronomicCasePayload = {
+  mode: CaseMode;
   stage: CaseStage;
-  caseSummary: string;
+  preliminaryAssessment: string;
+  severity: SeverityLevel;
   nextQuestion: string;
-  missingCriticalInformation: string[];
-  redFlags: string[];
-  likelyCauses: string[];
+  quickReplies: string[];
   checksToday: string[];
   safeActionsNow: string[];
   actionsToAvoid: string[];
-  escalationReason: string;
+  photoRecommended: boolean;
+  escalationRecommended: boolean;
+  /** Engine-only — never show in farmer UI. */
+  internalMissingInformation: string[];
 };
 
 export const CASE_RESPONSE_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
+    "mode",
     "stage",
-    "caseSummary",
+    "preliminaryAssessment",
+    "severity",
     "nextQuestion",
-    "missingCriticalInformation",
-    "redFlags",
-    "likelyCauses",
+    "quickReplies",
     "checksToday",
     "safeActionsNow",
     "actionsToAvoid",
-    "escalationReason",
+    "photoRecommended",
+    "escalationRecommended",
+    "internalMissingInformation",
   ],
   properties: {
+    mode: {
+      type: "string",
+      enum: [...CASE_MODES],
+    },
     stage: {
       type: "string",
       enum: [...CASE_STAGES],
     },
-    caseSummary: { type: "string" },
+    preliminaryAssessment: { type: "string" },
+    severity: {
+      type: "string",
+      enum: [...SEVERITY_LEVELS],
+    },
     nextQuestion: { type: "string" },
-    missingCriticalInformation: {
-      type: "array",
-      items: { type: "string" },
-    },
-    redFlags: {
-      type: "array",
-      items: { type: "string" },
-    },
-    likelyCauses: {
+    quickReplies: {
       type: "array",
       items: { type: "string" },
     },
@@ -74,14 +95,36 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
       type: "array",
       items: { type: "string" },
     },
-    escalationReason: { type: "string" },
+    photoRecommended: { type: "boolean" },
+    escalationRecommended: { type: "boolean" },
+    internalMissingInformation: {
+      type: "array",
+      items: { type: "string" },
+    },
   },
 } as const;
+
+/** Max assistant questions before Quick Help must give preliminary guidance. */
+export const QUICK_HELP_MAX_QUESTIONS = 3;
+
+export function isCaseMode(value: unknown): value is CaseMode {
+  return (
+    typeof value === "string" &&
+    (CASE_MODES as readonly string[]).includes(value)
+  );
+}
 
 export function isCaseStage(value: unknown): value is CaseStage {
   return (
     typeof value === "string" &&
     (CASE_STAGES as readonly string[]).includes(value)
+  );
+}
+
+export function isSeverityLevel(value: unknown): value is SeverityLevel {
+  return (
+    typeof value === "string" &&
+    (SEVERITY_LEVELS as readonly string[]).includes(value)
   );
 }
 
@@ -97,6 +140,10 @@ function asStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 /**
  * Validates and normalizes model JSON into the Agronomic Case payload.
  */
@@ -107,30 +154,51 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
 
   const data = raw as Record<string, unknown>;
 
+  if (!isCaseMode(data.mode)) {
+    throw new Error("Case response has an invalid mode.");
+  }
+
   if (!isCaseStage(data.stage)) {
     throw new Error("Case response has an invalid stage.");
   }
 
-  const caseSummary = asTrimmedString(data.caseSummary);
-  if (!caseSummary) {
-    throw new Error("Case response missing caseSummary.");
+  if (!isSeverityLevel(data.severity)) {
+    throw new Error("Case response has an invalid severity.");
+  }
+
+  const preliminaryAssessment = asTrimmedString(data.preliminaryAssessment);
+  if (!preliminaryAssessment) {
+    throw new Error("Case response missing preliminaryAssessment.");
   }
 
   return {
+    mode: data.mode,
     stage: data.stage,
-    caseSummary,
+    preliminaryAssessment,
+    severity: data.severity,
     nextQuestion: asTrimmedString(data.nextQuestion),
-    missingCriticalInformation: asStringArray(data.missingCriticalInformation),
-    redFlags: asStringArray(data.redFlags),
-    likelyCauses: asStringArray(data.likelyCauses),
+    quickReplies: asStringArray(data.quickReplies),
     checksToday: asStringArray(data.checksToday),
     safeActionsNow: asStringArray(data.safeActionsNow),
     actionsToAvoid: asStringArray(data.actionsToAvoid),
-    escalationReason: asTrimmedString(data.escalationReason),
+    photoRecommended: asBoolean(data.photoRecommended),
+    escalationRecommended: asBoolean(data.escalationRecommended),
+    internalMissingInformation: asStringArray(data.internalMissingInformation),
   };
 }
 
-/** Stages where the engine must ask exactly one question and avoid diagnosis. */
+/** Stages where the engine may still be asking (not yet delivering full triage). */
 export function isInterviewStage(stage: CaseStage): boolean {
   return stage === "intake" || stage === "questioning";
+}
+
+/** Stages that deliver farmer-visible guidance. */
+export function isGuidanceStage(stage: CaseStage): boolean {
+  return (
+    stage === "assessment" ||
+    stage === "action_plan" ||
+    stage === "follow_up" ||
+    stage === "human_review" ||
+    stage === "resolved"
+  );
 }

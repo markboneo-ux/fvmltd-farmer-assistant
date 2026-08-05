@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CaseEngineResponse } from "@/components/CaseEngineResponse";
-import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
+import type { AgronomicCasePayload, CaseMode } from "@/lib/agronomy/case-schema";
 import { formatCaseAsPlainText } from "@/lib/agronomy/formatCaseSummary";
 
 type HealthStatus = "checking" | "ready" | "unavailable";
@@ -31,20 +31,27 @@ type CaseApiPayload = {
   model?: string;
   diagnosticCode?: string;
   requestCompleted?: boolean;
+  questionsAsked?: number;
   error?: string;
 };
 
-const SUGGESTED_TURNS = [
-  "My commercial tomato field is stunted in Trinidad.",
-  "It affects almost the entire field.",
-  "The lower leaves are yellow and new leaves are small.",
-  "The soil stays wet for two days after irrigation.",
-  "The plants are six weeks old.",
-  "I incorporated well-composted manure before planting.",
+const TEST_PROMPTS = [
+  "Tomato whiteflies",
+  "My pepper leaves have holes",
+  "Cucumber plants suddenly wilting",
+  "Tomatoes are stunted across the whole field",
 ];
 
 function messageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function secondsSince(startedMs: number) {
+  return (nowMs() - startedMs) / 1000;
 }
 
 function statusLabel(status: HealthStatus) {
@@ -62,6 +69,7 @@ export default function AiLabPage() {
   const [configuredModel, setConfiguredModel] = useState<string>("");
   const [healthError, setHealthError] = useState<string | null>(null);
 
+  const [mode, setMode] = useState<CaseMode>("quick_help");
   const [messages, setMessages] = useState<LabMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -77,6 +85,8 @@ export default function AiLabPage() {
     httpStatus: number;
     responseId: string | null;
     stage: string | null;
+    questionsAsked: number | null;
+    mode: CaseMode | null;
   } | null>(null);
 
   useEffect(() => {
@@ -123,9 +133,18 @@ export default function AiLabPage() {
     });
   }, [messages, loading, error]);
 
-  async function sendQuestion(question: string) {
+  async function sendQuestion(question: string, modeOverride?: CaseMode) {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
+
+    const nextMode =
+      /start full crop check/i.test(trimmed)
+        ? "full_crop_check"
+        : (modeOverride ?? mode);
+
+    if (nextMode !== mode) {
+      setMode(nextMode);
+    }
 
     setLoading(true);
     setError(null);
@@ -146,7 +165,7 @@ export default function AiLabPage() {
 
     setMessages((prev) => [...prev, userMessage]);
 
-    const started = performance.now();
+    const started = nowMs();
 
     try {
       const controller = new AbortController();
@@ -159,18 +178,23 @@ export default function AiLabPage() {
           message: trimmed,
           messages: historyForApi.slice(0, -1),
           previousResponseId,
+          mode: nextMode,
         }),
         signal: controller.signal,
       });
 
       window.clearTimeout(timeout);
 
-      const elapsed = (performance.now() - started) / 1000;
+      const elapsed = secondsSince(started);
       const payload = (await response.json()) as CaseApiPayload;
       const casePayload = payload.case ?? null;
       const diagnosticCode =
         payload.diagnosticCode || "OPENAI_REQUEST_FAILED";
       const model = payload.model || configuredModel || "unknown";
+
+      if (casePayload?.mode) {
+        setMode(casePayload.mode);
+      }
 
       setLastMeta({
         model,
@@ -180,6 +204,11 @@ export default function AiLabPage() {
         httpStatus: response.status,
         responseId: payload.responseId ?? null,
         stage: casePayload?.stage ?? null,
+        questionsAsked:
+          typeof payload.questionsAsked === "number"
+            ? payload.questionsAsked
+            : null,
+        mode: casePayload?.mode ?? nextMode,
       });
 
       if (!response.ok || !casePayload) {
@@ -203,7 +232,7 @@ export default function AiLabPage() {
         {
           id: messageId(),
           role: "assistant",
-          text: casePayload.nextQuestion || casePayload.caseSummary,
+          text: casePayload.nextQuestion || casePayload.preliminaryAssessment,
           casePayload,
           model,
           responseSeconds: Number(elapsed.toFixed(2)),
@@ -219,14 +248,14 @@ export default function AiLabPage() {
       );
       setLastMeta({
         model: configuredModel || "unknown",
-        responseSeconds: Number(
-          ((performance.now() - started) / 1000).toFixed(2),
-        ),
+        responseSeconds: Number(secondsSince(started).toFixed(2)),
         diagnosticCode: "OPENAI_REQUEST_FAILED",
         requestCompleted: false,
         httpStatus: 0,
         responseId: null,
         stage: null,
+        questionsAsked: null,
+        mode: nextMode,
       });
     } finally {
       setLoading(false);
@@ -251,13 +280,13 @@ export default function AiLabPage() {
     setError(null);
     setLastMeta(null);
     setPreviousResponseId(null);
+    setMode("quick_help");
     inputRef.current?.focus();
   }
 
-  const nextSuggested =
-    messages.filter((m) => m.role === "user").length < SUGGESTED_TURNS.length
-      ? SUGGESTED_TURNS[messages.filter((m) => m.role === "user").length]
-      : null;
+  const latestAssistant = [...messages]
+    .reverse()
+    .find((item) => item.role === "assistant" && item.casePayload);
 
   const statusTone =
     healthStatus === "ready"
@@ -295,11 +324,36 @@ export default function AiLabPage() {
           </div>
         </div>
         <p className="mt-2 max-w-2xl text-sm text-muted">
-          Agronomic Case Engine V1 — structured tomato diagnostic interview.
-          Uses OpenAI Responses API via{" "}
-          <code className="text-canopy">/api/ai/case</code>. No registration or
-          Supabase required.
+          Rapid triage for Caribbean farmers — Quick Help by default (max three
+          questions), Full Crop Check optional. Endpoint{" "}
+          <code className="text-canopy">/api/ai/case</code>. No registration
+          required.
         </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setMode("quick_help")}
+            className={`min-h-10 rounded-lg px-3 py-2 text-sm font-semibold ring-1 transition ${
+              mode === "quick_help"
+                ? "bg-leaf text-white ring-leaf"
+                : "bg-surface text-canopy ring-line hover:bg-sky"
+            }`}
+          >
+            Quick Help
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("full_crop_check")}
+            className={`min-h-10 rounded-lg px-3 py-2 text-sm font-semibold ring-1 transition ${
+              mode === "full_crop_check"
+                ? "bg-leaf text-white ring-leaf"
+                : "bg-surface text-canopy ring-line hover:bg-sky"
+            }`}
+          >
+            Full Crop Check
+          </button>
+        </div>
       </header>
 
       <div
@@ -312,18 +366,20 @@ export default function AiLabPage() {
         {messages.length === 0 && !loading ? (
           <div className="rounded-2xl bg-surface/80 px-4 py-5 text-sm text-muted ring-1 ring-line">
             <p className="font-medium text-ink">
-              Ready for a commercial tomato case.
+              Describe the problem in a short line.
             </p>
             <p className="mt-1">
-              Run the Trinidad stunting transcript below, one farmer turn at a
-              time. The engine asks one question per reply and returns
-              structured sections — not raw Markdown.
+              Quick Help asks at most three high-value questions, then gives
+              preliminary guidance. No long missing-information questionnaire.
             </p>
           </div>
         ) : null}
 
         {messages.map((message) => {
           const isUser = message.role === "user";
+          const isLatestAssistant =
+            !isUser && latestAssistant?.id === message.id;
+
           return (
             <div
               key={message.id}
@@ -344,6 +400,12 @@ export default function AiLabPage() {
                     model={message.model}
                     responseSeconds={message.responseSeconds}
                     diagnosticCode={message.diagnosticCode}
+                    quickRepliesDisabled={loading || !isLatestAssistant}
+                    onQuickReply={
+                      isLatestAssistant
+                        ? (reply) => void sendQuestion(reply)
+                        : undefined
+                    }
                   />
                 )}
               </div>
@@ -359,7 +421,7 @@ export default function AiLabPage() {
                   className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-leaf"
                   aria-hidden
                 />
-                Case engine thinking…
+                Quick triage…
               </span>
             </div>
           </div>
@@ -368,21 +430,24 @@ export default function AiLabPage() {
 
       <div className="animate-rise-late shrink-0 border-t border-line/70 bg-surface/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto w-full max-w-3xl space-y-3">
-          {nextSuggested && !loading ? (
+          {messages.length === 0 && !loading ? (
             <div className="space-y-2">
               <p className="text-xs font-semibold tracking-wide text-muted uppercase">
-                {messages.length === 0
-                  ? "Acceptance transcript — next farmer turn"
-                  : "Next transcript turn"}
+                Test prompts
               </p>
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => void sendQuestion(nextSuggested)}
-                className="min-h-11 w-full rounded-xl bg-sky/70 px-3 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
-              >
-                {nextSuggested}
-              </button>
+              <div className="flex flex-col gap-2">
+                {TEST_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void sendQuestion(prompt, "quick_help")}
+                    className="min-h-11 rounded-xl bg-sky/70 px-3 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -395,13 +460,9 @@ export default function AiLabPage() {
           {lastMeta ? (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
               <span>
-                Model:{" "}
-                <span className="font-semibold text-ink">{lastMeta.model}</span>
-              </span>
-              <span>
-                Response time:{" "}
+                Mode:{" "}
                 <span className="font-semibold text-ink">
-                  {lastMeta.responseSeconds.toFixed(2)}s
+                  {lastMeta.mode ?? mode}
                 </span>
               </span>
               {lastMeta.stage ? (
@@ -410,18 +471,23 @@ export default function AiLabPage() {
                   <span className="font-semibold text-ink">{lastMeta.stage}</span>
                 </span>
               ) : null}
-              <span>
-                Code:{" "}
-                <span className="font-semibold text-ink">
-                  {lastMeta.diagnosticCode}
+              {typeof lastMeta.questionsAsked === "number" ? (
+                <span>
+                  Questions:{" "}
+                  <span className="font-semibold text-ink">
+                    {lastMeta.questionsAsked}
+                  </span>
                 </span>
+              ) : null}
+              <span>
+                {lastMeta.responseSeconds.toFixed(2)}s · {lastMeta.diagnosticCode}
               </span>
             </div>
           ) : null}
 
           <form className="flex items-end gap-2" onSubmit={handleSubmit}>
             <label className="sr-only" htmlFor="ai-lab-input">
-              Farmer reply for the case engine
+              Describe the crop problem
             </label>
             <textarea
               id="ai-lab-input"
@@ -431,7 +497,11 @@ export default function AiLabPage() {
               onKeyDown={handleKeyDown}
               rows={3}
               disabled={loading}
-              placeholder="Reply as the farmer…"
+              placeholder={
+                mode === "quick_help"
+                  ? "e.g. Tomato whiteflies"
+                  : "Continue the full crop check…"
+              }
               className="min-h-24 flex-1 resize-none rounded-xl border border-line bg-field px-3 py-3 text-base leading-snug text-ink outline-none ring-canopy/30 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
             />
             <button
@@ -474,22 +544,12 @@ export default function AiLabPage() {
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt>Configured model</dt>
-                <dd className="font-medium text-ink">
-                  {configuredModel || "—"}
-                </dd>
+                <dt>Active mode</dt>
+                <dd className="font-medium text-ink">{mode}</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt>Case endpoint</dt>
                 <dd className="font-medium text-ink">/api/ai/case</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt>Legacy chat endpoint</dt>
-                <dd className="font-medium text-ink">/api/ai/chat</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt>Health endpoint</dt>
-                <dd className="font-medium text-ink">/api/ai/health</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt>previous_response_id</dt>
@@ -497,34 +557,6 @@ export default function AiLabPage() {
                   {previousResponseId || "—"}
                 </dd>
               </div>
-              {lastMeta ? (
-                <>
-                  <div className="flex justify-between gap-3">
-                    <dt>Last HTTP status</dt>
-                    <dd className="font-medium text-ink">
-                      {lastMeta.httpStatus}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Last diagnosticCode</dt>
-                    <dd className="font-medium text-ink">
-                      {lastMeta.diagnosticCode}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>requestCompleted</dt>
-                    <dd className="font-medium text-ink">
-                      {String(lastMeta.requestCompleted)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Last response time</dt>
-                    <dd className="font-medium text-ink">
-                      {lastMeta.responseSeconds.toFixed(2)}s
-                    </dd>
-                  </div>
-                </>
-              ) : null}
               {healthError ? (
                 <div className="flex justify-between gap-3">
                   <dt>Health note</dt>
@@ -532,9 +564,8 @@ export default function AiLabPage() {
                 </div>
               ) : null}
               <p className="pt-1 text-[0.7rem] leading-relaxed">
-                Secrets are never shown here. Auth, cookies, Farmer ID, and
-                Supabase are not used by this page. Guest chat at{" "}
-                <code>/api/ai/chat</code> remains unchanged.
+                internalMissingInformation is never shown in the farmer UI. No
+                database or environment changes are required for this page.
               </p>
             </dl>
           </details>
