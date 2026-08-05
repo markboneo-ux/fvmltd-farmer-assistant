@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgronomicCasePayload } from "./case-schema";
+import { emptyRegionalContext } from "./case-schema";
 import {
   applyCommercialSafetyGuards,
   extractKnownFacts,
@@ -15,6 +16,8 @@ function basePayload(
   return {
     mode: "quick_help",
     stage: "questioning",
+    questionId: "q_1_field_distribution",
+    questionType: "field_distribution",
     preliminaryAssessment: "Tomato whiteflies reported.",
     severity: "unknown",
     nextQuestion: WHITEFLY_QUICK_SEQUENCE[0],
@@ -24,6 +27,9 @@ function basePayload(
     actionsToAvoid: [],
     photoRecommended: false,
     escalationRecommended: false,
+    regionalContext: emptyRegionalContext(),
+    weatherRisks: [],
+    verifiedInputOptions: [],
     internalMissingInformation: ["variety", "district"],
     ...overrides,
   };
@@ -34,6 +40,18 @@ describe("tomato-protocol rapid triage", () => {
     const facts = extractKnownFacts("Tomato whiteflies");
     expect(facts.crop).toBe("tomato");
     expect(facts.suspectedIssue).toBe("whiteflies");
+  });
+
+  it("uses profile country so country is not re-asked", () => {
+    const facts = extractKnownFacts("Tomato whiteflies", {
+      country: "Trinidad and Tobago",
+      district: "Chaguanas",
+    });
+    expect(facts.country).toBe("Trinidad and Tobago");
+    expect(facts.district).toBe("Chaguanas");
+    expect(
+      questionAsksForKnownFact("Which country is the farm in?", facts),
+    ).toBe(true);
   });
 
   it("does not treat known facts as askable again", () => {
@@ -74,6 +92,31 @@ describe("tomato-protocol rapid triage", () => {
     ).toBe(true);
   });
 
+  it("assigns soil_type quick replies for soil questions", () => {
+    const guarded = applyCommercialSafetyGuards(
+      basePayload({
+        nextQuestion: "What soil type are the tomatoes growing in?",
+        quickReplies: ["Few plants", "Patches"],
+      }),
+      {
+        mode: "full_crop_check",
+        questionsAskedBeforeThisTurn: 1,
+        knownFacts: extractKnownFacts("Tomato whiteflies"),
+      },
+    );
+
+    expect(guarded.questionType).toBe("soil_type");
+    expect(guarded.quickReplies).toEqual([
+      "Clay",
+      "Loam",
+      "Sandy",
+      "Raised-bed mix",
+      "Soilless medium",
+      "Not sure",
+    ]);
+    expect(guarded.questionId).toMatch(/soil_type/);
+  });
+
   it("strips sand advice and premature fertilizer", () => {
     const guarded = applyCommercialSafetyGuards(
       basePayload({
@@ -103,22 +146,21 @@ describe("tomato-protocol rapid triage", () => {
     ).toBe(false);
   });
 
-  it("escalates sudden wilt", () => {
+  it("blocks chemical recommendation from vague interview symptoms", () => {
     const guarded = applyCommercialSafetyGuards(
       basePayload({
-        stage: "assessment",
-        preliminaryAssessment: "Sudden wilt reported.",
-        severity: "high",
-        nextQuestion: "",
+        stage: "questioning",
+        safeActionsNow: ["Spray imidacloprid insecticide today"],
       }),
       {
         mode: "quick_help",
-        questionsAskedBeforeThisTurn: 2,
-        knownFacts: extractKnownFacts("Cucumber plants suddenly wilting"),
+        questionsAskedBeforeThisTurn: 0,
+        knownFacts: extractKnownFacts("Tomato leaves look odd"),
       },
     );
 
-    expect(guarded.escalationRecommended).toBe(true);
-    expect(guarded.stage).toBe("human_review");
+    expect(
+      guarded.safeActionsNow.join(" ").toLowerCase(),
+    ).not.toMatch(/imidacloprid|insecticide/);
   });
 });

@@ -3,15 +3,22 @@
  */
 
 import {
+  emptyRegionalContext,
   isGuidanceStage,
   isInterviewStage,
   QUICK_HELP_MAX_QUESTIONS,
-  STANDARD_QUICK_REPLIES,
+  stripMarkdownMarkers,
   type AgronomicCasePayload,
   type CaseMode,
   type CaseStage,
   type SeverityLevel,
 } from "./case-schema";
+import {
+  buildQuestionId,
+  inferQuestionType,
+  quickRepliesForType,
+  type QuestionType,
+} from "./question-types";
 
 /** Full history facts — used only in full_crop_check or as internal notes. */
 export const CRITICAL_CASE_FACTS = [
@@ -67,9 +74,12 @@ export type KnownFarmerFacts = {
   crop: string | null;
   suspectedIssue: string | null;
   country: string | null;
+  district: string | null;
   distributionHint: string | null;
+  productionSystem: string | null;
   suddenWilt: boolean;
   stuntedWholeField: boolean;
+  asksForProducts: boolean;
   rawText: string;
 };
 
@@ -91,7 +101,10 @@ const CROP_QUESTION =
 /**
  * Extract facts already stated by the farmer so we never re-ask them.
  */
-export function extractKnownFacts(text: string): KnownFarmerFacts {
+export function extractKnownFacts(
+  text: string,
+  profile?: { country?: string | null; district?: string | null } | null,
+): KnownFarmerFacts {
   const rawText = text.trim();
   const lower = rawText.toLowerCase();
 
@@ -105,13 +118,26 @@ export function extractKnownFacts(text: string): KnownFarmerFacts {
   else if (/\bholes?\b/.test(lower)) suspectedIssue = "leaf holes";
   else if (/\bwilt(ing|ed)?\b/.test(lower)) suspectedIssue = "wilt";
   else if (/\bstunt(ed|ing)?\b/.test(lower)) suspectedIssue = "stunting";
+  else if (/\b(blight|leaf\s+spot|fungal)\b/.test(lower)) {
+    suspectedIssue = "foliar fungal disease";
+  }
 
-  let country: string | null = null;
-  if (/\btrinidad\b/.test(lower)) country = "Trinidad";
-  else if (/\btobago\b/.test(lower)) country = "Tobago";
-  else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
-  else if (/\bbarbados\b/.test(lower)) country = "Barbados";
-  else if (/\bguyana\b/.test(lower)) country = "Guyana";
+  let country: string | null = profile?.country?.trim() || null;
+  if (!country) {
+    if (/\btrinidad\b/.test(lower) || /\btobago\b/.test(lower)) {
+      country = "Trinidad and Tobago";
+    } else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
+    else if (/\bbarbados\b/.test(lower)) country = "Barbados";
+    else if (/\bguyana\b/.test(lower)) country = "Guyana";
+  }
+
+  let district: string | null = profile?.district?.trim() || null;
+  if (!district) {
+    const districtMatch = lower.match(
+      /\b(chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin)\b/,
+    );
+    if (districtMatch) district = districtMatch[1];
+  }
 
   let distributionHint: string | null = null;
   if (/\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower)) {
@@ -122,15 +148,29 @@ export function extractKnownFacts(text: string): KnownFarmerFacts {
     distributionHint = "few plants";
   }
 
+  let productionSystem: string | null = null;
+  if (/\bgreenhouse\b/.test(lower)) productionSystem = "greenhouse";
+  else if (/\bshade\s*house\b/.test(lower)) productionSystem = "shade_house";
+  else if (/\bhydroponic\b/.test(lower)) productionSystem = "hydroponic";
+  else if (/\bopen\s+field\b/.test(lower)) productionSystem = "open_field";
+
   return {
     crop,
     suspectedIssue,
     country,
+    district,
     distributionHint,
-    suddenWilt: /\bsudden(ly)?\s+wilt/.test(lower) || /\bwilt(ing|ed)?\s+suddenly\b/.test(lower),
+    productionSystem,
+    suddenWilt:
+      /\bsudden(ly)?\s+wilt/.test(lower) ||
+      /\bwilt(ing|ed)?\s+suddenly\b/.test(lower),
     stuntedWholeField:
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
+    asksForProducts:
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use)|recommend(ed)?\s+(a\s+)?(product|chemical))\b/.test(
+        lower,
+      ) || /\bask about products\b/.test(lower),
     rawText,
   };
 }
@@ -183,25 +223,6 @@ export function countPriorAssistantQuestions(
   }).length;
 }
 
-function defaultQuickReplies(stage: CaseStage, photoRecommended: boolean): string[] {
-  if (isGuidanceStage(stage)) {
-    const replies = ["Upload a photo", "Start full crop check"];
-    if (!photoRecommended) {
-      return ["Start full crop check", "Not sure"];
-    }
-    return replies;
-  }
-
-  return [
-    "Few plants",
-    "Patches",
-    "Most of field",
-    "Not sure",
-    "Upload a photo",
-    "Start full crop check",
-  ];
-}
-
 /**
  * Server-side rapid-triage + commercial safety net.
  */
@@ -215,12 +236,14 @@ export function applyCommercialSafetyGuards(
 ): AgronomicCasePayload {
   const mode = options.mode;
   let stage: CaseStage = payload.stage;
-  let nextQuestion = payload.nextQuestion;
-  let preliminaryAssessment = payload.preliminaryAssessment;
+  let nextQuestion = stripMarkdownMarkers(payload.nextQuestion);
+  let preliminaryAssessment = stripMarkdownMarkers(
+    payload.preliminaryAssessment,
+  );
   let severity: SeverityLevel = payload.severity;
-  let checksToday = [...payload.checksToday];
-  let safeActionsNow = [...payload.safeActionsNow];
-  let actionsToAvoid = [...payload.actionsToAvoid];
+  let checksToday = payload.checksToday.map(stripMarkdownMarkers);
+  let safeActionsNow = payload.safeActionsNow.map(stripMarkdownMarkers);
+  let actionsToAvoid = payload.actionsToAvoid.map(stripMarkdownMarkers);
   let quickReplies = [...payload.quickReplies];
   let photoRecommended = payload.photoRecommended;
   let escalationRecommended = payload.escalationRecommended;
@@ -246,6 +269,23 @@ export function applyCommercialSafetyGuards(
     return true;
   });
 
+  // Never recommend chemical products from vague symptoms alone.
+  if (isInterviewStage(stage) && !options.knownFacts.asksForProducts) {
+    safeActionsNow = safeActionsNow.filter((action) => {
+      if (
+        /\b(apply|spray|use)\b.{0,40}\b(insecticide|fungicide|herbicide|pesticide|imidacloprid|mancozeb|chemical)\b/i.test(
+          action,
+        )
+      ) {
+        ensureAvoid(
+          "Do not apply a chemical solely from a vague symptom — confirm the issue first.",
+        );
+        return false;
+      }
+      return true;
+    });
+  }
+
   if (isInterviewStage(stage) || !hasWaterOrRootEvidence(payload)) {
     safeActionsNow = safeActionsNow.filter((action) => {
       if (PREMATURE_FERTILIZER.test(action)) {
@@ -258,7 +298,7 @@ export function applyCommercialSafetyGuards(
     });
   }
 
-  // Never re-ask facts already in the farmer's message.
+  // Never re-ask facts already in the farmer's message or profile.
   if (
     nextQuestion &&
     questionAsksForKnownFact(nextQuestion, options.knownFacts)
@@ -266,12 +306,11 @@ export function applyCommercialSafetyGuards(
     nextQuestion = "";
   }
 
-  // Do not lead with country/district in Quick Help.
+  // Do not automatically ask country when already known, or first in Quick Help.
   if (
-    mode === "quick_help" &&
     nextQuestion &&
     LOCATION_QUESTION.test(nextQuestion) &&
-    !options.knownFacts.country
+    (options.knownFacts.country || mode === "quick_help")
   ) {
     nextQuestion = "";
   }
@@ -314,24 +353,11 @@ export function applyCommercialSafetyGuards(
     if (!nextQuestion) {
       nextQuestion = pickFallbackQuestion(options.knownFacts, options.questionsAskedBeforeThisTurn);
     }
-    // Ensure we still ask at most one question and offer chips.
-    if (!quickReplies.length) {
-      quickReplies = defaultQuickReplies(stage, photoRecommended);
-    }
   }
 
   if (isGuidanceStage(stage)) {
     if (!preliminaryAssessment.toLowerCase().includes("preliminary")) {
       preliminaryAssessment = `Preliminary guidance: ${preliminaryAssessment}`;
-    }
-    if (!quickReplies.length) {
-      quickReplies = defaultQuickReplies(stage, photoRecommended);
-    }
-    // Always offer optional deeper path.
-    if (
-      !quickReplies.some((item) => /full crop check/i.test(item))
-    ) {
-      quickReplies = [...quickReplies, "Start full crop check"];
     }
   }
 
@@ -345,21 +371,75 @@ export function applyCommercialSafetyGuards(
     }
   }
 
-  // Normalize quick replies to known useful chips when model invents empty/odd values.
-  quickReplies = normalizeQuickReplies(quickReplies, stage, photoRecommended);
+  let questionType: QuestionType | "" = "";
+  let questionId = "";
+
+  if (nextQuestion) {
+    const inferred = inferQuestionType(nextQuestion);
+    questionType =
+      payload.questionType && payload.questionType !== "open"
+        ? (payload.questionType as QuestionType)
+        : inferred;
+
+    // Prefer deterministic type inference for common patterns.
+    if (inferred !== "open") {
+      questionType = inferred;
+    }
+
+    const questionNumber =
+      options.questionsAskedBeforeThisTurn +
+      (isInterviewStage(stage) ? 1 : 0);
+    // Always bind questionId to the resolved questionType so stale buttons cannot linger.
+    questionId = buildQuestionId(
+      questionType || "open",
+      Math.max(1, questionNumber),
+    );
+
+    const typedReplies = quickRepliesForType(questionType || "open");
+    if (typedReplies.length > 0) {
+      quickReplies = typedReplies;
+    } else {
+      // Unsupported / open question type — no unrelated buttons.
+      quickReplies = [];
+    }
+  } else if (isGuidanceStage(stage)) {
+    questionType = "guidance_followup";
+    questionId = buildQuestionId("guidance_followup", options.questionsAskedBeforeThisTurn);
+    quickReplies = quickRepliesForType("guidance_followup");
+    if (!photoRecommended) {
+      quickReplies = quickReplies.filter((item) => !/upload a photo/i.test(item));
+    }
+  } else {
+    questionType = "";
+    questionId = "";
+    quickReplies = [];
+  }
+
+  // Keep preliminaryAssessment short during interview — facts only, not a full summary dump.
+  if (isInterviewStage(stage) && preliminaryAssessment.length > 160) {
+    preliminaryAssessment = preliminaryAssessment.slice(0, 157) + "…";
+  }
 
   return {
     mode,
     stage,
-    preliminaryAssessment,
-    severity,
+    questionId,
+    questionType,
     nextQuestion,
     quickReplies,
+    preliminaryAssessment,
+    severity,
     checksToday,
     safeActionsNow,
     actionsToAvoid,
     photoRecommended,
     escalationRecommended,
+    regionalContext: payload.regionalContext ?? emptyRegionalContext({
+      country: options.knownFacts.country,
+      district: options.knownFacts.district,
+    }),
+    weatherRisks: payload.weatherRisks ?? [],
+    verifiedInputOptions: payload.verifiedInputOptions ?? [],
     internalMissingInformation,
   };
 }
@@ -558,28 +638,6 @@ function buildForcedQuickGuidance(
     photoRecommended: true,
     escalationRecommended: payload.escalationRecommended,
   };
-}
-
-function normalizeQuickReplies(
-  replies: string[],
-  stage: CaseStage,
-  photoRecommended: boolean,
-): string[] {
-  const cleaned = replies
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 6);
-
-  if (cleaned.length > 0) {
-    const hasStandard = cleaned.some((item) =>
-      (STANDARD_QUICK_REPLIES as readonly string[]).some(
-        (standard) => standard.toLowerCase() === item.toLowerCase(),
-      ),
-    );
-    if (hasStandard) return cleaned;
-  }
-
-  return defaultQuickReplies(stage, photoRecommended);
 }
 
 export function mentionsSandOrGravel(text: string): boolean {

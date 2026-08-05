@@ -5,14 +5,21 @@ import {
   type AiDiagnosticCode,
   type GuestChatMessage,
 } from "@/lib/ai/guestChat";
+import { getWeatherDiseaseRisk } from "@/lib/agronomy/get-weather-disease-risk";
 import { getOpenAIEnvDiagnostics, getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
+import { getVerifiedRegionalInputs } from "@/lib/regional-inputs/get-verified-regional-inputs";
+import { NO_VERIFIED_PRODUCT_MESSAGE } from "@/lib/regional-inputs/types";
 import {
   CASE_RESPONSE_JSON_SCHEMA,
+  emptyRegionalContext,
   isCaseMode,
+  isGuidanceStage,
   parseCasePayload,
   type AgronomicCasePayload,
   type CaseMode,
+  type VerifiedInputDisplay,
+  type WeatherRiskOption,
 } from "./case-schema";
 import { buildCaseSystemInstructions } from "./system-instructions";
 import {
@@ -22,6 +29,12 @@ import {
 } from "./tomato-protocol";
 
 export type CaseChatMessage = GuestChatMessage;
+
+export type CaseImageInput = {
+  mimeType: string;
+  base64: string;
+  fileName?: string;
+};
 
 export type CaseModelResponse = {
   id: string;
@@ -217,11 +230,19 @@ function mapOpenAIFailure(
   };
 }
 
+export type CaseProfileContext = {
+  country?: string | null;
+  district?: string | null;
+};
+
 export function parseCaseRequestBody(body: unknown): {
   message: string;
   history: CaseChatMessage[];
   previousResponseId: string | null;
   mode: CaseMode;
+  profile: CaseProfileContext;
+  images: CaseImageInput[];
+  activeQuestionId: string | null;
 } {
   const record =
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -253,7 +274,46 @@ export function parseCaseRequestBody(body: unknown): {
     history.push({ role, content });
   }
 
-  return { message, history, previousResponseId, mode };
+  const profileRaw =
+    record.profile && typeof record.profile === "object"
+      ? (record.profile as Record<string, unknown>)
+      : {};
+
+  const profile: CaseProfileContext = {
+    country:
+      asTrimmedString(profileRaw.country) ||
+      asTrimmedString(record.country) ||
+      null,
+    district:
+      asTrimmedString(profileRaw.district) ||
+      asTrimmedString(record.district) ||
+      null,
+  };
+
+  const images: CaseImageInput[] = [];
+  const imagesRaw = Array.isArray(record.images) ? record.images : [];
+  for (const item of imagesRaw.slice(0, 3)) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Record<string, unknown>;
+    const mimeType = asTrimmedString(entry.mimeType) || asTrimmedString(entry.type);
+    const base64 = asTrimmedString(entry.base64) || asTrimmedString(entry.data);
+    if (!mimeType.startsWith("image/") || !base64) continue;
+    images.push({
+      mimeType,
+      base64: base64.replace(/^data:[^;]+;base64,/, ""),
+      fileName: asTrimmedString(entry.fileName) || asTrimmedString(entry.name) || undefined,
+    });
+  }
+
+  return {
+    message,
+    history,
+    previousResponseId,
+    mode,
+    profile,
+    images,
+    activeQuestionId: asTrimmedString(record.activeQuestionId) || null,
+  };
 }
 
 function extractJsonObject(text: string): unknown {
@@ -277,12 +337,13 @@ function extractJsonObject(text: string): unknown {
 function summarizeKnownFacts(
   history: CaseChatMessage[],
   message: string,
+  profile?: CaseProfileContext | null,
 ): ReturnType<typeof extractKnownFacts> {
   const combined = [
     ...history.filter((item) => item.role === "user").map((item) => item.content),
     message,
   ].join("\n");
-  return extractKnownFacts(combined);
+  return extractKnownFacts(combined, profile);
 }
 
 function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string {
@@ -290,6 +351,10 @@ function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string 
   if (facts.crop) lines.push(`- crop: ${facts.crop}`);
   if (facts.suspectedIssue) lines.push(`- suspected issue: ${facts.suspectedIssue}`);
   if (facts.country) lines.push(`- country/island: ${facts.country}`);
+  if (facts.district) lines.push(`- district: ${facts.district}`);
+  if (facts.productionSystem) {
+    lines.push(`- production system: ${facts.productionSystem}`);
+  }
   if (facts.distributionHint) {
     lines.push(`- distribution hint: ${facts.distributionHint}`);
   }
@@ -298,29 +363,160 @@ function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string 
   return lines.join("\n");
 }
 
+function buildUserContent(
+  turnContext: string,
+  images: CaseImageInput[],
+): string | Array<Record<string, unknown>> {
+  if (images.length === 0) return turnContext;
+
+  const parts: Array<Record<string, unknown>> = [
+    { type: "input_text", text: turnContext },
+  ];
+
+  for (const image of images) {
+    parts.push({
+      type: "input_image",
+      image_url: `data:${image.mimeType};base64,${image.base64}`,
+    });
+  }
+
+  return parts;
+}
+
+async function enrichWithRegionalTools(
+  payload: AgronomicCasePayload,
+  facts: ReturnType<typeof extractKnownFacts>,
+): Promise<AgronomicCasePayload> {
+  const country = facts.country || "Trinidad and Tobago";
+  const crop = facts.crop || "tomato";
+  const issue = facts.suspectedIssue || "general crop problem";
+
+  const shouldFetchWeather =
+    isGuidanceStage(payload.stage) ||
+    payload.escalationRecommended ||
+    Boolean(facts.suspectedIssue);
+
+  const shouldFetchInputs =
+    isGuidanceStage(payload.stage) ||
+    facts.asksForProducts ||
+    /product|spray|fungicide|insecticide/i.test(payload.preliminaryAssessment);
+
+  let weatherRisks: WeatherRiskOption[] = [];
+  let weatherDataAsOf: string | null = null;
+  let productDataAsOf: string | null = null;
+  let verifiedInputOptions: VerifiedInputDisplay[] = [];
+
+  if (shouldFetchWeather) {
+    const weather = await getWeatherDiseaseRisk({
+      country,
+      district: facts.district,
+      crop,
+      productionSystem: facts.productionSystem,
+      recentSymptoms: facts.suspectedIssue,
+    });
+    weatherDataAsOf = weather.weatherDataAsOf;
+    weatherRisks = weather.alerts.map((alert) => ({
+      diseaseOrPest: alert.diseaseOrPest,
+      riskLevel: alert.riskLevel,
+      riskWindow: alert.riskWindow,
+      weatherDrivers: alert.weatherDrivers,
+      cropStage: alert.cropStage,
+      recommendedChecks: alert.recommendedChecks,
+      preventiveActions: alert.preventiveActions,
+      confidence: alert.confidence,
+      dataSource: alert.dataSource,
+      generatedAt: alert.generatedAt,
+      disclaimer: alert.disclaimer,
+    }));
+  }
+
+  if (shouldFetchInputs) {
+    const inputs = getVerifiedRegionalInputs({
+      country,
+      crop,
+      issue,
+    });
+    productDataAsOf = inputs.productDataAsOf;
+    verifiedInputOptions = inputs.options.map((option) => ({
+      productType: option.productType,
+      activeIngredientOrNutrient: option.activeIngredientOrNutrient,
+      verifiedBrands: option.verifiedBrands.map((brand) => ({
+        brandName: brand.brandName,
+        registrationStatus: brand.registrationStatus,
+        availabilityStatus: brand.availabilityStatus,
+        officialSource: brand.officialSource,
+        lastVerifiedAt: brand.lastVerifiedAt,
+        labelRestrictions: brand.labelRestrictions,
+        whyConsidered: brand.whyConsidered,
+        agronomistConfirmationRequired: brand.agronomistConfirmationRequired,
+      })),
+      registrationStatus: option.registrationStatus,
+      availabilityStatus: option.availabilityStatus,
+      labelRestrictions: option.labelRestrictions,
+      officialSource: option.officialSource,
+      lastVerifiedAt: option.lastVerifiedAt,
+      agronomistConfirmationRequired: option.agronomistConfirmationRequired,
+    }));
+
+    if (
+      facts.asksForProducts &&
+      verifiedInputOptions.length === 0 &&
+      isGuidanceStage(payload.stage)
+    ) {
+      payload = {
+        ...payload,
+        preliminaryAssessment: `${payload.preliminaryAssessment} ${NO_VERIFIED_PRODUCT_MESSAGE}`,
+      };
+    }
+  }
+
+  // Attach weather checks into checksToday without claiming diagnosis.
+  if (weatherRisks.length > 0) {
+    const top = weatherRisks[0];
+    for (const check of top.recommendedChecks.slice(0, 2)) {
+      if (!payload.checksToday.includes(check)) {
+        payload.checksToday = [...payload.checksToday, check];
+      }
+    }
+  }
+
+  return {
+    ...payload,
+    regionalContext: emptyRegionalContext({
+      country,
+      district: facts.district,
+      productDataAsOf,
+      weatherDataAsOf,
+    }),
+    weatherRisks,
+    verifiedInputOptions,
+  };
+}
+
 /**
  * Runs one Agronomic Case Engine turn via the OpenAI Responses API.
- *
- * Conversation memory:
- * - Prefer previous_response_id when the client supplies it (store: true).
- * - Otherwise send the complete relevant conversation history.
  */
 export async function runAgronomicCase(options: {
   message: string;
   history?: CaseChatMessage[];
   previousResponseId?: string | null;
   mode?: CaseMode;
+  profile?: CaseProfileContext | null;
+  images?: CaseImageInput[];
   apiKey?: string | undefined;
   /** Injected for automated tests — bypasses the network. */
   createResponse?: (
     params: Record<string, unknown>,
   ) => Promise<CaseModelResponse>;
+  /** Skip live tool calls in unit tests when tools are asserted separately. */
+  skipRegionalTools?: boolean;
 }): Promise<AgronomicCaseResult> {
   const model = getOpenAIModel();
   const message = options.message.trim();
   const mode: CaseMode = options.mode ?? "quick_help";
+  const images = (options.images ?? []).slice(0, 3);
 
-  if (!message) {
+  if (!message && images.length === 0) {
     return {
       ok: false,
       error: "Please describe the crop problem first.",
@@ -331,14 +527,22 @@ export async function runAgronomicCase(options: {
     };
   }
 
+  const effectiveMessage =
+    message ||
+    "Please assess the uploaded crop photo(s). State only what you can observe.";
+
   // Mode switch via quick reply.
   const effectiveMode: CaseMode =
-    /start full crop check/i.test(message) ? "full_crop_check" : mode;
+    /start full crop check/i.test(effectiveMessage) ? "full_crop_check" : mode;
 
   const history = (options.history ?? []).slice(-24);
   const previousResponseId = options.previousResponseId?.trim() || null;
   const questionsAskedBeforeThisTurn = countPriorAssistantQuestions(history);
-  const knownFacts = summarizeKnownFacts(history, message);
+  const knownFacts = summarizeKnownFacts(
+    history,
+    effectiveMessage,
+    options.profile,
+  );
 
   const createResponse: (
     params: Record<string, unknown>,
@@ -378,6 +582,7 @@ export async function runAgronomicCase(options: {
     mode: effectiveMode,
     questionsAskedBeforeThisTurn,
     knownFactsSummary: knownFactsSummary(knownFacts),
+    hasImages: images.length > 0,
   });
 
   const textFormat = {
@@ -395,28 +600,34 @@ export async function runAgronomicCase(options: {
     effectiveMode === "quick_help"
       ? "If three questions were already asked, return preliminary guidance now."
       : "Full crop check may continue collecting history one question at a time.",
-    `Farmer message: ${message}`,
+    images.length > 0
+      ? `Farmer attached ${images.length} photo(s). Describe only observable features. If blurry, distant, missing leaf underside, or missing root/stem base, say so and request a better photo.`
+      : "No photo attached on this turn.",
+    `Farmer message: ${effectiveMessage}`,
+    "Never invent weather conditions or product availability — the server attaches verified tool results.",
   ].join("\n");
+
+  const userContent = buildUserContent(turnContext, images);
 
   const baseParams: Record<string, unknown> = {
     model,
     instructions,
     temperature: 0.3,
-    max_output_tokens: 900,
+    max_output_tokens: 1100,
     store: true,
     text: textFormat,
   };
 
-  if (previousResponseId) {
+  if (previousResponseId && images.length === 0) {
     baseParams.previous_response_id = previousResponseId;
-    baseParams.input = [{ role: "user", content: turnContext }];
+    baseParams.input = [{ role: "user", content: userContent }];
   } else {
     baseParams.input = [
       ...history.map((item) => ({
         role: item.role,
         content: item.content,
       })),
-      { role: "user" as const, content: turnContext },
+      { role: "user" as const, content: userContent },
     ];
   }
 
@@ -439,7 +650,7 @@ export async function runAgronomicCase(options: {
               role: item.role,
               content: item.content,
             })),
-            { role: "user" as const, content: turnContext },
+            { role: "user" as const, content: userContent },
           ],
         };
         delete retryParams.previous_response_id;
@@ -472,6 +683,18 @@ export async function runAgronomicCase(options: {
           knownFacts,
         },
       );
+
+      if (!options.skipRegionalTools) {
+        parsed = await enrichWithRegionalTools(parsed, knownFacts);
+      } else {
+        parsed = {
+          ...parsed,
+          regionalContext: emptyRegionalContext({
+            country: knownFacts.country,
+            district: knownFacts.district,
+          }),
+        };
+      }
     } catch (parseError) {
       logReason("OPENAI_REQUEST_FAILED", {
         model,
