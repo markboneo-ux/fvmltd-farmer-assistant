@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 import { NextResponse } from "next/server";
 import { parseGuestChatBody, runGuestChat } from "@/lib/ai/guestChat";
-import { getOpenAIEnvDiagnostics } from "@/lib/openai/env";
+import { getOpenAIModel } from "@/lib/openai/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,19 +9,25 @@ export const maxDuration = 60;
 
 /**
  * Guest AI chat — no Supabase, no registration, no Farmer ID.
- * Uses the OpenAI Responses API with a server-only API key.
+ * Uses the official OpenAI JavaScript SDK Responses API with a server-only key.
  *
- * Pre-OpenAI 503 conditions (no outbound OpenAI call):
+ * Safe diagnostic codes:
+ * - AI_READY
  * - OPENAI_KEY_MISSING
- * - OPENAI_KEY_FORMAT_INVALID
- * - MODEL_CONFIGURATION_ERROR
+ * - OPENAI_AUTH_FAILED
+ * - OPENAI_QUOTA_OR_BILLING
+ * - MODEL_NOT_AVAILABLE
+ * - OPENAI_RATE_LIMIT
+ * - OPENAI_REQUEST_FAILED
+ * - INVALID_REQUEST
  */
 export async function POST(request: Request) {
   // Wait for the incoming request so env is read at request time, not build time.
   await connection();
 
-  // Exact required read — process.env.OPENAI_API_KEY
+  // Exact required read — process.env.OPENAI_API_KEY (never returned to clients)
   const apiKey = process.env.OPENAI_API_KEY;
+  const model = getOpenAIModel();
 
   let body: unknown;
 
@@ -30,8 +36,14 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       {
+        answer: null,
+        model,
+        diagnosticCode: "INVALID_REQUEST",
+        requestCompleted: false,
         error: "Invalid request body.",
-        code: "invalid_body",
+        // Backward-compatible aliases for existing guest chat UI.
+        reply: null,
+        code: "INVALID_REQUEST",
       },
       { status: 400 },
     );
@@ -41,29 +53,28 @@ export async function POST(request: Request) {
   const result = await runGuestChat({ message, history, apiKey });
 
   if (!result.ok) {
-    const diagnostics = getOpenAIEnvDiagnostics();
     return NextResponse.json(
       {
+        answer: null,
+        model: result.model,
+        diagnosticCode: result.diagnosticCode,
+        requestCompleted: result.requestCompleted,
         error: result.error,
-        code: result.code,
-        // Safe diagnostics only — never the key value.
-        diagnostics: {
-          keyPresent: diagnostics.keyPresent,
-          keyDefined: diagnostics.keyDefined,
-          model: diagnostics.model,
-          serviceRolePresent: diagnostics.serviceRolePresent,
-          publicSupabaseUrlPresent: diagnostics.publicSupabaseUrlPresent,
-          vercelEnv: diagnostics.vercelEnv,
-          nextRuntime: diagnostics.nextRuntime,
-        },
+        // Backward-compatible aliases for existing guest chat UI.
+        reply: null,
+        code: result.diagnosticCode,
       },
       { status: result.status },
     );
   }
 
   return NextResponse.json({
-    reply: result.reply,
+    answer: result.answer,
     model: result.model,
+    diagnosticCode: result.diagnosticCode,
+    requestCompleted: result.requestCompleted,
+    // Backward-compatible aliases for existing guest chat UI.
+    reply: result.answer,
     source: "openai",
   });
 }
