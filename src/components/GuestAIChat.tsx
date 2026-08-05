@@ -106,7 +106,7 @@ export function GuestAIChat({ showProfileLink = true }: GuestAIChatProps) {
       if (!response.ok || !payload.reply) {
         const fallback =
           payload.code === "missing_api_key"
-            ? "The AI assistant is not configured yet. Ask FVMLTD to add OPENAI_API_KEY on the server."
+            ? "The AI assistant is not available yet. Please try again later, or contact FVMLTD support."
             : payload.error ||
               "Could not get an answer right now. Please try again.";
         setError(fallback);
