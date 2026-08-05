@@ -2,7 +2,7 @@
 
 Mobile-first web application for an AI crop assistant aimed at tropical smallholder farmers.
 
-This version includes the visual app shell, **Supabase**, **farmer registration**, **farm / crop-cycle management**, a **guided Crop Check** (with photographs), a **server-side OpenAI preliminary assessment**, and a **secure FVMLTD Staff Review Dashboard**. Chat still uses placeholder data.
+This version includes an **AI-first guest chat** on the homepage (no registration required), plus the visual app shell, **Supabase**, **farmer registration**, **farm / crop-cycle management**, a **guided Crop Check** (with photographs), a **server-side OpenAI preliminary assessment**, and a **secure FVMLTD Staff Review Dashboard**.
 
 ## Stack
 
@@ -10,19 +10,19 @@ This version includes the visual app shell, **Supabase**, **farmer registration*
 - [TypeScript](https://www.typescriptlang.org/)
 - [Tailwind CSS](https://tailwindcss.com/)
 - [Supabase](https://supabase.com/) (Postgres + Storage + Auth-ready clients)
-- [OpenAI](https://openai.com/) (server-only preliminary assessments)
+- [OpenAI](https://openai.com/) (server-only guest chat + preliminary assessments)
 
 ## Pages
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Welcome page |
+| `/` | AI Farmer Assistant chat (guest — no signup) |
 | `/register` | Farmer registration (validated form → Supabase) |
 | `/dashboard` | Farmer dashboard with active crops |
 | `/farms/new` | Add a farm plot |
 | `/crop-cycles/new` | Create a crop cycle |
 | `/crop-check` | Guided crop check (Tomato, Pepper, Cucumber) |
-| `/chat` | AI crop assistant chat (demo messages) |
+| `/chat` | Same guest AI chat as homepage |
 | `/upload` | Upload / review crop photographs for a case |
 | `/results` | Preliminary AI assessment results (`?caseId=`) |
 | `/staff/login` | FVMLTD staff authentication (Supabase Auth) |
@@ -43,6 +43,7 @@ src/
     crop-cycles/        # Crop-cycle form types and validation
     crop-check/         # Guided crop-check steps and validation
     assessment/         # OpenAI preliminary assessment (server-only)
+    ai/                 # Guest AI chat (Responses API, no Supabase)
     staff/              # Staff auth, queue queries, assessment review maps
     openai/             # OpenAI client + env helpers (server-only)
     supabase/
@@ -134,6 +135,18 @@ Photos are compressed on-device when practical, stored in a **private** Supabase
 | `POST` | `/api/crop-cases/[id]/photos/skip` | Skip a required photograph slot |
 | `POST` | `/api/crop-cases/[id]/complete` | Finish check, then run preliminary OpenAI assessment |
 | `POST` / `GET` | `/api/crop-cases/[id]/assess` | Run / load preliminary assessment |
+
+## Guest AI chat (no registration)
+
+The homepage (`/`) and `/chat` open a ChatGPT-style Farmer Assistant immediately.
+
+- No Farmer ID, WhatsApp number, farm, crop cycle, or Supabase auth is required
+- `POST /api/ai/chat` calls the OpenAI **Responses API** with a server-only `OPENAI_API_KEY`
+- Optional profile link: “Create a farmer profile” → `/register`
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/ai/chat` | Guest farming Q&A (OpenAI Responses API) |
 
 ## Preliminary OpenAI assessment
 
@@ -269,10 +282,10 @@ In the Vercel project: **Settings → Environment Variables**, add:
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server | No | Supabase project URL. Safe to expose; required at build and runtime. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + server | No | Public anon key. Safe for Client Components. Protected by Row Level Security. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). Still used for farms/crop-check/staff admin paths; **not required for farmer registration** once `register_farmer` is applied. |
-| `OPENAI_API_KEY` | Server only | **Yes** | OpenAI API key. **Never** prefix with `NEXT_PUBLIC_`. Used only in `src/lib/openai` / assessment routes. |
+| `OPENAI_API_KEY` | Server only | **Yes** | OpenAI API key. **Never** prefix with `NEXT_PUBLIC_`. Used by guest chat (`/api/ai/chat`) and assessment routes. |
 | `OPENAI_MODEL` | Server only | No | Optional. Defaults to `gpt-4o`. |
 
-No **new** Vercel variable is required for this migration repair.
+No **new** Vercel variable name is required beyond `OPENAI_API_KEY` / optional `OPENAI_MODEL` already listed above — ensure they are set for Production and Preview.
 
 Recommended Vercel settings for each variable:
 

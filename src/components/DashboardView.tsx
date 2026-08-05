@@ -216,14 +216,19 @@ export function DashboardView() {
 
           {!farmer ? (
             <div className="rounded-2xl bg-surface/90 px-4 py-4 ring-1 ring-line">
-              <p className="text-sm font-semibold text-ink">Demo mode</p>
+              <p className="text-sm font-semibold text-ink">Ask the AI first</p>
               <p className="mt-1 text-sm text-muted">
-                Register and add a crop cycle to track live plantings here.
+                Open the Farmer Assistant now — registration is optional and
+                never required to chat.
               </p>
-              <div className="mt-3">
-                <Button href="/register" variant="secondary">
-                  Get started
-                </Button>
+              <div className="mt-3 space-y-2">
+                <Button href="/">Get started</Button>
+                <Link
+                  href="/register"
+                  className="inline-flex min-h-11 w-full items-center justify-center text-sm font-semibold text-canopy underline-offset-4 hover:underline"
+                >
+                  Create a farmer profile
+                </Link>
               </div>
             </div>
           ) : cropsLoading ? (
