@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CaseEngineResponse } from "@/components/CaseEngineResponse";
+import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
+import { formatCaseAsPlainText } from "@/lib/agronomy/formatCaseSummary";
 
 type HealthStatus = "checking" | "ready" | "unavailable";
 
@@ -10,6 +13,7 @@ type LabMessage = {
   id: string;
   role: ChatRole;
   text: string;
+  casePayload?: AgronomicCasePayload;
   model?: string;
   responseSeconds?: number;
   diagnosticCode?: string;
@@ -21,22 +25,22 @@ type HealthPayload = {
   model?: string;
 };
 
-type ChatPayload = {
-  answer?: string | null;
-  reply?: string | null;
+type CaseApiPayload = {
+  case?: AgronomicCasePayload | null;
+  responseId?: string | null;
   model?: string;
   diagnosticCode?: string;
   requestCompleted?: boolean;
   error?: string;
-  code?: string;
 };
 
-const SUGGESTED_QUESTIONS = [
-  "My tomato plants are stunted in Trinidad. What should I check first?",
-  "My pepper leaves have small holes. What are the likely causes?",
-  "Create a seven-day recovery plan for yellowing cucumber plants.",
-  "Ask me the questions you need before diagnosing my tomato problem.",
-  "Explain blossom-end rot to a farmer using very simple language.",
+const SUGGESTED_TURNS = [
+  "My commercial tomato field is stunted in Trinidad.",
+  "It affects almost the entire field.",
+  "The lower leaves are yellow and new leaves are small.",
+  "The soil stays wet for two days after irrigation.",
+  "The plants are six weeks old.",
+  "I incorporated well-composted manure before planting.",
 ];
 
 function messageId() {
@@ -62,12 +66,17 @@ export default function AiLabPage() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previousResponseId, setPreviousResponseId] = useState<string | null>(
+    null,
+  );
   const [lastMeta, setLastMeta] = useState<{
     model: string;
     responseSeconds: number;
     diagnosticCode: string;
     requestCompleted: boolean;
     httpStatus: number;
+    responseId: string | null;
+    stage: string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -130,7 +139,9 @@ export default function AiLabPage() {
 
     const historyForApi = [...messages, userMessage].map((item) => ({
       role: item.role,
-      content: item.text,
+      content: item.casePayload
+        ? formatCaseAsPlainText(item.casePayload)
+        : item.text,
     }));
 
     setMessages((prev) => [...prev, userMessage]);
@@ -141,12 +152,13 @@ export default function AiLabPage() {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 55_000);
 
-      const response = await fetch("/api/ai/chat", {
+      const response = await fetch("/api/ai/case", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: trimmed,
           messages: historyForApi.slice(0, -1),
+          previousResponseId,
         }),
         signal: controller.signal,
       });
@@ -154,10 +166,10 @@ export default function AiLabPage() {
       window.clearTimeout(timeout);
 
       const elapsed = (performance.now() - started) / 1000;
-      const payload = (await response.json()) as ChatPayload;
-      const answer = payload.answer || payload.reply || null;
+      const payload = (await response.json()) as CaseApiPayload;
+      const casePayload = payload.case ?? null;
       const diagnosticCode =
-        payload.diagnosticCode || payload.code || "OPENAI_REQUEST_FAILED";
+        payload.diagnosticCode || "OPENAI_REQUEST_FAILED";
       const model = payload.model || configuredModel || "unknown";
 
       setLastMeta({
@@ -166,10 +178,12 @@ export default function AiLabPage() {
         diagnosticCode,
         requestCompleted: Boolean(payload.requestCompleted),
         httpStatus: response.status,
+        responseId: payload.responseId ?? null,
+        stage: casePayload?.stage ?? null,
       });
 
-      if (!response.ok || !answer) {
-        setError(payload.error || "Could not get an answer right now.");
+      if (!response.ok || !casePayload) {
+        setError(payload.error || "Could not get a case response right now.");
         if (
           diagnosticCode === "OPENAI_KEY_MISSING" ||
           diagnosticCode === "OPENAI_AUTH_FAILED"
@@ -179,13 +193,18 @@ export default function AiLabPage() {
         return;
       }
 
+      if (payload.responseId) {
+        setPreviousResponseId(payload.responseId);
+      }
+
       setHealthStatus("ready");
       setMessages((prev) => [
         ...prev,
         {
           id: messageId(),
           role: "assistant",
-          text: answer,
+          text: casePayload.nextQuestion || casePayload.caseSummary,
+          casePayload,
           model,
           responseSeconds: Number(elapsed.toFixed(2)),
           diagnosticCode,
@@ -200,10 +219,14 @@ export default function AiLabPage() {
       );
       setLastMeta({
         model: configuredModel || "unknown",
-        responseSeconds: Number(((performance.now() - started) / 1000).toFixed(2)),
+        responseSeconds: Number(
+          ((performance.now() - started) / 1000).toFixed(2),
+        ),
         diagnosticCode: "OPENAI_REQUEST_FAILED",
         requestCompleted: false,
         httpStatus: 0,
+        responseId: null,
+        stage: null,
       });
     } finally {
       setLoading(false);
@@ -227,8 +250,14 @@ export default function AiLabPage() {
     setMessages([]);
     setError(null);
     setLastMeta(null);
+    setPreviousResponseId(null);
     inputRef.current?.focus();
   }
+
+  const nextSuggested =
+    messages.filter((m) => m.role === "user").length < SUGGESTED_TURNS.length
+      ? SUGGESTED_TURNS[messages.filter((m) => m.role === "user").length]
+      : null;
 
   const statusTone =
     healthStatus === "ready"
@@ -266,8 +295,10 @@ export default function AiLabPage() {
           </div>
         </div>
         <p className="mt-2 max-w-2xl text-sm text-muted">
-          Standalone OpenAI test bench — no registration, Farmer ID, or Supabase
-          required.
+          Agronomic Case Engine V1 — structured tomato diagnostic interview.
+          Uses OpenAI Responses API via{" "}
+          <code className="text-canopy">/api/ai/case</code>. No registration or
+          Supabase required.
         </p>
       </header>
 
@@ -280,11 +311,13 @@ export default function AiLabPage() {
       >
         {messages.length === 0 && !loading ? (
           <div className="rounded-2xl bg-surface/80 px-4 py-5 text-sm text-muted ring-1 ring-line">
-            <p className="font-medium text-ink">Ready for a crop question.</p>
+            <p className="font-medium text-ink">
+              Ready for a commercial tomato case.
+            </p>
             <p className="mt-1">
-              Pick a suggested test below or type your own. Responses use the
-              OpenAI Responses API via{" "}
-              <code className="text-canopy">/api/ai/chat</code>.
+              Run the Trinidad stunting transcript below, one farmer turn at a
+              time. The engine asks one question per reply and returns
+              structured sections — not raw Markdown.
             </p>
           </div>
         ) : null}
@@ -303,18 +336,16 @@ export default function AiLabPage() {
                     : "rounded-bl-md bg-surface text-ink ring-1 ring-line"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{message.text}</p>
-                {!isUser && message.model ? (
-                  <p className="mt-2 border-t border-line/60 pt-2 text-[0.7rem] text-muted">
-                    {message.model}
-                    {typeof message.responseSeconds === "number"
-                      ? ` · ${message.responseSeconds.toFixed(2)}s`
-                      : ""}
-                    {message.diagnosticCode
-                      ? ` · ${message.diagnosticCode}`
-                      : ""}
-                  </p>
-                ) : null}
+                {isUser || !message.casePayload ? (
+                  <p className="whitespace-pre-wrap">{message.text}</p>
+                ) : (
+                  <CaseEngineResponse
+                    payload={message.casePayload}
+                    model={message.model}
+                    responseSeconds={message.responseSeconds}
+                    diagnosticCode={message.diagnosticCode}
+                  />
+                )}
               </div>
             </div>
           );
@@ -328,7 +359,7 @@ export default function AiLabPage() {
                   className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-leaf"
                   aria-hidden
                 />
-                Waiting for OpenAI…
+                Case engine thinking…
               </span>
             </div>
           </div>
@@ -337,24 +368,21 @@ export default function AiLabPage() {
 
       <div className="animate-rise-late shrink-0 border-t border-line/70 bg-surface/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto w-full max-w-3xl space-y-3">
-          {messages.length === 0 && !loading ? (
+          {nextSuggested && !loading ? (
             <div className="space-y-2">
               <p className="text-xs font-semibold tracking-wide text-muted uppercase">
-                Suggested test questions
+                {messages.length === 0
+                  ? "Acceptance transcript — next farmer turn"
+                  : "Next transcript turn"}
               </p>
-              <div className="flex flex-col gap-2">
-                {SUGGESTED_QUESTIONS.map((question) => (
-                  <button
-                    key={question}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => void sendQuestion(question)}
-                    className="min-h-11 rounded-xl bg-sky/70 px-3 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
-                  >
-                    {question}
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => void sendQuestion(nextSuggested)}
+                className="min-h-11 w-full rounded-xl bg-sky/70 px-3 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
+              >
+                {nextSuggested}
+              </button>
             </div>
           ) : null}
 
@@ -376,6 +404,12 @@ export default function AiLabPage() {
                   {lastMeta.responseSeconds.toFixed(2)}s
                 </span>
               </span>
+              {lastMeta.stage ? (
+                <span>
+                  Stage:{" "}
+                  <span className="font-semibold text-ink">{lastMeta.stage}</span>
+                </span>
+              ) : null}
               <span>
                 Code:{" "}
                 <span className="font-semibold text-ink">
@@ -387,7 +421,7 @@ export default function AiLabPage() {
 
           <form className="flex items-end gap-2" onSubmit={handleSubmit}>
             <label className="sr-only" htmlFor="ai-lab-input">
-              Ask a farming question
+              Farmer reply for the case engine
             </label>
             <textarea
               id="ai-lab-input"
@@ -397,7 +431,7 @@ export default function AiLabPage() {
               onKeyDown={handleKeyDown}
               rows={3}
               disabled={loading}
-              placeholder="Ask the FVMLTD Farmer Assistant…"
+              placeholder="Reply as the farmer…"
               className="min-h-24 flex-1 resize-none rounded-xl border border-line bg-field px-3 py-3 text-base leading-snug text-ink outline-none ring-canopy/30 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
             />
             <button
@@ -425,7 +459,9 @@ export default function AiLabPage() {
             <dl className="mt-2 space-y-1.5 text-xs text-muted">
               <div className="flex justify-between gap-3">
                 <dt>Health status</dt>
-                <dd className="font-medium text-ink">{statusLabel(healthStatus)}</dd>
+                <dd className="font-medium text-ink">
+                  {statusLabel(healthStatus)}
+                </dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt>OPENAI_API_KEY configured</dt>
@@ -444,18 +480,30 @@ export default function AiLabPage() {
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt>Chat endpoint</dt>
+                <dt>Case endpoint</dt>
+                <dd className="font-medium text-ink">/api/ai/case</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Legacy chat endpoint</dt>
                 <dd className="font-medium text-ink">/api/ai/chat</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt>Health endpoint</dt>
                 <dd className="font-medium text-ink">/api/ai/health</dd>
               </div>
+              <div className="flex justify-between gap-3">
+                <dt>previous_response_id</dt>
+                <dd className="max-w-[60%] truncate font-medium text-ink">
+                  {previousResponseId || "—"}
+                </dd>
+              </div>
               {lastMeta ? (
                 <>
                   <div className="flex justify-between gap-3">
                     <dt>Last HTTP status</dt>
-                    <dd className="font-medium text-ink">{lastMeta.httpStatus}</dd>
+                    <dd className="font-medium text-ink">
+                      {lastMeta.httpStatus}
+                    </dd>
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt>Last diagnosticCode</dt>
@@ -485,7 +533,8 @@ export default function AiLabPage() {
               ) : null}
               <p className="pt-1 text-[0.7rem] leading-relaxed">
                 Secrets are never shown here. Auth, cookies, Farmer ID, and
-                Supabase are not used by this page.
+                Supabase are not used by this page. Guest chat at{" "}
+                <code>/api/ai/chat</code> remains unchanged.
               </p>
             </dl>
           </details>
