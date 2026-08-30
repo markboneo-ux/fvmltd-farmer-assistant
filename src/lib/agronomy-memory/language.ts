@@ -5,6 +5,10 @@ const JARGON_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bvector dynamics\b/gi, "how insects spread the problem"],
   [/\bsubstrate saturation\b/gi, "soil that stays too wet"],
   [/\bvascular pathogens?\b/gi, "diseases that move inside the stem"],
+  [
+    /\bassess root-zone saturation\b/gi,
+    "check whether the soil is staying wet for a long time after watering",
+  ],
   [/\broot-zone saturation\b/gi, "soil staying wet around the roots"],
   [/\binspect for symptoms consistent with\b/gi, "look for signs of"],
   [/\bassess root-zone\b/gi, "check the soil around the roots"],

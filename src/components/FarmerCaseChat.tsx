@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ChatAssistantMessage } from "@/components/ChatAssistantMessage";
 import {
@@ -64,6 +64,12 @@ function readSessionId(): string {
   return created;
 }
 
+function subscribeSession(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
+
 const FOLLOW_UP_CHIPS: Array<{ id: CropOutcome; label: string }> = [
   { id: "improved", label: "Improved" },
   { id: "unchanged", label: "About the same" },
@@ -118,7 +124,11 @@ export function FarmerCaseChat({
   const farmer = useRegisteredFarmer();
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  const [sessionId, setSessionId] = useState("guest-session");
+  const sessionId = useSyncExternalStore(
+    subscribeSession,
+    readSessionId,
+    () => "guest-session",
+  );
   const [caseId, setCaseId] = useState<string | null>(null);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [askWhatYouDid, setAskWhatYouDid] = useState(false);
@@ -140,9 +150,8 @@ export function FarmerCaseChat({
   const showStarters = farmerMessages.length === 0 && !loading;
 
   useEffect(() => {
-    const id = readSessionId();
-    setSessionId(id);
-    void fetch(`/api/ai/case/outcome?sessionId=${encodeURIComponent(id)}`)
+    if (!sessionId || sessionId === "guest-session") return;
+    void fetch(`/api/ai/case/outcome?sessionId=${encodeURIComponent(sessionId)}`)
       .then(async (response) => {
         const payload = (await response.json()) as {
           followUp?: { caseId: string } | null;
@@ -155,7 +164,7 @@ export function FarmerCaseChat({
       .catch(() => {
         // Follow-up is optional; chat still works.
       });
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({

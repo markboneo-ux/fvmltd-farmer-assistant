@@ -109,7 +109,7 @@ describe("TEST A — simple language", () => {
       ),
     ).toMatch(/look for signs/i);
     expect(simplifyFarmerLanguage("Assess root-zone saturation.")).toMatch(
-      /check the soil around the roots/i,
+      /check whether the soil is staying wet/i,
     );
   });
 });
