@@ -221,11 +221,9 @@ describe("TEST 1 — Conversation UX transcripts", () => {
     );
     expect(finalAssistant.case.checksToday.length).toBeGreaterThan(0);
     expect(finalAssistant.case.regionalContext.country).toMatch(/trinidad/i);
-    // Guidance may include weather and/or verified inputs from tools.
-    expect(
-      finalAssistant.case.weatherRisks.length +
-        finalAssistant.case.verifiedInputOptions.length,
-    ).toBeGreaterThan(0);
+    // Generic spray-history follow-up must not attach weather or product cards.
+    expect(finalAssistant.case.weatherRisks).toEqual([]);
+    expect(finalAssistant.case.verifiedInputOptions).toEqual([]);
 
     // Exact transcript for delivery summary.
     console.log("TEST 1 TRANSCRIPT\n" + transcript.join("\n"));
@@ -351,6 +349,35 @@ describe("TEST 4 — Regional input verification via case route tools", () => {
       expect(option.availabilityStatus).toBeTruthy();
       expect(option.lastVerifiedAt || option.officialSource).toBeTruthy();
     }
+  });
+});
+
+describe("TEST 4b — Tools stay off for generic chat", () => {
+  it("does not attach weather or products for Tomatoes stunted", async () => {
+    const result = await runAgronomicCase({
+      message: "Tomatoes stunted",
+      mode: "quick_help",
+      profile: { country: "Trinidad and Tobago" },
+      createResponse: async () => ({
+        id: "resp_stunted",
+        output_text: JSON.stringify(
+          mockCase({
+            stage: "assessment",
+            preliminaryAssessment:
+              "Stunting can come from root stress, waterlogging, nutrition, nematodes, disease or chemical injury.",
+            nextQuestion:
+              "Is it affecting the whole field, patches, or individual plants?",
+            checksToday: ["Compare patches with healthier plants"],
+            safeActionsNow: ["Check whether soil is waterlogged or bone dry"],
+          }),
+        ),
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.weatherRisks).toEqual([]);
+    expect(result.case.verifiedInputOptions).toEqual([]);
   });
 });
 

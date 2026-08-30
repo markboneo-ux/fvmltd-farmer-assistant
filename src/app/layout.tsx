@@ -1,24 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree, Fraunces } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const figtree = Figtree({
-  variable: "--font-figtree",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
 });
 
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
-
 export const metadata: Metadata = {
-  title: "FVMLTD Farmer Crop Assistant",
+  title: "Farmersvaluemart AI",
   description:
-    "Practical crop guidance built for Caribbean and tropical farmers by Farmers Value Mart Ltd.",
-  applicationName: "FVMLTD Farmer Crop Assistant",
+    "Your Caribbean farming assistant from Farmers Value Mart Ltd. Ask about your crop or send a photo.",
+  applicationName: "Farmersvaluemart AI",
 };
 
 export const viewport: Viewport = {
@@ -33,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${figtree.variable} ${fraunces.variable} h-full`}>
+    <html lang="en" className={`${inter.variable} h-full`}>
       <body className="min-h-full antialiased">{children}</body>
     </html>
   );

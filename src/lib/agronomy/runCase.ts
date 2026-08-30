@@ -23,6 +23,10 @@ import {
 } from "./case-schema";
 import { buildCaseSystemInstructions } from "./system-instructions";
 import {
+  shouldInvokeProductTool,
+  shouldInvokeWeatherTool,
+} from "./tool-policy";
+import {
   applyCommercialSafetyGuards,
   countPriorAssistantQuestions,
   extractKnownFacts,
@@ -355,6 +359,15 @@ function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string 
   if (facts.productionSystem) {
     lines.push(`- production system: ${facts.productionSystem}`);
   }
+  if (facts.farmerScale) {
+    lines.push(`- farmer scale: ${facts.farmerScale}`);
+  }
+  if (facts.areaPlanted) {
+    lines.push(`- area planted: ${facts.areaPlanted}`);
+  }
+  if (facts.plantAge) {
+    lines.push(`- plant age: ${facts.plantAge}`);
+  }
   if (facts.distributionHint) {
     lines.push(`- distribution hint: ${facts.distributionHint}`);
   }
@@ -391,15 +404,8 @@ async function enrichWithRegionalTools(
   const crop = facts.crop || "tomato";
   const issue = facts.suspectedIssue || "general crop problem";
 
-  const shouldFetchWeather =
-    isGuidanceStage(payload.stage) ||
-    payload.escalationRecommended ||
-    Boolean(facts.suspectedIssue);
-
-  const shouldFetchInputs =
-    isGuidanceStage(payload.stage) ||
-    facts.asksForProducts ||
-    /product|spray|fungicide|insecticide/i.test(payload.preliminaryAssessment);
+  const shouldFetchWeather = shouldInvokeWeatherTool(facts);
+  const shouldFetchInputs = shouldInvokeProductTool(facts);
 
   let weatherRisks: WeatherRiskOption[] = [];
   let weatherDataAsOf: string | null = null;
@@ -596,15 +602,15 @@ export async function runAgronomicCase(options: {
 
   const turnContext = [
     `Farmer mode: ${effectiveMode}.`,
-    `Assistant questions already asked: ${questionsAskedBeforeThisTurn}.`,
+    `Follow-up questions already asked: ${questionsAskedBeforeThisTurn}.`,
     effectiveMode === "quick_help"
-      ? "If three questions were already asked, return preliminary guidance now."
+      ? "Answer now if you safely can. Ask one follow-up only if it would change the advice. If three follow-ups were already asked, give useful guidance now."
       : "Full crop check may continue collecting history one question at a time.",
     images.length > 0
       ? `Farmer attached ${images.length} photo(s). Describe only observable features. If blurry, distant, missing leaf underside, or missing root/stem base, say so and request a better photo.`
       : "No photo attached on this turn.",
     `Farmer message: ${effectiveMessage}`,
-    "Never invent weather conditions or product availability — the server attaches verified tool results.",
+    "Never invent weather conditions or product availability. The server attaches verified weather or product results only when those tools are relevant to this turn.",
   ].join("\n");
 
   const userContent = buildUserContent(turnContext, images);
