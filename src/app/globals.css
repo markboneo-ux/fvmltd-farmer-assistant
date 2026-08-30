@@ -1,31 +1,35 @@
 @import "tailwindcss";
 
 :root {
-  /* FVMLTD official palette — green, white, charcoal */
+  /* Deep FVMLTD green + official logo accents (blue / lime) */
   --canopy: #1b4332;
-  --leaf: #2d6a4f;
-  --leaf-bright: #40916c;
-  --mint: #95d5b2;
+  --leaf: #1b4332;
+  --leaf-bright: #245c42;
+  --accent-blue: #00a0d8;
+  --accent-lime: #abcd02;
+  --mint: #dce8e1;
   --field: #ffffff;
-  --sky: #eef6f1;
+  --sky: #f7f6f3;
   --sun: #e9b44c;
   --soil: #2a2a2a;
-  --ink: #212121;
+  --ink: #171717;
   --charcoal: #2f2f2f;
-  --muted: #5a635e;
+  --muted: #5f5f5a;
   --surface: #ffffff;
-  --line: #d5e0d9;
+  --line: #eceae4;
   --danger: #b42318;
   --warn: #b54708;
-  --ok: #2d6a4f;
-  --background: #ffffff;
-  --foreground: #212121;
+  --ok: #1b4332;
+  --background: #f7f6f3;
+  --foreground: #171717;
 }
 
 @theme inline {
   --color-canopy: var(--canopy);
   --color-leaf: var(--leaf);
   --color-leaf-bright: var(--leaf-bright);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-lime: var(--accent-lime);
   --color-mint: var(--mint);
   --color-field: var(--field);
   --color-sky: var(--sky);
@@ -121,11 +125,10 @@ h3,
 }
 
 .field-pattern {
-  background-color: var(--surface);
+  background-color: var(--sky);
   background-image:
-    radial-gradient(circle at 12% 18%, rgba(27, 67, 50, 0.06), transparent 42%),
-    radial-gradient(circle at 88% 8%, rgba(45, 106, 79, 0.08), transparent 36%),
-    linear-gradient(180deg, #ffffff 0%, #f7faf8 55%, #ffffff 100%);
+    radial-gradient(circle at 12% 18%, rgba(27, 67, 50, 0.03), transparent 42%),
+    linear-gradient(180deg, #faf9f6 0%, #f7f6f3 100%);
 }
 
 .hero-field {

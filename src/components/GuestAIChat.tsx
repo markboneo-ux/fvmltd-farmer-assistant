@@ -1,10 +1,11 @@
 "use client";
 
 import { FarmerCaseChat } from "@/components/FarmerCaseChat";
+import { PRODUCT_NAME, PRODUCT_SUBTITLE } from "@/lib/brand";
 
 /**
- * Default farmer experience — conversational Farmersvaluemart AI.
- * No registration required to start chatting.
+ * Default farmer experience on /.
+ * No registration or login required.
  */
 export function GuestAIChat() {
   return (
@@ -13,8 +14,8 @@ export function GuestAIChat() {
       showDiagnostics={false}
       showTestPrompts={false}
       defaultCountry="Trinidad and Tobago"
-      title="Farmersvaluemart AI"
-      subtitle="Your Caribbean farming assistant"
+      title={PRODUCT_NAME}
+      subtitle={PRODUCT_SUBTITLE}
     />
   );
 }
