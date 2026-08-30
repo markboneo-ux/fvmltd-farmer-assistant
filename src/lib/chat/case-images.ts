@@ -98,6 +98,10 @@ export function farmerFacingSendError(
   const message = error instanceof Error ? error.message : String(error ?? "");
   const lower = message.toLowerCase();
 
+  if (/openai_api_key|openai is not configured|openai rejected/i.test(message)) {
+    return "I couldn’t get a reply right now. Please try again shortly.";
+  }
+
   if (
     lower.includes("too large") ||
     lower.includes("413") ||

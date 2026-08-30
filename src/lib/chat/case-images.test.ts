@@ -74,5 +74,12 @@ describe("case image validation", () => {
         largestBytes: 0,
       }),
     ).not.toMatch(/network problem/i);
+
+    expect(
+      farmerFacingSendError(
+        new Error("OpenAI is not configured on the server. Add OPENAI_API_KEY and try again."),
+        { hadImages: false, largestBytes: 0 },
+      ),
+    ).not.toMatch(/OPENAI_API_KEY/);
   });
 });

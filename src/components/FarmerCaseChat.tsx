@@ -254,12 +254,15 @@ export function FarmerCaseChat({
 
       if (!response.ok || !casePayload) {
         clearQuickReplies();
-        if (response.status === 413) {
-          setError(payload.error || FARMER_PHOTO_TOO_LARGE);
+        const rawError = payload.error || "";
+        if (/openai_api_key|openai is not configured/i.test(rawError)) {
+          setError("I couldn’t get a reply right now. Please try again shortly.");
+        } else if (response.status === 413) {
+          setError(rawError || FARMER_PHOTO_TOO_LARGE);
         } else if (imagesSnapshot.length > 0) {
-          setError(payload.error || FARMER_PHOTO_UPLOAD_FAILED);
+          setError(rawError || FARMER_PHOTO_UPLOAD_FAILED);
         } else {
-          setError(payload.error || "I couldn’t get a reply right now.");
+          setError(rawError || "I couldn’t get a reply right now.");
         }
         return;
       }
