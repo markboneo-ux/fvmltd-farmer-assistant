@@ -241,6 +241,8 @@ export async function POST(request: Request) {
       diagnosticCode: result.diagnosticCode,
       requestCompleted: result.requestCompleted,
       questionsAsked: result.questionsAsked,
+      caseId: result.caseId,
+      followUpDue: result.followUpDue,
     });
   } catch (error) {
     console.error("[ai/case] route failure", error);

@@ -60,7 +60,7 @@ describe("farmer-visible reply", () => {
     ).toBe(false);
   });
 
-  it("uses a compact diagnosis layout when checks or guidance exist", () => {
+  it("uses a compact diagnosis layout only for urgent guidance", () => {
     expect(
       shouldUseDiagnosisLayout(
         payload({
@@ -68,6 +68,17 @@ describe("farmer-visible reply", () => {
           checksToday: ["Turn leaves over"],
           safeActionsNow: ["Scout early morning"],
           preliminaryAssessment: "Preliminary guidance: whitefly pressure looks significant.",
+          escalationRecommended: false,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      shouldUseDiagnosisLayout(
+        payload({
+          stage: "human_review",
+          escalationRecommended: true,
+          checksToday: ["Cut one wilted stem"],
+          safeActionsNow: ["Hold new sprays"],
         }),
       ),
     ).toBe(true);

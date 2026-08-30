@@ -21,6 +21,17 @@ import {
   type VerifiedInputDisplay,
   type WeatherRiskOption,
 } from "./case-schema";
+import { applyIrreversibleActionGuards } from "@/lib/agronomy-memory/irreversible";
+import { mapTurnToCasePatch } from "@/lib/agronomy-memory/map-case";
+import { persistAgronomyCase, persistCaseMessage } from "@/lib/agronomy-memory/persist";
+import {
+  FARMER_PRIVACY_ANSWER,
+  isPrivacyOrLearningQuestion,
+} from "@/lib/agronomy-memory/privacy";
+import {
+  formatSimilarCasesForModel,
+  getSimilarCases,
+} from "@/lib/agronomy-memory/store";
 import { buildCaseSystemInstructions } from "./system-instructions";
 import {
   shouldInvokeProductTool,
@@ -55,6 +66,8 @@ export type AgronomicCaseResult =
       diagnosticCode: "AI_READY";
       requestCompleted: true;
       questionsAsked: number;
+      caseId: string | null;
+      followUpDue: boolean;
     }
   | {
       ok: false;
@@ -237,6 +250,11 @@ function mapOpenAIFailure(
 export type CaseProfileContext = {
   country?: string | null;
   district?: string | null;
+  farmerId?: string | null;
+  sessionId?: string | null;
+  caseId?: string | null;
+  farm?: string | null;
+  variety?: string | null;
 };
 
 export function parseCaseRequestBody(body: unknown): {
@@ -292,6 +310,20 @@ export function parseCaseRequestBody(body: unknown): {
       asTrimmedString(profileRaw.district) ||
       asTrimmedString(record.district) ||
       null,
+    farmerId:
+      asTrimmedString(profileRaw.farmerId) ||
+      asTrimmedString(record.farmerId) ||
+      null,
+    sessionId:
+      asTrimmedString(profileRaw.sessionId) ||
+      asTrimmedString(record.sessionId) ||
+      null,
+    caseId:
+      asTrimmedString(profileRaw.caseId) ||
+      asTrimmedString(record.caseId) ||
+      null,
+    farm: asTrimmedString(profileRaw.farm) || null,
+    variety: asTrimmedString(profileRaw.variety) || null,
   };
 
   const images: CaseImageInput[] = [];
@@ -367,6 +399,9 @@ function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string 
   }
   if (facts.plantAge) {
     lines.push(`- plant age: ${facts.plantAge}`);
+  }
+  if (facts.variety) {
+    lines.push(`- variety: ${facts.variety}`);
   }
   if (facts.distributionHint) {
     lines.push(`- distribution hint: ${facts.distributionHint}`);
@@ -550,6 +585,97 @@ export async function runAgronomicCase(options: {
     options.profile,
   );
 
+  const sessionId =
+    options.profile?.sessionId?.trim() ||
+    "guest-session";
+  const similarCases = getSimilarCases({
+    country: knownFacts.country,
+    district: knownFacts.district,
+    crop: knownFacts.crop,
+    variety: knownFacts.variety,
+    symptoms: knownFacts.suspectedIssue || effectiveMessage,
+    productionSystem: knownFacts.productionSystem,
+  });
+
+  async function rememberTurn(
+    payload: AgronomicCasePayload,
+    farmerMessage: string,
+  ): Promise<{ caseId: string; followUpDue: boolean }> {
+    try {
+      const saved = await persistAgronomyCase(
+        mapTurnToCasePatch({
+          sessionId,
+          farmerId: options.profile?.farmerId ?? null,
+          farm: options.profile?.farm ?? null,
+          facts: knownFacts,
+          payload,
+          farmerMessage,
+          photoCount: images.length,
+          existingId: options.profile?.caseId ?? null,
+        }),
+      );
+      await persistCaseMessage({
+        caseId: saved.id,
+        role: "user",
+        content: farmerMessage,
+      });
+      await persistCaseMessage({
+        caseId: saved.id,
+        role: "assistant",
+        content: payload.preliminaryAssessment,
+      });
+      return {
+        caseId: saved.id,
+        followUpDue: Boolean(
+          saved.followUpDueAt &&
+            new Date(saved.followUpDueAt).getTime() <= Date.now(),
+        ),
+      };
+    } catch (error) {
+      console.error("[ai/case] memory persist failed", error);
+      return { caseId: options.profile?.caseId ?? "", followUpDue: false };
+    }
+  }
+
+  if (isPrivacyOrLearningQuestion(effectiveMessage)) {
+    const privacyCase = applyIrreversibleActionGuards(
+      parseCasePayload({
+        mode: effectiveMode,
+        stage: "assessment",
+        questionId: "",
+        questionType: "",
+        preliminaryAssessment: FARMER_PRIVACY_ANSWER,
+        severity: "unknown",
+        nextQuestion: "",
+        quickReplies: [],
+        checksToday: [],
+        safeActionsNow: [],
+        actionsToAvoid: [],
+        photoRecommended: false,
+        escalationRecommended: false,
+        internalMissingInformation: [],
+      }),
+    );
+    const remembered = await rememberTurn(privacyCase, effectiveMessage);
+    return {
+      ok: true,
+      case: {
+        ...privacyCase,
+        regionalContext: emptyRegionalContext({
+          country: knownFacts.country,
+          district: knownFacts.district,
+        }),
+      },
+      responseId: `privacy_${Date.now()}`,
+      model,
+      diagnosticCode: "AI_READY",
+      requestCompleted: true,
+      questionsAsked: questionsAskedBeforeThisTurn,
+      caseId: remembered.caseId || null,
+      followUpDue: false,
+    };
+  }
+
   const createResponse: (
     params: Record<string, unknown>,
   ) => Promise<CaseModelResponse> =
@@ -589,6 +715,7 @@ export async function runAgronomicCase(options: {
     questionsAskedBeforeThisTurn,
     knownFactsSummary: knownFactsSummary(knownFacts),
     hasImages: images.length > 0,
+    similarCasesSummary: formatSimilarCasesForModel(similarCases),
   });
 
   const textFormat = {
@@ -681,12 +808,22 @@ export async function runAgronomicCase(options: {
 
     let parsed: AgronomicCasePayload;
     try {
-      parsed = applyCommercialSafetyGuards(
-        parseCasePayload(extractJsonObject(rawText)),
+      parsed = applyIrreversibleActionGuards(
+        applyCommercialSafetyGuards(
+          parseCasePayload(extractJsonObject(rawText)),
+          {
+            mode: effectiveMode,
+            questionsAskedBeforeThisTurn,
+            knownFacts,
+          },
+        ),
         {
-          mode: effectiveMode,
-          questionsAskedBeforeThisTurn,
-          knownFacts,
+          vagueSymptom:
+            !knownFacts.suspectedIssue ||
+            knownFacts.suspectedIssue === "wilt" ||
+            knownFacts.suspectedIssue === "stunting",
+          wiltReported: knownFacts.suspectedIssue === "wilt",
+          containmentDefined: knownFacts.distributionHint === "few plants",
         },
       );
 
@@ -726,6 +863,8 @@ export async function runAgronomicCase(options: {
         ? 1
         : 0);
 
+    const remembered = await rememberTurn(parsed, effectiveMessage);
+
     return {
       ok: true,
       case: parsed,
@@ -734,6 +873,8 @@ export async function runAgronomicCase(options: {
       diagnosticCode: "AI_READY",
       requestCompleted: true,
       questionsAsked,
+      caseId: remembered.caseId || null,
+      followUpDue: remembered.followUpDue,
     };
   } catch (error) {
     const withCode = error as Error & {

@@ -82,6 +82,7 @@ export type KnownFarmerFacts = {
   farmerScale: FarmerScale;
   areaPlanted: string | null;
   plantAge: string | null;
+  variety: string | null;
   suddenWilt: boolean;
   stuntedWholeField: boolean;
   asksForProducts: boolean;
@@ -113,12 +114,47 @@ const ACREAGE_QUESTION =
 const PLANT_AGE_QUESTION =
   /\b(how\s+old\s+are\s+the\s+plants|plant\s+age|weeks?\s+old|what\s+stage\s+are\s+the\s+plants)\b/i;
 
+const VARIETY_QUESTION =
+  /\b(what\s+variety|which\s+variety|variety\s+name|what\s+kind\s+of\s+tomato)\b/i;
+
+const VARIETY_STOP = new Set([
+  "my",
+  "the",
+  "some",
+  "our",
+  "this",
+  "that",
+  "those",
+  "these",
+  "fresh",
+  "ripe",
+  "young",
+  "old",
+  "stunted",
+  "wilted",
+  "wilting",
+  "of",
+  "acres",
+  "acre",
+  "hectare",
+  "hectares",
+  "field",
+  "garden",
+  "commercial",
+  "home",
+  "backyard",
+]);
+
 /**
  * Extract facts already stated by the farmer so we never re-ask them.
  */
 export function extractKnownFacts(
   text: string,
-  profile?: { country?: string | null; district?: string | null } | null,
+  profile?: {
+    country?: string | null;
+    district?: string | null;
+    variety?: string | null;
+  } | null,
 ): KnownFarmerFacts {
   const rawText = text.trim();
   const lower = rawText.toLowerCase();
@@ -131,7 +167,14 @@ export function extractKnownFacts(
   let suspectedIssue: string | null = null;
   if (/\bwhite\s*fl(y|ies)\b/.test(lower)) suspectedIssue = "whiteflies";
   else if (/\bholes?\b/.test(lower)) suspectedIssue = "leaf holes";
-  else if (/\bwilt(ing|ed)?\b/.test(lower)) suspectedIssue = "wilt";
+  else if (
+    /\bwilt(ing|ed)?\b/.test(lower) ||
+    /\b(drop(ping)?\s+down|falling\s+over|keeling\s+over|falling\s+down)\b/.test(
+      lower,
+    )
+  ) {
+    suspectedIssue = "wilt";
+  }
   else if (/\bstunt(ed|ing)?\b/.test(lower)) suspectedIssue = "stunting";
   else if (/\b(blight|leaf\s+spot|fungal)\b/.test(lower)) {
     suspectedIssue = "foliar fungal disease";
@@ -149,7 +192,7 @@ export function extractKnownFacts(
   let district: string | null = profile?.district?.trim() || null;
   if (!district) {
     const districtMatch = lower.match(
-      /\b(chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin)\b/,
+      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|princes\s+town|rio\s+claro)\b/,
     );
     if (districtMatch) district = districtMatch[1];
   }
@@ -194,6 +237,20 @@ export function extractKnownFacts(
     lower.match(/\bplants?\s+are\s+(\d+)\s*(weeks?|months?|days?)\b/);
   const plantAge = ageMatch ? `${ageMatch[1]} ${ageMatch[2]}` : null;
 
+  let variety: string | null = null;
+  const varietyNamed = lower.match(/\bvariety\s+([a-z][a-z0-9-]+)\b/);
+  const varietyBeforeCrop = lower.match(
+    /\b([a-z][a-z0-9-]+)\s+(tomato|pepper|cucumber)s?\b/,
+  );
+  if (varietyNamed) {
+    variety = varietyNamed[1];
+  } else if (varietyBeforeCrop && !VARIETY_STOP.has(varietyBeforeCrop[1])) {
+    variety = varietyBeforeCrop[1];
+  }
+  if (!variety && profile?.variety) {
+    variety = profile.variety.trim().toLowerCase();
+  }
+
   return {
     crop,
     suspectedIssue,
@@ -204,6 +261,7 @@ export function extractKnownFacts(
     farmerScale,
     areaPlanted,
     plantAge,
+    variety,
     suddenWilt:
       /\bsudden(ly)?\s+wilt/.test(lower) ||
       /\bwilt(ing|ed)?\s+suddenly\b/.test(lower),
@@ -263,6 +321,17 @@ export function questionAsksForKnownFact(
   }
 
   if (facts.plantAge && PLANT_AGE_QUESTION.test(question)) {
+    return true;
+  }
+
+  if (facts.variety && VARIETY_QUESTION.test(question)) {
+    return true;
+  }
+
+  if (
+    facts.district &&
+    /\b(which\s+)?(district|village|area|where\s+in)\b/i.test(question)
+  ) {
     return true;
   }
 
@@ -611,16 +680,15 @@ function buildForcedQuickGuidance(
 
   if (facts.suddenWilt) {
     return {
-      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — treat it as urgent triage.`,
+      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can mean root damage, a disease inside the stem, or spray injury. This is not a final diagnosis — treat it as urgent triage.`,
       severity: "high",
       checksToday: [
         "Cut a wilted stem lengthwise and check for brown streaks inside",
-        "Feel whether the soil is waterlogged or bone dry around roots",
+        "Feel whether the soil is staying wet or bone dry around the roots",
         "Note whether wilted plants are in a patch or scattered",
       ],
       safeActionsNow: [
         "Stop new sprays until the pattern is clearer",
-        "Isolate badly wilted plants if practical",
         "Take a clear photo of wilted plants and a cut stem for review",
       ],
       actionsToAvoid: [

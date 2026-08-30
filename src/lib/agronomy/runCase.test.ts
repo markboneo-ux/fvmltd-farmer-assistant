@@ -6,6 +6,7 @@ import { WHITEFLY_QUICK_SEQUENCE } from "./tomato-protocol";
 import { setWeatherProviderForTests } from "@/lib/weather/get-forecast";
 import { buildMockHumidRainyForecast } from "@/lib/weather/get-forecast";
 import { resetCatalogueStoreToSeed } from "@/lib/regional-inputs/catalogue";
+import { resetMemoryStoreForTests } from "@/lib/agronomy-memory/store";
 
 export const TEST_PROMPTS = [
   "Tomato whiteflies",
@@ -45,6 +46,7 @@ function mockCase(
 }
 
 beforeEach(() => {
+  resetMemoryStoreForTests();
   resetCatalogueStoreToSeed();
   setWeatherProviderForTests({
     name: "mock-humid-rainy",

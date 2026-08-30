@@ -20,15 +20,10 @@ export function buildFarmerVisibleReply(payload: AgronomicCasePayload): string {
 }
 
 export function shouldUseDiagnosisLayout(payload: AgronomicCasePayload): boolean {
-  if (!isGuidanceStage(payload.stage) && payload.stage !== "questioning") {
-    return false;
-  }
-
   return (
-    payload.checksToday.length > 0 ||
-    payload.safeActionsNow.length > 0 ||
-    (isGuidanceStage(payload.stage) &&
-      payload.preliminaryAssessment.trim().length > 40)
+    payload.escalationRecommended &&
+    isGuidanceStage(payload.stage) &&
+    (payload.checksToday.length > 0 || payload.safeActionsNow.length > 0)
   );
 }
 

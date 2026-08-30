@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { ChatAssistantMessage } from "@/components/ChatAssistantMessage";
 import {
   CasePhotoAttach,
@@ -16,6 +17,8 @@ import {
   farmerFacingSendError,
 } from "@/lib/chat/case-images";
 import { farmerHistoryContent } from "@/lib/chat/visible-reply";
+import { useRegisteredFarmer } from "@/lib/farmers/useRegisteredFarmer";
+import type { CropOutcome } from "@/lib/agronomy-memory/types";
 
 type ChatRole = "user" | "assistant";
 
@@ -46,7 +49,27 @@ type CaseApiPayload = {
   requestCompleted?: boolean;
   questionsAsked?: number;
   error?: string;
+  caseId?: string | null;
+  followUpDue?: boolean;
 };
+
+const SESSION_KEY = "fvm-agronomy-session";
+
+function readSessionId(): string {
+  if (typeof window === "undefined") return "guest-session";
+  const existing = window.localStorage.getItem(SESSION_KEY);
+  if (existing) return existing;
+  const created = window.crypto.randomUUID();
+  window.localStorage.setItem(SESSION_KEY, created);
+  return created;
+}
+
+const FOLLOW_UP_CHIPS: Array<{ id: CropOutcome; label: string }> = [
+  { id: "improved", label: "Improved" },
+  { id: "unchanged", label: "About the same" },
+  { id: "worse", label: "Worse" },
+  { id: "solved", label: "Problem solved" },
+];
 
 type FarmerCaseChatProps = {
   showModeToggle?: boolean;
@@ -92,7 +115,13 @@ export function FarmerCaseChat({
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachRef = useRef<CasePhotoAttachHandle>(null);
+  const farmer = useRegisteredFarmer();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [sessionId, setSessionId] = useState("guest-session");
+  const [caseId, setCaseId] = useState<string | null>(null);
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [askWhatYouDid, setAskWhatYouDid] = useState(false);
 
   const [mode, setMode] = useState<CaseMode>("quick_help");
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
@@ -109,6 +138,24 @@ export function FarmerCaseChat({
 
   const farmerMessages = messages.filter((item) => !item.local);
   const showStarters = farmerMessages.length === 0 && !loading;
+
+  useEffect(() => {
+    const id = readSessionId();
+    setSessionId(id);
+    void fetch(`/api/ai/case/outcome?sessionId=${encodeURIComponent(id)}`)
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          followUp?: { caseId: string } | null;
+        };
+        if (payload.followUp?.caseId) {
+          setCaseId(payload.followUp.caseId);
+          setShowFollowUp(true);
+        }
+      })
+      .catch(() => {
+        // Follow-up is optional; chat still works.
+      });
+  }, []);
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({
@@ -205,8 +252,12 @@ export function FarmerCaseChat({
       form.append(
         "profile",
         JSON.stringify({
-          country: defaultCountry,
-          district: defaultDistrict,
+          country: farmer?.country || defaultCountry,
+          district: farmer?.district || defaultDistrict,
+          farmerId: farmer?.id ?? null,
+          sessionId,
+          caseId,
+          farm: farmer?.fullName ? `${farmer.fullName} farm` : null,
         }),
       );
       for (const file of preparedFiles) {
@@ -269,6 +320,12 @@ export function FarmerCaseChat({
 
       if (payload.responseId) {
         setPreviousResponseId(payload.responseId);
+      }
+      if (payload.caseId) {
+        setCaseId(payload.caseId);
+      }
+      if (payload.followUpDue) {
+        setShowFollowUp(true);
       }
 
       setActiveQuestionId(casePayload.questionId || null);
@@ -337,6 +394,47 @@ export function FarmerCaseChat({
     inputRef.current?.focus();
   }
 
+  async function submitFollowUp(outcome: CropOutcome) {
+    if (!caseId) {
+      setAskWhatYouDid(true);
+      return;
+    }
+    try {
+      await fetch("/api/ai/case/outcome", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId,
+          cropOutcome: outcome,
+          daysAfterRecommendation: 7,
+        }),
+      });
+      setShowFollowUp(false);
+      setAskWhatYouDid(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: messageId(),
+          role: "user",
+          text:
+            FOLLOW_UP_CHIPS.find((item) => item.id === outcome)?.label ??
+            outcome,
+        },
+        {
+          id: messageId(),
+          role: "assistant",
+          text:
+            outcome === "worse"
+              ? "Thank you. What did you do, and I will help with the next check."
+              : "Thank you. What did you do? That helps us learn which steps actually helped.",
+          local: true,
+        },
+      ]);
+    } catch {
+      setError("I couldn’t save that follow-up. Please try again.");
+    }
+  }
+
   function startFullCropCheck() {
     setMenuOpen(false);
     setMode("full_crop_check");
@@ -351,14 +449,17 @@ export function FarmerCaseChat({
     .find((item) => item.role === "assistant" && item.casePayload);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-sky">
-      <header className="sticky top-0 z-20 border-b border-line/80 bg-surface/95 px-4 py-3 backdrop-blur">
+    <div className="flex min-h-dvh flex-col bg-[#f6f7f6]">
+      <header className="sticky top-0 z-20 border-b border-line/70 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold tracking-tight text-canopy">
-              {title}
-            </p>
-            <p className="truncate text-xs text-muted">{subtitle}</p>
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandLogo className="h-10 w-10 shrink-0" />
+            <div className="min-w-0">
+              <p className="truncate text-base font-semibold tracking-tight text-canopy">
+                {title}
+              </p>
+              <p className="truncate text-xs text-muted">{subtitle}</p>
+            </div>
           </div>
           <button
             type="button"
@@ -390,6 +491,17 @@ export function FarmerCaseChat({
               className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
             >
               New conversation
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                setShowFollowUp(true);
+              }}
+              disabled={loading || !caseId}
+              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
+            >
+              How is the crop now?
             </button>
             {showModeToggle ? (
               <button
@@ -517,6 +629,29 @@ export function FarmerCaseChat({
           );
         })}
 
+        {showFollowUp && !loading ? (
+          <div className="rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-line">
+            <p className="text-sm font-medium text-ink">
+              Did the crop improve after the steps we discussed?
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {FOLLOW_UP_CHIPS.map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => void submitFollowUp(chip.id)}
+                  className="min-h-10 rounded-full bg-[#f6f7f6] px-3.5 py-2 text-sm font-medium text-canopy ring-1 ring-line hover:bg-white"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+            {askWhatYouDid ? (
+              <p className="mt-2 text-sm text-muted">What did you do?</p>
+            ) : null}
+          </div>
+        ) : null}
+
         {loading ? (
           <div className="flex justify-start" aria-busy="true">
             <div className="rounded-3xl rounded-bl-lg bg-surface px-4 py-3 text-sm text-muted shadow-sm ring-1 ring-line/80">
@@ -534,7 +669,7 @@ export function FarmerCaseChat({
         ) : null}
       </div>
 
-      <div className="sticky bottom-0 z-20 border-t border-line/80 bg-surface/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <div className="sticky bottom-0 z-20 border-t border-line/70 bg-white/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto w-full max-w-3xl space-y-3">
           {showStarters ? (
             <div className="flex flex-wrap gap-2">
@@ -592,12 +727,37 @@ export function FarmerCaseChat({
             uploading={loading && attachedImages.length > 0}
           />
 
+          {attachMenuOpen ? (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachMenuOpen(false);
+                  attachRef.current?.openCamera();
+                }}
+                className="min-h-10 rounded-full bg-white px-3.5 text-sm font-medium text-canopy ring-1 ring-line"
+              >
+                Take Photo
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachMenuOpen(false);
+                  attachRef.current?.openLibrary();
+                }}
+                className="min-h-10 rounded-full bg-white px-3.5 text-sm font-medium text-canopy ring-1 ring-line"
+              >
+                Choose Photo
+              </button>
+            </div>
+          ) : null}
+
           <form className="flex items-end gap-2" onSubmit={handleSubmit}>
             <button
               type="button"
-              onClick={() => attachRef.current?.openLibrary()}
+              onClick={() => setAttachMenuOpen((open) => !open)}
               disabled={loading}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-field text-xl font-semibold text-canopy ring-1 ring-line hover:bg-sky disabled:opacity-50"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-xl font-semibold text-canopy shadow-sm ring-1 ring-line hover:bg-[#f6f7f6] disabled:opacity-50"
               aria-label="Attach photo"
             >
               +
@@ -617,7 +777,7 @@ export function FarmerCaseChat({
               rows={1}
               disabled={loading}
               placeholder="Ask about your crop…"
-              className="max-h-40 min-h-11 flex-1 resize-none rounded-3xl border border-line bg-field px-4 py-2.5 text-base leading-snug text-ink outline-none ring-canopy/30 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
+              className="max-h-40 min-h-11 flex-1 resize-none rounded-3xl border border-line bg-white px-4 py-2.5 text-base leading-snug text-ink shadow-sm outline-none ring-canopy/25 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
             />
             <button
               type="button"

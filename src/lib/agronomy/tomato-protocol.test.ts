@@ -64,6 +64,38 @@ describe("tomato-protocol rapid triage", () => {
     ).toBe(false);
   });
 
+  it("remembers Couva, acreage, Ruby variety and crop so they are not re-asked", () => {
+    const facts = extractKnownFacts(
+      "I am in Couva growing 3 acres of Ruby tomato.",
+    );
+    expect(facts.district).toBe("couva");
+    expect(facts.crop).toBe("tomato");
+    expect(facts.variety).toBe("ruby");
+    expect(facts.areaPlanted).toMatch(/3 acres/);
+    expect(questionAsksForKnownFact("What crop are you growing?", facts)).toBe(
+      true,
+    );
+    expect(questionAsksForKnownFact("What variety is this?", facts)).toBe(true);
+    expect(questionAsksForKnownFact("Which district is the farm in?", facts)).toBe(
+      true,
+    );
+    expect(questionAsksForKnownFact("How many acres is the field?", facts)).toBe(
+      true,
+    );
+  });
+
+  it("does not treat 'of tomato' as a variety name", () => {
+    const facts = extractKnownFacts("I have 3 acres of tomato.");
+    expect(facts.variety).toBeNull();
+    expect(facts.areaPlanted).toMatch(/3 acres/);
+  });
+
+  it("treats plants dropping down as wilt", () => {
+    const facts = extractKnownFacts("My tomato plants just dropping down.");
+    expect(facts.crop).toBe("tomato");
+    expect(facts.suspectedIssue).toBe("wilt");
+  });
+
   it("remembers commercial scale, acreage and plant age so they are not re-asked", () => {
     const facts = extractKnownFacts(
       "I am a commercial farmer with 3 acres of tomato and the plants are 6 weeks old.",

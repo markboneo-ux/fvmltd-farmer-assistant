@@ -69,14 +69,14 @@ export function ChatAssistantMessage({
       {useDiagnosis ? (
         <div className="space-y-3">
           <section>
-            <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+            <h3 className="text-xs font-semibold text-canopy">
               Likely issue
             </h3>
             <p className="mt-1 whitespace-pre-wrap">{assessment}</p>
           </section>
           {payload.checksToday.length > 0 ? (
             <section>
-              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+              <h3 className="text-xs font-semibold text-canopy">
                 What to check now
               </h3>
               <BulletList items={payload.checksToday} />
@@ -84,7 +84,7 @@ export function ChatAssistantMessage({
           ) : null}
           {payload.safeActionsNow.length > 0 ? (
             <section>
-              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+              <h3 className="text-xs font-semibold text-canopy">
                 What I would do next
               </h3>
               <BulletList items={payload.safeActionsNow} />
@@ -107,9 +107,7 @@ export function ChatAssistantMessage({
 
       {showWeather ? (
         <div className="rounded-xl bg-sky px-3 py-2.5 ring-1 ring-line">
-          <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
-            Weather risk
-          </p>
+          <p className="text-xs font-semibold text-canopy">Weather risk</p>
           {payload.weatherRisks.slice(0, 2).map((risk) => (
             <div key={`${risk.diseaseOrPest}-${risk.generatedAt}`} className="mt-1.5">
               <p className="text-sm font-medium text-ink">
@@ -127,9 +125,7 @@ export function ChatAssistantMessage({
 
       {showProducts ? (
         <div className="rounded-xl bg-field px-3 py-2.5 ring-1 ring-line">
-          <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
-            Local options
-          </p>
+          <p className="text-xs font-semibold text-canopy">Local options</p>
           <p className="mt-1 text-xs text-muted">
             Only verified catalogue entries. Availability is not invented.
           </p>

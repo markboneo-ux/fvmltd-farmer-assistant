@@ -11,6 +11,10 @@
 --   crop_cycles, soil_tests, follow_ups, lab_test_requests, products,
 --   recommendations
 --
+-- Conversational agronomy memory (additive; does not replace crop_checks):
+--   agronomy_cases, agronomy_case_messages, agronomy_case_outcomes,
+--   agronomy_case_reviews
+--
 -- Regional agri-input + weather risk tables (additive Caribbean catalogue):
 --   countries, agri_inputs, input_registrations, input_crop_uses,
 --   supplier_inventory, input_sources, input_verification_history,
