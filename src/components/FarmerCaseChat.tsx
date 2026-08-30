@@ -352,7 +352,7 @@ export function FarmerCaseChat({
     .find((item) => item.role === "assistant" && item.casePayload);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-sky">
+    <div className="flex h-dvh flex-col overflow-hidden bg-sky">
       <header className="sticky top-0 z-20 border-b border-line/80 bg-surface/95 backdrop-blur-md">
         <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-3 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -435,7 +435,7 @@ export function FarmerCaseChat({
 
       <div
         ref={scrollerRef}
-        className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-y-auto px-4"
+        className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-y-auto px-4"
         role="log"
         aria-live="polite"
         aria-relevant="additions"
@@ -602,7 +602,7 @@ export function FarmerCaseChat({
         )}
       </div>
 
-      <div className="sticky bottom-0 z-20 bg-sky/90 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md">
+      <div className="z-20 shrink-0 bg-sky/90 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md">
         <div className="mx-auto w-full max-w-3xl space-y-2">
           {error ? (
             <p className="px-1 text-sm font-medium text-danger" role="alert">
