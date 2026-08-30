@@ -1,26 +1,41 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { CaseEngineResponse } from "@/components/CaseEngineResponse";
+import { ChatAssistantMessage } from "@/components/ChatAssistantMessage";
 import {
   CasePhotoAttach,
-  filesToCaseImagePayload,
+  prepareCaseImageFiles,
   type AttachedCaseImage,
+  type CasePhotoAttachHandle,
 } from "@/components/CasePhotoAttach";
 import type { AgronomicCasePayload, CaseMode } from "@/lib/agronomy/case-schema";
-import { formatCaseAsPlainText } from "@/lib/agronomy/formatCaseSummary";
+import {
+  FARMER_PHOTO_TOO_LARGE,
+  FARMER_PHOTO_UPLOAD_FAILED,
+  farmerFacingSendError,
+} from "@/lib/chat/case-images";
+import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 
 type ChatRole = "user" | "assistant";
+
+type ChatImagePreview = {
+  id: string;
+  previewUrl: string;
+  fileName: string;
+};
 
 type ChatMessage = {
   id: string;
   role: ChatRole;
   text: string;
+  images?: ChatImagePreview[];
   casePayload?: AgronomicCasePayload;
   model?: string;
   responseSeconds?: number;
   diagnosticCode?: string;
   questionsAsked?: number;
+  local?: boolean;
 };
 
 type CaseApiPayload = {
@@ -43,39 +58,44 @@ type FarmerCaseChatProps = {
   subtitle?: string;
 };
 
-const TEST_PROMPTS = [
-  "Tomato whiteflies",
-  "My pepper leaves have holes",
-  "Cucumber plants suddenly wilting",
-  "Tomatoes are stunted across the whole field",
-];
+const WELCOME_TEXT =
+  "Hi. Ask me anything about your crop, or send me a photo of what you’re seeing.";
+
+const STARTER_CHIPS = [
+  { id: "diagnose", label: "Diagnose a crop problem", prompt: "My crop has a problem. Can you help me work out what’s going on?" },
+  { id: "photo", label: "Upload a photo", prompt: "" },
+  { id: "product", label: "Ask about a product", prompt: "What can I use for this in Trinidad?" },
+] as const;
 
 function messageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function nowMs() {
-  return Date.now();
-}
-
-function secondsSince(startedMs: number) {
-  return (nowMs() - startedMs) / 1000;
+function welcomeMessage(): ChatMessage {
+  return {
+    id: "welcome",
+    role: "assistant",
+    text: WELCOME_TEXT,
+    local: true,
+  };
 }
 
 export function FarmerCaseChat({
-  showModeToggle = true,
+  showModeToggle = false,
   showDiagnostics = false,
-  showTestPrompts = true,
+  showTestPrompts = false,
   defaultCountry = "Trinidad and Tobago",
   defaultDistrict = null,
-  title = "Crop Quick Help",
-  subtitle = "Preliminary Caribbean crop guidance after a few questions. Photo upload supported.",
+  title = "Farmersvaluemart AI",
+  subtitle = "Your Caribbean farming assistant",
 }: FarmerCaseChatProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const attachRef = useRef<CasePhotoAttachHandle>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [mode, setMode] = useState<CaseMode>("quick_help");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,27 +105,38 @@ export function FarmerCaseChat({
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [attachedImages, setAttachedImages] = useState<AttachedCaseImage[]>([]);
   const [questionsAsked, setQuestionsAsked] = useState<number | null>(null);
+  const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
+
+  const farmerMessages = messages.filter((item) => !item.local);
+  const showStarters = farmerMessages.length === 0 && !loading;
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({
       top: scrollerRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, loading, error]);
+  }, [messages, loading, error, attachedImages]);
 
   function clearQuickReplies() {
     setActiveQuestionId(null);
+  }
+
+  function resizeComposer() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }
 
   async function sendQuestion(question: string, modeOverride?: CaseMode) {
     const trimmed = question.trim();
     if ((!trimmed && attachedImages.length === 0) || loading) return;
 
-    // Clear previous buttons immediately when an answer is selected / typed / new request begins.
     clearQuickReplies();
+    setMenuOpen(false);
 
     const nextMode =
-      /start full crop check/i.test(trimmed)
+      /start full crop check|more detailed crop assessment/i.test(trimmed)
         ? "full_crop_check"
         : (modeOverride ?? mode);
 
@@ -114,64 +145,103 @@ export function FarmerCaseChat({
     }
 
     setLoading(true);
+    setAnalyzingPhotos(attachedImages.length > 0);
     setError(null);
     setDraft("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
+
+    const imagePreviews: ChatImagePreview[] = attachedImages.map((image) => ({
+      id: image.id,
+      previewUrl: image.previewUrl,
+      fileName: image.fileName,
+    }));
 
     const userMessage: ChatMessage = {
       id: messageId(),
       role: "user",
       text:
         trimmed ||
-        `(${attachedImages.length} photo${attachedImages.length === 1 ? "" : "s"} attached)`,
+        (attachedImages.length === 1
+          ? "Here’s a photo of what I’m seeing."
+          : `Here are ${attachedImages.length} photos of what I’m seeing.`),
+      images: imagePreviews,
     };
 
-    const historyForApi = [...messages, userMessage].map((item) => ({
-      role: item.role,
-      content: item.casePayload
-        ? formatCaseAsPlainText(item.casePayload)
-        : item.text,
-    }));
+    const historyForApi = [...messages, userMessage]
+      .filter((item) => !item.local)
+      .slice(0, -1)
+      .map((item) => ({
+        role: item.role,
+        content: item.casePayload
+          ? farmerHistoryContent(item.casePayload)
+          : item.text,
+      }));
 
     setMessages((prev) => [...prev, userMessage]);
 
-    const started = nowMs();
     const imagesSnapshot = [...attachedImages];
+    const largestBytes = imagesSnapshot.reduce(
+      (max, image) => Math.max(max, image.file.size),
+      0,
+    );
 
     try {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 55_000);
-      const imagePayload = await filesToCaseImagePayload(imagesSnapshot);
+
+      let preparedFiles: File[] = [];
+      if (imagesSnapshot.length > 0) {
+        preparedFiles = await prepareCaseImageFiles(imagesSnapshot);
+      }
+
+      const form = new FormData();
+      form.append(
+        "message",
+        trimmed || "Please assess the uploaded crop photo(s).",
+      );
+      form.append("messages", JSON.stringify(historyForApi));
+      form.append("previousResponseId", previousResponseId ?? "");
+      form.append("mode", nextMode);
+      form.append(
+        "profile",
+        JSON.stringify({
+          country: defaultCountry,
+          district: defaultDistrict,
+        }),
+      );
+      for (const file of preparedFiles) {
+        form.append("images", file, file.name);
+      }
 
       const response = await fetch("/api/ai/case", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: trimmed || "Please assess the uploaded crop photo(s).",
-          messages: historyForApi.slice(0, -1),
-          previousResponseId,
-          mode: nextMode,
-          profile: {
-            country: defaultCountry,
-            district: defaultDistrict,
-          },
-          images: imagePayload,
-        }),
+        body: form,
         signal: controller.signal,
       });
 
       window.clearTimeout(timeout);
 
-      const elapsed = secondsSince(started);
-      const payload = (await response.json()) as CaseApiPayload;
+      const elapsed = (Date.now() - Number(userMessage.id.split("-")[0])) / 1000;
+      let payload: CaseApiPayload;
+      try {
+        payload = (await response.json()) as CaseApiPayload;
+      } catch {
+        setAttachedImages([]);
+        if (response.status === 413) {
+          setError(FARMER_PHOTO_TOO_LARGE);
+        } else if (imagesSnapshot.length > 0) {
+          setError(FARMER_PHOTO_UPLOAD_FAILED);
+        } else {
+          setError("I couldn’t send that message. Please try again.");
+        }
+        return;
+      }
+
       const casePayload = payload.case ?? null;
       const diagnosticCode =
         payload.diagnosticCode || "OPENAI_REQUEST_FAILED";
       const model = payload.model || "unknown";
 
-      // Clear attached images after successful send attempt completes.
-      for (const image of imagesSnapshot) {
-        URL.revokeObjectURL(image.previewUrl);
-      }
       setAttachedImages([]);
 
       if (casePayload?.mode) {
@@ -184,7 +254,13 @@ export function FarmerCaseChat({
 
       if (!response.ok || !casePayload) {
         clearQuickReplies();
-        setError(payload.error || "Could not get a case response right now.");
+        if (response.status === 413) {
+          setError(payload.error || FARMER_PHOTO_TOO_LARGE);
+        } else if (imagesSnapshot.length > 0) {
+          setError(payload.error || FARMER_PHOTO_UPLOAD_FAILED);
+        } else {
+          setError(payload.error || "I couldn’t get a reply right now.");
+        }
         return;
       }
 
@@ -192,7 +268,6 @@ export function FarmerCaseChat({
         setPreviousResponseId(payload.responseId);
       }
 
-      // Bind buttons only to the new questionId from this server response.
       setActiveQuestionId(casePayload.questionId || null);
 
       setMessages((prev) => [
@@ -200,7 +275,7 @@ export function FarmerCaseChat({
         {
           id: messageId(),
           role: "assistant",
-          text: casePayload.nextQuestion || casePayload.preliminaryAssessment,
+          text: farmerHistoryContent(casePayload),
           casePayload,
           model,
           responseSeconds: Number(elapsed.toFixed(2)),
@@ -213,14 +288,16 @@ export function FarmerCaseChat({
       ]);
     } catch (err) {
       clearQuickReplies();
-      const aborted = err instanceof DOMException && err.name === "AbortError";
+      console.error("[farmer-chat] send failed", err);
       setError(
-        aborted
-          ? "That is taking longer than expected. Please try again."
-          : "Network problem — check your connection and try again.",
+        farmerFacingSendError(err, {
+          hadImages: imagesSnapshot.length > 0,
+          largestBytes,
+        }),
       );
     } finally {
       setLoading(false);
+      setAnalyzingPhotos(false);
       inputRef.current?.focus();
     }
   }
@@ -242,13 +319,28 @@ export function FarmerCaseChat({
     for (const image of attachedImages) {
       URL.revokeObjectURL(image.previewUrl);
     }
+    for (const message of messages) {
+      for (const image of message.images ?? []) {
+        URL.revokeObjectURL(image.previewUrl);
+      }
+    }
     setAttachedImages([]);
-    setMessages([]);
+    setMessages([welcomeMessage()]);
     setError(null);
     setPreviousResponseId(null);
     setQuestionsAsked(null);
     setMode("quick_help");
+    setMenuOpen(false);
     inputRef.current?.focus();
+  }
+
+  function startFullCropCheck() {
+    setMenuOpen(false);
+    setMode("full_crop_check");
+    void sendQuestion(
+      "I’d like a more detailed crop assessment.",
+      "full_crop_check",
+    );
   }
 
   const latestAssistant = [...messages]
@@ -256,69 +348,82 @@ export function FarmerCaseChat({
     .find((item) => item.role === "assistant" && item.casePayload);
 
   return (
-    <div className="field-pattern flex min-h-dvh flex-col">
-      <header className="animate-rise shrink-0 border-b border-line/70 bg-surface/90 px-4 pb-3 pt-5 backdrop-blur">
-        <p className="text-[0.68rem] font-semibold tracking-[0.2em] text-canopy uppercase">
-          Farmers Value Mart Ltd
-        </p>
-        <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-          {title}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted">{subtitle}</p>
+    <div className="flex min-h-dvh flex-col bg-sky">
+      <header className="sticky top-0 z-20 border-b border-line/80 bg-surface/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold tracking-tight text-canopy">
+              {title}
+            </p>
+            <p className="truncate text-xs text-muted">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-canopy ring-1 ring-line hover:bg-sky"
+            aria-expanded={menuOpen}
+            aria-label="Open menu"
+          >
+            <span aria-hidden className="text-lg leading-none">
+              ☰
+            </span>
+          </button>
+        </div>
 
-        {showModeToggle ? (
-          <div className="mt-3 flex flex-wrap gap-2">
+        {menuOpen ? (
+          <div className="mx-auto mt-3 w-full max-w-3xl rounded-2xl bg-field p-2 ring-1 ring-line">
             <button
               type="button"
-              onClick={() => {
-                clearQuickReplies();
-                setMode("quick_help");
-              }}
-              className={`min-h-10 rounded-lg px-3 py-2 text-sm font-semibold ring-1 transition ${
-                mode === "quick_help"
-                  ? "bg-leaf text-white ring-leaf"
-                  : "bg-surface text-canopy ring-line hover:bg-sky"
-              }`}
+              onClick={startFullCropCheck}
+              disabled={loading}
+              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
             >
-              Quick Help
+              More detailed crop assessment
             </button>
             <button
               type="button"
-              onClick={() => {
-                clearQuickReplies();
-                setMode("full_crop_check");
-              }}
-              className={`min-h-10 rounded-lg px-3 py-2 text-sm font-semibold ring-1 transition ${
-                mode === "full_crop_check"
-                  ? "bg-leaf text-white ring-leaf"
-                  : "bg-surface text-canopy ring-line hover:bg-sky"
-              }`}
+              onClick={clearConversation}
+              disabled={loading}
+              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
             >
-              Full Crop Check
+              New conversation
             </button>
+            {showModeToggle ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode((current) =>
+                    current === "quick_help" ? "full_crop_check" : "quick_help",
+                  );
+                }}
+                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+              >
+                Mode: {mode === "full_crop_check" ? "Full crop check" : "Chat"}
+              </button>
+            ) : null}
+            <Link
+              href="/register"
+              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+              onClick={() => setMenuOpen(false)}
+            >
+              Save a farmer profile (optional)
+            </Link>
+            {showDiagnostics ? (
+              <p className="px-3 py-2 text-xs text-muted">
+                Developer lab — diagnostics stay collapsed below replies.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </header>
 
       <div
         ref={scrollerRef}
-        className="animate-rise-delay mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+        className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-5"
         role="log"
         aria-live="polite"
         aria-relevant="additions"
       >
-        {messages.length === 0 && !loading ? (
-          <div className="rounded-2xl bg-surface/80 px-4 py-5 text-sm text-muted ring-1 ring-line">
-            <p className="font-medium text-ink">
-              Describe the problem in a short line.
-            </p>
-            <p className="mt-1">
-              Quick Help asks at most three high-value questions, then gives
-              preliminary guidance. Country defaults to {defaultCountry}.
-            </p>
-          </div>
-        ) : null}
-
         {messages.map((message) => {
           const isUser = message.role === "user";
           const isLatestAssistant =
@@ -330,30 +435,40 @@ export function FarmerCaseChat({
               className={`flex ${isUser ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[85%] ${
+                className={`max-w-[88%] rounded-3xl px-4 py-3 text-[15px] leading-relaxed sm:max-w-[80%] ${
                   isUser
-                    ? "rounded-br-md bg-canopy text-white"
-                    : "rounded-bl-md bg-surface text-ink ring-1 ring-line"
+                    ? "rounded-br-lg bg-canopy text-white"
+                    : "rounded-bl-lg bg-surface text-ink shadow-sm ring-1 ring-line/80"
                 }`}
               >
-                {isUser || !message.casePayload ? (
-                  <p className="whitespace-pre-wrap">{message.text}</p>
+                {isUser ? (
+                  <div className="space-y-2">
+                    {message.images && message.images.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {message.images.map((image) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={image.id}
+                            src={image.previewUrl}
+                            alt={image.fileName}
+                            className="h-20 w-20 rounded-xl object-cover ring-1 ring-white/30"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    <p className="whitespace-pre-wrap">{message.text}</p>
+                  </div>
                 ) : (
-                  <CaseEngineResponse
+                  <ChatAssistantMessage
                     payload={message.casePayload}
-                    model={showDiagnostics ? message.model : undefined}
-                    responseSeconds={
-                      showDiagnostics ? message.responseSeconds : undefined
+                    text={message.text}
+                    showQuickReplies={
+                      isLatestAssistant &&
+                      Boolean(activeQuestionId) &&
+                      message.casePayload?.questionId === activeQuestionId
                     }
-                    diagnosticCode={
-                      showDiagnostics ? message.diagnosticCode : undefined
-                    }
-                    questionsAsked={message.questionsAsked ?? questionsAsked}
-                    activeQuestionId={
-                      isLatestAssistant ? activeQuestionId : "__stale__"
-                    }
-                    forceShowSummary={message.casePayload.mode === "full_crop_check"}
                     quickRepliesDisabled={loading || !isLatestAssistant}
+                    onUploadPhoto={() => attachRef.current?.openLibrary()}
                     onQuickReply={
                       isLatestAssistant
                         ? (reply) => {
@@ -364,6 +479,36 @@ export function FarmerCaseChat({
                     }
                   />
                 )}
+
+                {showDiagnostics && message.casePayload ? (
+                  <details className="mt-3 rounded-xl bg-field/90 px-3 py-2 text-xs text-muted ring-1 ring-line">
+                    <summary className="cursor-pointer font-semibold text-canopy">
+                      Developer diagnostics
+                    </summary>
+                    <div className="mt-2 space-y-1 font-mono">
+                      <p>model: {message.model || "—"}</p>
+                      <p>
+                        time:{" "}
+                        {typeof message.responseSeconds === "number"
+                          ? `${message.responseSeconds.toFixed(2)}s`
+                          : "—"}
+                      </p>
+                      <p>code: {message.diagnosticCode || "—"}</p>
+                      <p>stage: {message.casePayload.stage}</p>
+                      <p>mode: {message.casePayload.mode}</p>
+                      <p>
+                        questionsAsked:{" "}
+                        {message.questionsAsked ?? questionsAsked ?? "—"}
+                      </p>
+                      <p>
+                        missing:{" "}
+                        {message.casePayload.internalMissingInformation.join(
+                          ", ",
+                        ) || "—"}
+                      </p>
+                    </div>
+                  </details>
+                ) : null}
               </div>
             </div>
           );
@@ -371,52 +516,73 @@ export function FarmerCaseChat({
 
         {loading ? (
           <div className="flex justify-start" aria-busy="true">
-            <div className="rounded-2xl rounded-bl-md bg-surface px-3.5 py-3 text-sm text-muted ring-1 ring-line">
+            <div className="rounded-3xl rounded-bl-lg bg-surface px-4 py-3 text-sm text-muted shadow-sm ring-1 ring-line/80">
               <span className="inline-flex items-center gap-2">
                 <span
                   className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-leaf"
                   aria-hidden
                 />
-                Quick triage…
+                {analyzingPhotos
+                  ? "Looking at your photo…"
+                  : "Thinking…"}
               </span>
             </div>
           </div>
         ) : null}
       </div>
 
-      <div className="animate-rise-late shrink-0 border-t border-line/70 bg-surface/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <div className="sticky bottom-0 z-20 border-t border-line/80 bg-surface/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
         <div className="mx-auto w-full max-w-3xl space-y-3">
-          {showTestPrompts && messages.length === 0 && !loading ? (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold tracking-wide text-muted uppercase">
-                Try a short prompt
-              </p>
-              <div className="flex flex-col gap-2">
-                {TEST_PROMPTS.map((prompt) => (
+          {showStarters ? (
+            <div className="flex flex-wrap gap-2">
+              {STARTER_CHIPS.map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    if (chip.id === "photo") {
+                      attachRef.current?.openLibrary();
+                      return;
+                    }
+                    void sendQuestion(chip.prompt);
+                  }}
+                  className="min-h-10 rounded-full bg-field px-3.5 py-2 text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
+                >
+                  {chip.label}
+                </button>
+              ))}
+              {showTestPrompts ? (
+                <>
                   <button
-                    key={prompt}
                     type="button"
                     disabled={loading}
-                    onClick={() => {
-                      clearQuickReplies();
-                      void sendQuestion(prompt, "quick_help");
-                    }}
-                    className="min-h-11 rounded-xl bg-sky/70 px-3 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
+                    onClick={() => void sendQuestion("Tomatoes stunted")}
+                    className="min-h-10 rounded-full bg-field px-3.5 py-2 text-sm font-medium text-muted ring-1 ring-line"
                   >
-                    {prompt}
+                    Tomatoes stunted
                   </button>
-                ))}
-              </div>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void sendQuestion("Whiteflies on tomato")}
+                    className="min-h-10 rounded-full bg-field px-3.5 py-2 text-sm font-medium text-muted ring-1 ring-line"
+                  >
+                    Whiteflies on tomato
+                  </button>
+                </>
+              ) : null}
             </div>
           ) : null}
 
           {error ? (
-            <p className="text-xs font-medium text-danger" role="alert">
+            <p className="text-sm font-medium text-danger" role="alert">
               {error}
             </p>
           ) : null}
 
           <CasePhotoAttach
+            ref={attachRef}
             images={attachedImages}
             onChange={setAttachedImages}
             disabled={loading}
@@ -424,43 +590,67 @@ export function FarmerCaseChat({
           />
 
           <form className="flex items-end gap-2" onSubmit={handleSubmit}>
+            <button
+              type="button"
+              onClick={() => attachRef.current?.openLibrary()}
+              disabled={loading}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-field text-xl font-semibold text-canopy ring-1 ring-line hover:bg-sky disabled:opacity-50"
+              aria-label="Attach photo"
+            >
+              +
+            </button>
             <label className="sr-only" htmlFor="farmer-case-input">
-              Describe the crop problem
+              Ask about your crop
             </label>
             <textarea
               id="farmer-case-input"
               ref={inputRef}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                resizeComposer();
+              }}
               onKeyDown={handleKeyDown}
-              rows={3}
+              rows={1}
               disabled={loading}
-              placeholder={
-                mode === "quick_help"
-                  ? "e.g. Tomato whiteflies"
-                  : "Continue the full crop check…"
-              }
-              className="min-h-24 flex-1 resize-none rounded-xl border border-line bg-field px-3 py-3 text-base leading-snug text-ink outline-none ring-canopy/30 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
+              placeholder="Ask about your crop…"
+              className="max-h-40 min-h-11 flex-1 resize-none rounded-3xl border border-line bg-field px-4 py-2.5 text-base leading-snug text-ink outline-none ring-canopy/30 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
             />
+            <button
+              type="button"
+              onClick={() => attachRef.current?.openCamera()}
+              disabled={loading}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-field text-canopy ring-1 ring-line hover:bg-sky disabled:opacity-50"
+              aria-label="Take photo"
+            >
+              <CameraIcon />
+            </button>
             <button
               type="submit"
               disabled={loading || (!draft.trim() && attachedImages.length === 0)}
-              className="min-h-24 min-w-20 rounded-xl bg-leaf px-4 text-sm font-semibold text-white transition enabled:hover:bg-canopy disabled:opacity-50"
+              className="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full bg-leaf px-3 text-sm font-semibold text-white transition enabled:hover:bg-canopy disabled:opacity-50"
             >
               Send
             </button>
           </form>
-
-          <button
-            type="button"
-            onClick={clearConversation}
-            disabled={loading || (messages.length === 0 && !error)}
-            className="min-h-11 w-full rounded-xl bg-surface text-sm font-semibold text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-50"
-          >
-            Clear conversation
-          </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden
+    >
+      <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h2l1.2-1.6A1.5 1.5 0 0 1 10.9 4h2.2a1.5 1.5 0 0 1 1.2.4L15.5 6h2A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8Z" />
+      <circle cx="12" cy="12.5" r="3.2" />
+    </svg>
   );
 }

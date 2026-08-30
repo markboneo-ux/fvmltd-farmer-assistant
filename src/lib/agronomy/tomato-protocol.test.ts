@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgronomicCasePayload } from "./case-schema";
-import { emptyRegionalContext } from "./case-schema";
+import { emptyRegionalContext, isGuidanceStage } from "./case-schema";
 import {
   applyCommercialSafetyGuards,
   extractKnownFacts,
@@ -62,6 +62,45 @@ describe("tomato-protocol rapid triage", () => {
     expect(
       questionAsksForKnownFact(WHITEFLY_QUICK_SEQUENCE[0], facts),
     ).toBe(false);
+  });
+
+  it("remembers commercial scale, acreage and plant age so they are not re-asked", () => {
+    const facts = extractKnownFacts(
+      "I am a commercial farmer with 3 acres of tomato and the plants are 6 weeks old.",
+    );
+    expect(facts.farmerScale).toBe("commercial");
+    expect(facts.areaPlanted).toMatch(/3 acres/);
+    expect(facts.plantAge).toMatch(/6 weeks/);
+    expect(
+      questionAsksForKnownFact("Are you a commercial or home gardener?", facts),
+    ).toBe(true);
+    expect(
+      questionAsksForKnownFact("How many acres is the field?", facts),
+    ).toBe(true);
+    expect(
+      questionAsksForKnownFact("How old are the plants?", facts),
+    ).toBe(true);
+  });
+
+  it("does not force a follow-up when the model already answered usefully", () => {
+    const guarded = applyCommercialSafetyGuards(
+      basePayload({
+        stage: "questioning",
+        nextQuestion: "",
+        preliminaryAssessment:
+          "Whiteflies usually gather underneath the leaves and can cause yellowing, sticky honeydew and sooty mould.",
+        checksToday: [],
+        safeActionsNow: [],
+      }),
+      {
+        mode: "quick_help",
+        questionsAskedBeforeThisTurn: 0,
+        knownFacts: extractKnownFacts("Tomato whiteflies"),
+      },
+    );
+
+    expect(isGuidanceStage(guarded.stage)).toBe(true);
+    expect(guarded.nextQuestion).toBe("");
   });
 
   it("forces preliminary guidance after three Quick Help questions", () => {

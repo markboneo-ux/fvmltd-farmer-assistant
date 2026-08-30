@@ -9,8 +9,8 @@ export default function AiLabPage() {
       showDiagnostics
       showTestPrompts
       defaultCountry="Trinidad and Tobago"
-      title="FVM AI Laboratory"
-      subtitle="Region-aware Caribbean crop advisory — Quick Help by default (max three questions), working photo upload, verified Trinidad inputs, and weather-linked risk. Endpoint /api/ai/case."
+      title="Farmersvaluemart AI"
+      subtitle="Developer lab — diagnostics stay hidden unless opened"
     />
   );
 }

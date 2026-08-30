@@ -70,6 +70,8 @@ export const WHITEFLY_QUICK_SEQUENCE = [
   "What have you sprayed during the last seven days?",
 ] as const;
 
+export type FarmerScale = "commercial" | "home" | null;
+
 export type KnownFarmerFacts = {
   crop: string | null;
   suspectedIssue: string | null;
@@ -77,9 +79,13 @@ export type KnownFarmerFacts = {
   district: string | null;
   distributionHint: string | null;
   productionSystem: string | null;
+  farmerScale: FarmerScale;
+  areaPlanted: string | null;
+  plantAge: string | null;
   suddenWilt: boolean;
   stuntedWholeField: boolean;
   asksForProducts: boolean;
+  asksAboutWeather: boolean;
   rawText: string;
 };
 
@@ -97,6 +103,15 @@ const LOCATION_QUESTION =
 
 const CROP_QUESTION =
   /\b(what\s+crop|which\s+crop|is\s+it\s+tomato|pepper\s+or|what\s+are\s+you\s+growing)\b/i;
+
+const SCALE_QUESTION =
+  /\b(commercial\s+or\s+home|home\s+garden|are\s+you\s+a\s+(commercial|home)|smallholder\s+or\s+commercial)\b/i;
+
+const ACREAGE_QUESTION =
+  /\b(how\s+many\s+acres|what\s+acreage|area\s+planted|how\s+large\s+is\s+(the|your)\s+(field|plot|farm))\b/i;
+
+const PLANT_AGE_QUESTION =
+  /\b(how\s+old\s+are\s+the\s+plants|plant\s+age|weeks?\s+old|what\s+stage\s+are\s+the\s+plants)\b/i;
 
 /**
  * Extract facts already stated by the farmer so we never re-ask them.
@@ -154,6 +169,31 @@ export function extractKnownFacts(
   else if (/\bhydroponic\b/.test(lower)) productionSystem = "hydroponic";
   else if (/\bopen\s+field\b/.test(lower)) productionSystem = "open_field";
 
+  let farmerScale: FarmerScale = null;
+  if (
+    /\bcommercial\s+(farmer|grower|farm|production|field)\b/.test(lower) ||
+    /\bi('m| am)\s+a\s+commercial\b/.test(lower)
+  ) {
+    farmerScale = "commercial";
+  } else if (
+    /\b(home|backyard|kitchen)\s+(garden|gardener|grower)\b/.test(lower) ||
+    /\bhome\s+gardener\b/.test(lower)
+  ) {
+    farmerScale = "home";
+  }
+
+  const areaMatch = lower.match(
+    /\b(\d+(?:\.\d+)?)\s*(acres?|hectares?|ha)\b/,
+  );
+  const areaPlanted = areaMatch
+    ? `${areaMatch[1]} ${areaMatch[2]}`
+    : null;
+
+  const ageMatch =
+    lower.match(/\b(\d+)\s*(weeks?|months?|days?)\s+old\b/) ||
+    lower.match(/\bplants?\s+are\s+(\d+)\s*(weeks?|months?|days?)\b/);
+  const plantAge = ageMatch ? `${ageMatch[1]} ${ageMatch[2]}` : null;
+
   return {
     crop,
     suspectedIssue,
@@ -161,6 +201,9 @@ export function extractKnownFacts(
     district,
     distributionHint,
     productionSystem,
+    farmerScale,
+    areaPlanted,
+    plantAge,
     suddenWilt:
       /\bsudden(ly)?\s+wilt/.test(lower) ||
       /\bwilt(ing|ed)?\s+suddenly\b/.test(lower),
@@ -168,9 +211,13 @@ export function extractKnownFacts(
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
     asksForProducts:
-      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use)|recommend(ed)?\s+(a\s+)?(product|chemical))\b/.test(
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use)|what\s+can\s+i\s+use|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
         lower,
       ) || /\bask about products\b/.test(lower),
+    asksAboutWeather:
+      /\b(weather|forecast|humidity|humid|dew\b|leaf\s+disease|disease\s+pressure|heavy\s+rain|rainfall|rainy|could this weather)\b/.test(
+        lower,
+      ) || /\bwhy am i suddenly seeing more\b/.test(lower),
     rawText,
   };
 }
@@ -204,6 +251,18 @@ export function questionAsksForKnownFact(
     LOCATION_QUESTION.test(question) &&
     !/\b(would|materially|change)\b/i.test(question)
   ) {
+    return true;
+  }
+
+  if (facts.farmerScale && SCALE_QUESTION.test(question)) {
+    return true;
+  }
+
+  if (facts.areaPlanted && ACREAGE_QUESTION.test(question)) {
+    return true;
+  }
+
+  if (facts.plantAge && PLANT_AGE_QUESTION.test(question)) {
     return true;
   }
 
@@ -348,10 +407,24 @@ export function applyCommercialSafetyGuards(
     }
   }
 
-  // During early interview turns, keep guidance light but allow a short framing line.
-  if (mode === "quick_help" && isInterviewStage(stage)) {
-    if (!nextQuestion) {
-      nextQuestion = pickFallbackQuestion(options.knownFacts, options.questionsAskedBeforeThisTurn);
+  // Ask a follow-up only when the model left a material gap — do not force
+  // a three-question interview when useful advice is already available.
+  if (mode === "quick_help" && isInterviewStage(stage) && !nextQuestion) {
+    const usefulAnswer =
+      hasUsefulGuidance({
+        ...payload,
+        preliminaryAssessment,
+        checksToday,
+        safeActionsNow,
+      }) || preliminaryAssessment.length > 80;
+
+    if (usefulAnswer) {
+      stage = options.knownFacts.suddenWilt ? "human_review" : "assessment";
+    } else {
+      nextQuestion = pickFallbackQuestion(
+        options.knownFacts,
+        options.questionsAskedBeforeThisTurn,
+      );
     }
   }
 
@@ -413,11 +486,6 @@ export function applyCommercialSafetyGuards(
     questionType = "";
     questionId = "";
     quickReplies = [];
-  }
-
-  // Keep preliminaryAssessment short during interview — facts only, not a full summary dump.
-  if (isInterviewStage(stage) && preliminaryAssessment.length > 160) {
-    preliminaryAssessment = preliminaryAssessment.slice(0, 157) + "…";
   }
 
   return {
