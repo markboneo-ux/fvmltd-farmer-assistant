@@ -1,6 +1,7 @@
 "use client";
 
 import { FarmerCaseChat } from "@/components/FarmerCaseChat";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 export default function AiLabPage() {
   return (
@@ -9,7 +10,7 @@ export default function AiLabPage() {
       showDiagnostics
       showTestPrompts
       defaultCountry="Trinidad and Tobago"
-      title="Farmersvaluemart AI"
+      title={PRODUCT_NAME}
       subtitle="Developer lab — diagnostics stay hidden unless opened"
     />
   );

@@ -1,8 +1,8 @@
 import { GuestAIChat } from "@/components/GuestAIChat";
 
 /**
- * AI-first guest homepage — farmers can ask immediately.
- * Registration and farm setup are optional and never block chat.
+ * Production farmer route.
+ * GET / must serve FVM Crop Solution — never a platform 404, login wall, or /ai-lab.
  */
 export default function HomePage() {
   return <GuestAIChat />;

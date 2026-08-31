@@ -178,7 +178,7 @@ export function ChatAssistantMessage({
                 }
                 onQuickReply?.(reply);
               }}
-              className="min-h-10 rounded-full bg-sky px-3.5 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-mint/40 disabled:opacity-50"
+              className="min-h-10 rounded-full bg-sky px-3.5 py-2 text-left text-sm font-medium text-canopy ring-1 ring-line/80 transition hover:bg-white disabled:opacity-50"
             >
               {reply}
             </button>

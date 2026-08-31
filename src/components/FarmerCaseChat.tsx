@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { ChatAssistantMessage } from "@/components/ChatAssistantMessage";
 import {
   CasePhotoAttach,
@@ -10,6 +11,7 @@ import {
   type CasePhotoAttachHandle,
 } from "@/components/CasePhotoAttach";
 import type { AgronomicCasePayload, CaseMode } from "@/lib/agronomy/case-schema";
+import { PRODUCT_NAME, PRODUCT_SUBTITLE } from "@/lib/brand";
 import {
   FARMER_PHOTO_TOO_LARGE,
   FARMER_PHOTO_UPLOAD_FAILED,
@@ -58,26 +60,23 @@ type FarmerCaseChatProps = {
   subtitle?: string;
 };
 
-const WELCOME_TEXT =
-  "Hi. Ask me anything about your crop, or send me a photo of what you’re seeing.";
-
 const STARTER_CHIPS = [
-  { id: "diagnose", label: "Diagnose a crop problem", prompt: "My crop has a problem. Can you help me work out what’s going on?" },
-  { id: "photo", label: "Upload a photo", prompt: "" },
-  { id: "product", label: "Ask about a product", prompt: "What can I use for this in Trinidad?" },
+  {
+    id: "diagnose",
+    label: "Diagnose a crop problem",
+    prompt:
+      "My crop has a problem. Can you help me work out what’s going on?",
+  },
+  { id: "photo", label: "Send a photo", prompt: "" },
+  {
+    id: "product",
+    label: "Ask about a product",
+    prompt: "What can I use for this in Trinidad?",
+  },
 ] as const;
 
 function messageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function welcomeMessage(): ChatMessage {
-  return {
-    id: "welcome",
-    role: "assistant",
-    text: WELCOME_TEXT,
-    local: true,
-  };
 }
 
 export function FarmerCaseChat({
@@ -86,16 +85,17 @@ export function FarmerCaseChat({
   showTestPrompts = false,
   defaultCountry = "Trinidad and Tobago",
   defaultDistrict = null,
-  title = "Farmersvaluemart AI",
-  subtitle = "Your Caribbean farming assistant",
+  title = PRODUCT_NAME,
+  subtitle = PRODUCT_SUBTITLE,
 }: FarmerCaseChatProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachRef = useRef<CasePhotoAttachHandle>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
 
   const [mode, setMode] = useState<CaseMode>("quick_help");
-  const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,8 +107,7 @@ export function FarmerCaseChat({
   const [questionsAsked, setQuestionsAsked] = useState<number | null>(null);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
 
-  const farmerMessages = messages.filter((item) => !item.local);
-  const showStarters = farmerMessages.length === 0 && !loading;
+  const showWelcome = messages.length === 0 && !loading;
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({
@@ -134,6 +133,7 @@ export function FarmerCaseChat({
 
     clearQuickReplies();
     setMenuOpen(false);
+    setAttachMenuOpen(false);
 
     const nextMode =
       /start full crop check|more detailed crop assessment/i.test(trimmed)
@@ -328,12 +328,13 @@ export function FarmerCaseChat({
       }
     }
     setAttachedImages([]);
-    setMessages([welcomeMessage()]);
+    setMessages([]);
     setError(null);
     setPreviousResponseId(null);
     setQuestionsAsked(null);
     setMode("quick_help");
     setMenuOpen(false);
+    setAttachMenuOpen(false);
     inputRef.current?.focus();
   }
 
@@ -351,19 +352,29 @@ export function FarmerCaseChat({
     .find((item) => item.role === "assistant" && item.casePayload);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-sky">
-      <header className="sticky top-0 z-20 border-b border-line/80 bg-surface/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold tracking-tight text-canopy">
-              {title}
-            </p>
-            <p className="truncate text-xs text-muted">{subtitle}</p>
+    <div className="flex h-dvh flex-col overflow-hidden bg-sky">
+      <header className="sticky top-0 z-20 border-b border-line/80 bg-surface/95 backdrop-blur-md">
+        <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-3 px-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <BrandLogo className="h-9 w-auto shrink-0 sm:h-10" priority />
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-semibold tracking-tight text-canopy sm:text-base">
+                {title}
+              </p>
+              {subtitle ? (
+                <p className="hidden truncate text-xs text-muted md:block">
+                  {subtitle}
+                </p>
+              ) : null}
+            </div>
           </div>
           <button
             type="button"
-            onClick={() => setMenuOpen((open) => !open)}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-canopy ring-1 ring-line hover:bg-sky"
+            onClick={() => {
+              setAttachMenuOpen(false);
+              setMenuOpen((open) => !open);
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-canopy hover:bg-sky"
             aria-expanded={menuOpen}
             aria-label="Open menu"
           >
@@ -374,170 +385,73 @@ export function FarmerCaseChat({
         </div>
 
         {menuOpen ? (
-          <div className="mx-auto mt-3 w-full max-w-3xl rounded-2xl bg-field p-2 ring-1 ring-line">
-            <button
-              type="button"
-              onClick={startFullCropCheck}
-              disabled={loading}
-              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
-            >
-              More detailed crop assessment
-            </button>
-            <button
-              type="button"
-              onClick={clearConversation}
-              disabled={loading}
-              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
-            >
-              New conversation
-            </button>
-            {showModeToggle ? (
+          <div className="mx-auto mb-3 w-full max-w-3xl px-4">
+            <div className="rounded-2xl bg-surface p-1.5 shadow-lg shadow-black/5 ring-1 ring-line/80">
               <button
                 type="button"
-                onClick={() => {
-                  setMode((current) =>
-                    current === "quick_help" ? "full_crop_check" : "quick_help",
-                  );
-                }}
-                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                onClick={startFullCropCheck}
+                disabled={loading}
+                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
               >
-                Mode: {mode === "full_crop_check" ? "Full crop check" : "Chat"}
+                More detailed crop assessment
               </button>
-            ) : null}
-            <Link
-              href="/register"
-              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
-              onClick={() => setMenuOpen(false)}
-            >
-              Save a farmer profile (optional)
-            </Link>
-            {showDiagnostics ? (
-              <p className="px-3 py-2 text-xs text-muted">
-                Developer lab — diagnostics stay collapsed below replies.
-              </p>
-            ) : null}
+              <button
+                type="button"
+                onClick={clearConversation}
+                disabled={loading}
+                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky disabled:opacity-50"
+              >
+                New conversation
+              </button>
+              {showModeToggle ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode((current) =>
+                      current === "quick_help" ? "full_crop_check" : "quick_help",
+                    );
+                  }}
+                  className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                >
+                  Mode: {mode === "full_crop_check" ? "Full crop check" : "Chat"}
+                </button>
+              ) : null}
+              <Link
+                href="/register"
+                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                onClick={() => setMenuOpen(false)}
+              >
+                Save a farmer profile (optional)
+              </Link>
+              {showDiagnostics ? (
+                <p className="px-3 py-2 text-xs text-muted">
+                  Developer lab — diagnostics stay collapsed below replies.
+                </p>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </header>
 
       <div
         ref={scrollerRef}
-        className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-5"
+        className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-y-auto px-4"
         role="log"
         aria-live="polite"
         aria-relevant="additions"
       >
-        {messages.map((message) => {
-          const isUser = message.role === "user";
-          const isLatestAssistant =
-            !isUser && latestAssistant?.id === message.id;
-
-          return (
-            <div
-              key={message.id}
-              className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-[88%] rounded-3xl px-4 py-3 text-[15px] leading-relaxed sm:max-w-[80%] ${
-                  isUser
-                    ? "rounded-br-lg bg-canopy text-white"
-                    : "rounded-bl-lg bg-surface text-ink shadow-sm ring-1 ring-line/80"
-                }`}
-              >
-                {isUser ? (
-                  <div className="space-y-2">
-                    {message.images && message.images.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {message.images.map((image) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={image.id}
-                            src={image.previewUrl}
-                            alt={image.fileName}
-                            className="h-20 w-20 rounded-xl object-cover ring-1 ring-white/30"
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                    <p className="whitespace-pre-wrap">{message.text}</p>
-                  </div>
-                ) : (
-                  <ChatAssistantMessage
-                    payload={message.casePayload}
-                    text={message.text}
-                    showQuickReplies={
-                      isLatestAssistant &&
-                      Boolean(activeQuestionId) &&
-                      message.casePayload?.questionId === activeQuestionId
-                    }
-                    quickRepliesDisabled={loading || !isLatestAssistant}
-                    onUploadPhoto={() => attachRef.current?.openLibrary()}
-                    onQuickReply={
-                      isLatestAssistant
-                        ? (reply) => {
-                            clearQuickReplies();
-                            void sendQuestion(reply);
-                          }
-                        : undefined
-                    }
-                  />
-                )}
-
-                {showDiagnostics && message.casePayload ? (
-                  <details className="mt-3 rounded-xl bg-field/90 px-3 py-2 text-xs text-muted ring-1 ring-line">
-                    <summary className="cursor-pointer font-semibold text-canopy">
-                      Developer diagnostics
-                    </summary>
-                    <div className="mt-2 space-y-1 font-mono">
-                      <p>model: {message.model || "—"}</p>
-                      <p>
-                        time:{" "}
-                        {typeof message.responseSeconds === "number"
-                          ? `${message.responseSeconds.toFixed(2)}s`
-                          : "—"}
-                      </p>
-                      <p>code: {message.diagnosticCode || "—"}</p>
-                      <p>stage: {message.casePayload.stage}</p>
-                      <p>mode: {message.casePayload.mode}</p>
-                      <p>
-                        questionsAsked:{" "}
-                        {message.questionsAsked ?? questionsAsked ?? "—"}
-                      </p>
-                      <p>
-                        missing:{" "}
-                        {message.casePayload.internalMissingInformation.join(
-                          ", ",
-                        ) || "—"}
-                      </p>
-                    </div>
-                  </details>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-
-        {loading ? (
-          <div className="flex justify-start" aria-busy="true">
-            <div className="rounded-3xl rounded-bl-lg bg-surface px-4 py-3 text-sm text-muted shadow-sm ring-1 ring-line/80">
-              <span className="inline-flex items-center gap-2">
-                <span
-                  className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-leaf"
-                  aria-hidden
-                />
-                {analyzingPhotos
-                  ? "Looking at your photo…"
-                  : "Thinking…"}
-              </span>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="sticky bottom-0 z-20 border-t border-line/80 bg-surface/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-          {showStarters ? (
-            <div className="flex flex-wrap gap-2">
+        {showWelcome ? (
+          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+            <h1 className="text-[2rem] leading-tight font-semibold tracking-tight text-ink">
+              Hi 👋
+            </h1>
+            <p className="mt-3 text-xl font-medium text-balance text-ink">
+              What is happening with your crop?
+            </p>
+            <p className="mt-2 max-w-md text-sm leading-relaxed text-muted">
+              You can type your problem or send me a photo.
+            </p>
+            <div className="mt-8 flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
               {STARTER_CHIPS.map((chip) => (
                 <button
                   key={chip.id}
@@ -545,12 +459,12 @@ export function FarmerCaseChat({
                   disabled={loading}
                   onClick={() => {
                     if (chip.id === "photo") {
-                      attachRef.current?.openLibrary();
+                      setAttachMenuOpen(true);
                       return;
                     }
                     void sendQuestion(chip.prompt);
                   }}
-                  className="min-h-10 rounded-full bg-field px-3.5 py-2 text-sm font-medium text-canopy ring-1 ring-line transition hover:bg-sky disabled:opacity-60"
+                  className="min-h-11 rounded-full bg-surface px-4 py-2.5 text-sm font-medium text-canopy shadow-sm ring-1 ring-line/90 transition hover:ring-canopy/30 disabled:opacity-60"
                 >
                   {chip.label}
                 </button>
@@ -561,7 +475,7 @@ export function FarmerCaseChat({
                     type="button"
                     disabled={loading}
                     onClick={() => void sendQuestion("Tomatoes stunted")}
-                    className="min-h-10 rounded-full bg-field px-3.5 py-2 text-sm font-medium text-muted ring-1 ring-line"
+                    className="min-h-11 rounded-full bg-surface px-4 py-2.5 text-sm font-medium text-muted ring-1 ring-line"
                   >
                     Tomatoes stunted
                   </button>
@@ -569,17 +483,129 @@ export function FarmerCaseChat({
                     type="button"
                     disabled={loading}
                     onClick={() => void sendQuestion("Whiteflies on tomato")}
-                    className="min-h-10 rounded-full bg-field px-3.5 py-2 text-sm font-medium text-muted ring-1 ring-line"
+                    className="min-h-11 rounded-full bg-surface px-4 py-2.5 text-sm font-medium text-muted ring-1 ring-line"
                   >
                     Whiteflies on tomato
                   </button>
                 </>
               ) : null}
             </div>
-          ) : null}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4 py-5">
+            {messages.map((message) => {
+              const isUser = message.role === "user";
+              const isLatestAssistant =
+                !isUser && latestAssistant?.id === message.id;
 
+              return (
+                <div
+                  key={message.id}
+                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[88%] px-4 py-3 text-[15px] leading-relaxed sm:max-w-[80%] ${
+                      isUser
+                        ? "rounded-2xl rounded-br-md bg-canopy text-white"
+                        : "rounded-2xl rounded-bl-md bg-surface text-ink shadow-sm"
+                    }`}
+                  >
+                    {isUser ? (
+                      <div className="space-y-2">
+                        {message.images && message.images.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {message.images.map((image) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                key={image.id}
+                                src={image.previewUrl}
+                                alt={image.fileName}
+                                className="h-20 w-20 rounded-xl object-cover"
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                        <p className="whitespace-pre-wrap">{message.text}</p>
+                      </div>
+                    ) : (
+                      <ChatAssistantMessage
+                        payload={message.casePayload}
+                        text={message.text}
+                        showQuickReplies={
+                          isLatestAssistant &&
+                          Boolean(activeQuestionId) &&
+                          message.casePayload?.questionId === activeQuestionId
+                        }
+                        quickRepliesDisabled={loading || !isLatestAssistant}
+                        onUploadPhoto={() => attachRef.current?.openLibrary()}
+                        onQuickReply={
+                          isLatestAssistant
+                            ? (reply) => {
+                                clearQuickReplies();
+                                void sendQuestion(reply);
+                              }
+                            : undefined
+                        }
+                      />
+                    )}
+
+                    {showDiagnostics && message.casePayload ? (
+                      <details className="mt-3 rounded-xl bg-sky px-3 py-2 text-xs text-muted">
+                        <summary className="cursor-pointer font-semibold text-canopy">
+                          Developer diagnostics
+                        </summary>
+                        <div className="mt-2 space-y-1 font-mono">
+                          <p>model: {message.model || "—"}</p>
+                          <p>
+                            time:{" "}
+                            {typeof message.responseSeconds === "number"
+                              ? `${message.responseSeconds.toFixed(2)}s`
+                              : "—"}
+                          </p>
+                          <p>code: {message.diagnosticCode || "—"}</p>
+                          <p>stage: {message.casePayload.stage}</p>
+                          <p>mode: {message.casePayload.mode}</p>
+                          <p>
+                            questionsAsked:{" "}
+                            {message.questionsAsked ?? questionsAsked ?? "—"}
+                          </p>
+                          <p>
+                            missing:{" "}
+                            {message.casePayload.internalMissingInformation.join(
+                              ", ",
+                            ) || "—"}
+                          </p>
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+
+            {loading ? (
+              <div className="flex justify-start" aria-busy="true">
+                <div className="rounded-2xl rounded-bl-md bg-surface px-4 py-3 text-sm text-muted shadow-sm">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-accent-lime"
+                      aria-hidden
+                    />
+                    {analyzingPhotos
+                      ? "Looking at your photo…"
+                      : "Thinking…"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div className="z-20 shrink-0 bg-sky/90 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md">
+        <div className="mx-auto w-full max-w-3xl space-y-2">
           {error ? (
-            <p className="text-sm font-medium text-danger" role="alert">
+            <p className="px-1 text-sm font-medium text-danger" role="alert">
               {error}
             </p>
           ) : null}
@@ -592,13 +618,41 @@ export function FarmerCaseChat({
             uploading={loading && attachedImages.length > 0}
           />
 
-          <form className="flex items-end gap-2" onSubmit={handleSubmit}>
+          <form className="relative flex items-end gap-1.5" onSubmit={handleSubmit}>
+            {attachMenuOpen ? (
+              <div className="absolute bottom-full left-0 mb-2 w-44 overflow-hidden rounded-2xl bg-surface py-1 shadow-lg shadow-black/5 ring-1 ring-line/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    attachRef.current?.openCamera();
+                    setAttachMenuOpen(false);
+                  }}
+                  className="flex min-h-11 w-full items-center px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                >
+                  Take Photo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    attachRef.current?.openLibrary();
+                    setAttachMenuOpen(false);
+                  }}
+                  className="flex min-h-11 w-full items-center px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                >
+                  Choose Photo
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
-              onClick={() => attachRef.current?.openLibrary()}
+              onClick={() => {
+                setMenuOpen(false);
+                setAttachMenuOpen((open) => !open);
+              }}
               disabled={loading}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-field text-xl font-semibold text-canopy ring-1 ring-line hover:bg-sky disabled:opacity-50"
-              aria-label="Attach photo"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface text-xl font-semibold text-canopy shadow-sm ring-1 ring-line/80 hover:bg-white disabled:opacity-50"
+              aria-label="Add photo"
+              aria-expanded={attachMenuOpen}
             >
               +
             </button>
@@ -616,14 +670,14 @@ export function FarmerCaseChat({
               onKeyDown={handleKeyDown}
               rows={1}
               disabled={loading}
-              placeholder="Ask about your crop…"
-              className="max-h-40 min-h-11 flex-1 resize-none rounded-3xl border border-line bg-field px-4 py-2.5 text-base leading-snug text-ink outline-none ring-canopy/30 placeholder:text-muted/80 focus:ring-2 disabled:opacity-60"
+              placeholder="Ask about your crop..."
+              className="max-h-40 min-h-11 flex-1 resize-none rounded-3xl border-0 bg-surface px-4 py-2.5 text-base leading-snug text-ink shadow-sm outline-none ring-1 ring-line/80 placeholder:text-muted/80 focus:ring-2 focus:ring-canopy/25 disabled:opacity-60"
             />
             <button
               type="button"
               onClick={() => attachRef.current?.openCamera()}
               disabled={loading}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-field text-canopy ring-1 ring-line hover:bg-sky disabled:opacity-50"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface text-canopy shadow-sm ring-1 ring-line/80 hover:bg-white disabled:opacity-50"
               aria-label="Take photo"
             >
               <CameraIcon />
@@ -631,7 +685,7 @@ export function FarmerCaseChat({
             <button
               type="submit"
               disabled={loading || (!draft.trim() && attachedImages.length === 0)}
-              className="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full bg-leaf px-3 text-sm font-semibold text-white transition enabled:hover:bg-canopy disabled:opacity-50"
+              className="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full bg-canopy px-3 text-sm font-semibold text-white transition enabled:hover:bg-leaf-bright disabled:opacity-50"
             >
               Send
             </button>

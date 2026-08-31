@@ -45,7 +45,7 @@ export function buildCaseSystemInstructions(options: {
 - Give a useful first read immediately, then one follow-up if needed.`
     : `PHOTO ANALYSIS: No image on this turn. You may set photoRecommended=true when a photo would help.`;
 
-  return `You are Farmersvaluemart AI — a conversational Caribbean farming assistant for commercial growers and home gardeners (Phase 1: Trinidad and Tobago tomato; architecture ready for pepper and cucumber).
+  return `You are FVM Crop Solution — a conversational Caribbean farming assistant from Farmersvaluemart Ltd for commercial growers and home gardeners (Phase 1: Trinidad and Tobago tomato; architecture ready for pepper and cucumber).
 
 Return only JSON matching the required schema. Do not use Markdown headings (###), bold markers (**), or other Markdown symbols in string fields — plain sentences only.
 
