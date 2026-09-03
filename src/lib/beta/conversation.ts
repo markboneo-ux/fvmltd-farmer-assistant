@@ -1,12 +1,18 @@
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
+import type { CaseChatMessage } from "@/lib/agronomy/runCase";
 import { getSimilarCases } from "@/lib/cases/similar";
 import {
+  addCaseAction,
+  addCaseAssessment,
   addCaseMessage,
   addCaseObservation,
   addCasePhoto,
+  CasePersistenceError,
   createCropCase,
   getCropCase,
   hasActiveCase,
+  listCaseMessages,
+  logCasePersistenceBackend,
   updateCaseFromConversation,
 } from "@/lib/cases/store";
 import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
@@ -18,15 +24,15 @@ export type ConversationGate = UsageDecision & {
   used: ReturnType<typeof countUsage>;
 };
 
-export function evaluateConversationGate(options: {
+export async function evaluateConversationGate(options: {
   identity: AppIdentity;
   next: "message" | "case" | "image_analysis";
-}): ConversationGate {
+}): Promise<ConversationGate> {
   const used = countUsage({
     guestSessionId: options.identity.guestSessionId,
     authUserId: options.identity.authUserId,
   });
-  const activeCaseInProgress = hasActiveCase({
+  const activeCaseInProgress = await hasActiveCase({
     userId: options.identity.authUserId,
     anonymousSessionId: options.identity.guestSessionId,
   });
@@ -39,7 +45,32 @@ export function evaluateConversationGate(options: {
   return { ...decision, used };
 }
 
-export function persistConversationTurn(options: {
+export async function loadPersistedConversationHistory(
+  caseId: string | null | undefined,
+  currentMessage?: string,
+): Promise<CaseChatMessage[] | null> {
+  if (!caseId) return null;
+  const stored = await listCaseMessages(caseId);
+  if (stored.length === 0) return null;
+  const history: CaseChatMessage[] = stored
+    .filter((item): item is typeof item & { role: "user" | "assistant" } =>
+      item.role === "user" || item.role === "assistant",
+    )
+    .map((item) => ({
+      role: item.role,
+      content: item.content,
+    }));
+  if (
+    currentMessage &&
+    history.at(-1)?.role === "user" &&
+    history.at(-1)?.content === currentMessage
+  ) {
+    return history.slice(0, -1);
+  }
+  return history;
+}
+
+export async function persistConversationTurn(options: {
   identity: AppIdentity;
   caseId?: string | null;
   userMessage: string;
@@ -47,13 +78,14 @@ export function persistConversationTurn(options: {
   payload?: AgronomicCasePayload | null;
   imageCount?: number;
   profile?: { country?: string | null; district?: string | null } | null;
-}): { caseId: string; createdNewCase: boolean } {
+}): Promise<{ caseId: string; createdNewCase: boolean }> {
+  logCasePersistenceBackend();
   const { identity } = options;
   let createdNewCase = false;
-  let record = options.caseId ? getCropCase(options.caseId) : null;
+  let record = options.caseId ? await getCropCase(options.caseId) : null;
 
   if (!record) {
-    record = createCropCase({
+    record = await createCropCase({
       userId: identity.authUserId,
       anonymousSessionId: identity.guestSessionId,
       accessState: identity.access,
@@ -68,7 +100,7 @@ export function persistConversationTurn(options: {
       caseId: record.id,
     });
   } else {
-    updateCaseFromConversation(record.id, options.userMessage, {
+    await updateCaseFromConversation(record.id, options.userMessage, {
       productsRequested:
         record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
       verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
@@ -86,20 +118,20 @@ export function persistConversationTurn(options: {
     });
   }
 
-  addCaseMessage({
+  await addCaseMessage({
     caseId: record.id,
     role: "user",
     content: options.userMessage,
     hasImages: (options.imageCount ?? 0) > 0,
   });
-  addCaseMessage({
+  await addCaseMessage({
     caseId: record.id,
     role: "assistant",
     content: options.assistantText,
   });
 
   if (options.payload) {
-    addCaseObservation({
+    await addCaseObservation({
       caseId: record.id,
       observedFacts: [options.userMessage],
       possibleCauses: options.payload.checksToday,
@@ -112,6 +144,14 @@ export function persistConversationTurn(options: {
       nextCheck: options.payload.nextQuestion || options.payload.checksToday[0] || null,
       recommendedAction: options.payload.safeActionsNow[0] || null,
     });
+    await addCaseAssessment({
+      caseId: record.id,
+      payload: { ...options.payload } as Record<string, unknown>,
+    });
+    for (const actionText of options.payload.safeActionsNow) {
+      if (!actionText.trim()) continue;
+      await addCaseAction({ caseId: record.id, actionText });
+    }
   }
 
   recordUsageEvent({
@@ -130,34 +170,36 @@ export function persistConversationTurn(options: {
     });
   }
 
-  const latest = getCropCase(record.id);
+  const latest = await getCropCase(record.id);
   if (latest && !latest.humanEscalation) {
-    addCaseFollowupSafe(latest);
+    await addCaseFollowupSafe(latest);
   }
 
   return { caseId: record.id, createdNewCase };
 }
 
-export function similarCaseHint(caseId: string): string | null {
-  const record = getCropCase(caseId);
+export async function similarCaseHint(caseId: string): Promise<string | null> {
+  const record = await getCropCase(caseId);
   if (!record) return null;
-  const matches = getSimilarCases(
-    {
-      country: record.country,
-      district: record.district,
-      crop: record.crop,
-      variety: record.variety,
-      symptoms: record.symptoms,
-      problemCategory: record.problemCategory,
-      productionSystem: record.productionSystem,
-      weatherContext: record.weatherRisk,
-    },
-    3,
+  const matches = (
+    await getSimilarCases(
+      {
+        country: record.country,
+        district: record.district,
+        crop: record.crop,
+        variety: record.variety,
+        symptoms: record.symptoms,
+        problemCategory: record.problemCategory,
+        productionSystem: record.productionSystem,
+        weatherContext: record.weatherRisk,
+      },
+      3,
+    )
   ).filter((item) => item.caseId !== caseId);
   return matches[0]?.farmerFacingSummary ?? null;
 }
 
-export function recordCasePhoto(options: {
+export async function recordCasePhoto(options: {
   caseId: string;
   identity: AppIdentity;
   storagePath: string;
@@ -173,3 +215,5 @@ export function recordCasePhoto(options: {
     fileSizeBytes: options.fileSizeBytes,
   });
 }
+
+export { CasePersistenceError };

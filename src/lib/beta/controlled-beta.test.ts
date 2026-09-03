@@ -35,6 +35,7 @@ import {
   resetCaseStore,
   addCaseFollowup,
   addCasePhoto,
+  setCasePersistenceModeForTests,
   updateCaseFromConversation,
 } from "@/lib/cases/store";
 import { getMainWebsiteUrl } from "@/lib/config/urls";
@@ -90,6 +91,7 @@ function payload(overrides: Partial<AgronomicCasePayload> = {}): AgronomicCasePa
 }
 
 beforeEach(() => {
+  setCasePersistenceModeForTests("memory");
   resetCaseStore();
   resetUsageStore();
   resetPromoStore();
@@ -100,10 +102,10 @@ beforeEach(() => {
 });
 
 describe("controlled beta — farmer journey and safety", () => {
-  it("1. guest can start without registration", () => {
+  it("1. guest can start without registration", async () => {
     const identity = guest();
     expect(identity.kind).toBe("guest");
-    const gate = evaluateConversationGate({ identity, next: "message" });
+    const gate = await evaluateConversationGate({ identity, next: "message" });
     expect(gate.ok).toBe(true);
   });
 
@@ -160,12 +162,12 @@ describe("controlled beta — farmer journey and safety", () => {
     ).toBe(true);
   });
 
-  it("6. saved images stay private and owner-scoped", () => {
-    const record = createCropCase({
+  it("6. saved images stay private and owner-scoped", async () => {
+    const record = await createCropCase({
       anonymousSessionId: "11111111-1111-4111-8111-111111111111",
       message: "Tomato wilt",
     });
-    const photo = addCasePhoto({
+    const photo = await addCasePhoto({
       caseId: record.id,
       ownerSessionId: record.anonymousSessionId,
       storagePath: `${record.anonymousSessionId}/${record.id}/a.jpg`,
@@ -179,7 +181,7 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(canAccessPhoto(photo, { anonymousSessionId: record.anonymousSessionId })).toBe(true);
   });
 
-  it("7–8. structured case is created and updated from natural speech", () => {
+  it("7–8. structured case is created and updated from natural speech", async () => {
     const facts = extractStructuredFacts(
       "My Ruby tomato in Couva is stunted across about 3 acres.",
     );
@@ -190,11 +192,11 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(facts.area).toMatch(/3 acres/);
     expect(facts.fieldDistribution).toBe("broad");
 
-    const created = createCropCase({
+    const created = await createCropCase({
       anonymousSessionId: "11111111-1111-4111-8111-111111111111",
       message: "My Ruby tomato in Couva is stunted across about 3 acres.",
     });
-    const updated = updateCaseFromConversation(
+    const updated = await updateCaseFromConversation(
       created.id,
       "The soil stays very wet after watering.",
     );
@@ -246,44 +248,44 @@ describe("controlled beta — farmer journey and safety", () => {
     ).toBe(true);
   });
 
-  it("13–14. guest usage increments and hits configurable limits", () => {
+  it("13–14. guest usage increments and hits configurable limits", async () => {
     setUsageLimitOverrides({
       guest_max_messages: 2,
       guest_max_cases: 1,
       guest_max_image_analyses: 1,
     });
     const identity = guest();
-    persistConversationTurn({
+    await persistConversationTurn({
       identity,
       userMessage: "Tomato wilt",
       assistantText: "Let us check the stem.",
       payload: payload(),
     });
     expect(countUsage({ guestSessionId: identity.guestSessionId }).messages).toBe(1);
-    persistConversationTurn({
+    await persistConversationTurn({
       identity,
       userMessage: "Still wilting",
       assistantText: "Send a closer photo.",
       payload: payload(),
     });
-    const gate = evaluateConversationGate({ identity, next: "message" });
+    const gate = await evaluateConversationGate({ identity, next: "message" });
     expect(gate.ok).toBe(false);
     if (gate.ok) throw new Error("expected guest limit");
     expect(gate.reason).toBe("guest_limit");
     expect(GUEST_LIMIT_MESSAGE).toMatch(/Create a free account/);
   });
 
-  it("15–19. guest can register and guest cases link to the new account", () => {
+  it("15–19. guest can register and guest cases link to the new account", async () => {
     const identity = guest();
-    const persisted = persistConversationTurn({
+    const persisted = await persistConversationTurn({
       identity,
       userMessage: "Tomato whiteflies",
       assistantText: "Look under the leaves.",
       payload: payload(),
     });
-    const linked = linkGuestCasesToUser(identity.guestSessionId, "user-1");
+    const linked = await linkGuestCasesToUser(identity.guestSessionId, "user-1");
     expect(linked).toBe(1);
-    expect(assertCaseOwned(persisted.caseId, { userId: "user-1" })?.userId).toBe("user-1");
+    expect((await assertCaseOwned(persisted.caseId, { userId: "user-1" }))?.userId).toBe("user-1");
     expect(resolveAccess({ authUserId: "user-1" })).toBe("free_registered");
   });
 
@@ -331,12 +333,12 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(resolveAccess({ authUserId: "user-1" })).toBe("promo");
   });
 
-  it("24. follow-up outcome is stored", () => {
-    const created = createCropCase({
+  it("24. follow-up outcome is stored", async () => {
+    const created = await createCropCase({
       anonymousSessionId: "11111111-1111-4111-8111-111111111111",
       message: "Tomato leaf spot",
     });
-    const follow = addCaseFollowup({
+    const follow = await addCaseFollowup({
       caseId: created.id,
       userId: null,
       anonymousSessionId: created.anonymousSessionId,
@@ -349,7 +351,7 @@ describe("controlled beta — farmer journey and safety", () => {
       newSeverity: null,
       optedOut: false,
     });
-    const saved = recordFollowupOutcome({
+    const saved = await recordFollowupOutcome({
       followupId: follow.id,
       outcome: parseFollowUpOutcome("Improved")!,
       actionTaken: "Removed lower leaves",
@@ -359,20 +361,20 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(saved?.actionTaken).toMatch(/Removed lower leaves/);
   });
 
-  it("25–26. similar-case retrieval ranks reviewed/outcome cases higher", () => {
-    const weak = createCropCase({
+  it("25–26. similar-case retrieval ranks reviewed/outcome cases higher", async () => {
+    const weak = await createCropCase({
       anonymousSessionId: "a",
       message: "Tomato wilt in Couva",
     });
-    const strong = createCropCase({
+    const strong = await createCropCase({
       anonymousSessionId: "b",
       message: "Tomato wilt in Couva after rain",
     });
-    updateCaseFromConversation(strong.id, "reviewed", {
+    await updateCaseFromConversation(strong.id, "reviewed", {
       agronomistReviewed: true,
       diagnosisConfirmed: true,
     });
-    addCaseFollowup({
+    await addCaseFollowup({
       caseId: strong.id,
       userId: null,
       anonymousSessionId: "b",
@@ -385,11 +387,11 @@ describe("controlled beta — farmer journey and safety", () => {
       newSeverity: null,
       optedOut: false,
     });
-    recordFollowupOutcome({
-      followupId: listFollowups(strong.id)[0].id,
+    await recordFollowupOutcome({
+      followupId: (await listFollowups(strong.id))[0].id,
       outcome: "improved",
     });
-    const ranked = getSimilarCases({
+    const ranked = await getSimilarCases({
       country: "Trinidad and Tobago",
       district: "Couva",
       crop: "tomato",
@@ -403,14 +405,14 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(ranked[0]?.farmerFacingSummary).not.toMatch(/anonymousSessionId|user-|_@/);
   });
 
-  it("27. admin insights aggregate cases", () => {
-    persistConversationTurn({
+  it("27. admin insights aggregate cases", async () => {
+    await persistConversationTurn({
       identity: guest(),
       userMessage: "Whiteflies on tomato in Couva",
       assistantText: "Check the underside of leaves.",
       payload: payload(),
     });
-    const insights = buildInsights();
+    const insights = await buildInsights();
     expect(insights.activity.cases).toBe(1);
     expect(insights.agronomy.problemsByCrop[0]?.label).toBe("tomato");
   });
@@ -424,13 +426,13 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(middleware).toMatch(/\/admin/);
   });
 
-  it("29. one user cannot access another user's records", () => {
-    const a = createCropCase({
+  it("29. one user cannot access another user's records", async () => {
+    const a = await createCropCase({
       userId: "user-a",
       message: "Tomato wilt",
     });
-    expect(assertCaseOwned(a.id, { userId: "user-b" })).toBeNull();
-    expect(assertCaseOwned(a.id, { userId: "user-a" })?.id).toBe(a.id);
+    expect(await assertCaseOwned(a.id, { userId: "user-b" })).toBeNull();
+    expect((await assertCaseOwned(a.id, { userId: "user-a" }))?.id).toBe(a.id);
   });
 
   it("30. rate limiting functions", () => {
@@ -487,26 +489,26 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(isUuid("11111111-1111-4111-8111-111111111111")).toBe(true);
   });
 
-  it("persists conversation messages for a crop case", () => {
-    const persisted = persistConversationTurn({
+  it("persists conversation messages for a crop case", async () => {
+    const persisted = await persistConversationTurn({
       identity: guest(),
       userMessage: "Celery leaf spot after humid weather",
       assistantText: "Check the lower leaves.",
       payload: payload(),
     });
-    expect(listCaseMessages(persisted.caseId)).toHaveLength(2);
+    expect(await listCaseMessages(persisted.caseId)).toHaveLength(2);
   });
 
-  it("does not stop an active diagnostic case solely because the limit is reached", () => {
+  it("does not stop an active diagnostic case solely because the limit is reached", async () => {
     setUsageLimitOverrides({ guest_max_messages: 1, guest_max_cases: 1, guest_max_image_analyses: 1 });
     const identity = guest();
-    persistConversationTurn({
+    await persistConversationTurn({
       identity,
       userMessage: "Urgent wilt across the field",
       assistantText: "Check the stem first.",
       payload: payload({ severity: "high", stage: "questioning" }),
     });
-    const gate = evaluateConversationGate({ identity, next: "message" });
+    const gate = await evaluateConversationGate({ identity, next: "message" });
     expect(gate.ok).toBe(false);
     if (gate.ok) throw new Error("expected guest limit");
     expect(gate.allowFinishActiveCase).toBe(true);

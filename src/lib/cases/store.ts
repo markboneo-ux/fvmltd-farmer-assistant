@@ -1,5 +1,16 @@
+import "server-only";
+
 import type { AccessState } from "@/lib/beta/limits";
+import { resolveCasePersistenceMode } from "./persistence";
+import {
+  caseIsOwnedBy,
+  type CaseUpdateExtras,
+} from "./records";
+import * as memory from "./memory-store";
+import * as supabase from "./supabase-store";
 import type {
+  CaseActionRecord,
+  CaseAssessmentRecord,
   CaseFollowupRecord,
   CaseMessageRecord,
   CaseObservationRecord,
@@ -9,283 +20,111 @@ import type {
   FollowUpOutcome,
   StructuredCaseFacts,
 } from "./types";
-import { extractStructuredFacts, mergeCaseFacts } from "./extract";
 
-const cases = new Map<string, CropCaseRecord>();
-const messages = new Map<string, CaseMessageRecord[]>();
-const observations = new Map<string, CaseObservationRecord[]>();
-const photos = new Map<string, CasePhotoRecord[]>();
-const followups = new Map<string, CaseFollowupRecord[]>();
-const outcomes = new Map<string, CaseOutcomeRecord[]>();
+export { CasePersistenceError } from "./persistence";
+export {
+  logCasePersistenceBackend,
+  resolveCasePersistenceMode,
+  setCasePersistenceModeForTests,
+} from "./persistence";
+export { setCaseStoreAdminClientForTests } from "./supabase-store";
 
-function emptyFacts(problem = ""): StructuredCaseFacts {
-  return extractStructuredFacts(problem);
-}
-
-function nowIso() {
-  return new Date().toISOString();
+function isMemoryBackend() {
+  return resolveCasePersistenceMode() === "memory";
 }
 
 export function resetCaseStore() {
-  cases.clear();
-  messages.clear();
-  observations.clear();
-  photos.clear();
-  followups.clear();
-  outcomes.clear();
+  memory.resetMemoryCaseStore();
 }
 
-export function createCropCase(input: {
+export async function createCropCase(input: {
   userId?: string | null;
   anonymousSessionId?: string | null;
   accessState?: AccessState;
   message: string;
   profile?: { country?: string | null; district?: string | null } | null;
-}): CropCaseRecord {
-  const facts = extractStructuredFacts(input.message, input.profile);
-  const createdAt = nowIso();
-  const record: CropCaseRecord = {
-    id: crypto.randomUUID(),
-    userId: input.userId ?? null,
-    anonymousSessionId: input.anonymousSessionId ?? null,
-    accessState: input.accessState ?? "guest",
-    country: facts.country,
-    district: facts.district,
-    farm: facts.farm,
-    crop: facts.crop,
-    variety: facts.variety,
-    plantAge: facts.plantAge,
-    productionSystem: facts.productionSystem,
-    homeOrCommercial: facts.homeOrCommercial,
-    userLevel: facts.userLevel,
-    area: facts.area,
-    farmerProblemText: facts.farmerProblemText,
-    problemCategory: facts.problemCategory,
-    symptoms: facts.symptoms,
-    fieldDistribution: facts.fieldDistribution,
-    soilOrMedium: facts.soilOrMedium,
-    irrigation: facts.irrigation,
-    drainage: facts.drainage,
-    fertilizerHistory: facts.fertilizerHistory,
-    chemicalHistory: facts.chemicalHistory,
-    recentWeather: facts.recentWeather,
-    weatherRisk: facts.weatherRisk,
-    possibleCauses: facts.possibleCauses,
-    confidence: facts.confidence,
-    severity: facts.severity,
-    recommendedActions: facts.recommendedActions,
-    productsRequested: facts.productsRequested,
-    verifiedProductsShown: facts.verifiedProductsShown,
-    humanEscalation: facts.humanEscalation,
-    agronomistReviewed: false,
-    diagnosisConfirmed: false,
-    caseStatus: "open",
-    createdAt,
-    updatedAt: createdAt,
-  };
-  cases.set(record.id, record);
-  messages.set(record.id, []);
-  observations.set(record.id, []);
-  photos.set(record.id, []);
-  followups.set(record.id, []);
-  outcomes.set(record.id, []);
-  return record;
+}): Promise<CropCaseRecord> {
+  if (isMemoryBackend()) return memory.memoryCreateCropCase(input);
+  return supabase.supabaseCreateCropCase(input);
 }
 
-export function getCropCase(id: string): CropCaseRecord | null {
-  return cases.get(id) ?? null;
+export async function getCropCase(id: string): Promise<CropCaseRecord | null> {
+  if (isMemoryBackend()) return memory.memoryGetCropCase(id);
+  return supabase.supabaseGetCropCase(id);
 }
 
-export function listCropCases(): CropCaseRecord[] {
-  return [...cases.values()];
+export async function listCropCases(): Promise<CropCaseRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListCropCases();
+  return supabase.supabaseListCropCases();
 }
 
-export function casesForOwner(owner: {
+export async function casesForOwner(owner: {
   userId?: string | null;
   anonymousSessionId?: string | null;
-}): CropCaseRecord[] {
-  return listCropCases().filter((item) => {
-    if (owner.userId && item.userId === owner.userId) return true;
-    if (owner.anonymousSessionId && item.anonymousSessionId === owner.anonymousSessionId) {
-      return true;
-    }
-    return false;
-  });
+}): Promise<CropCaseRecord[]> {
+  if (isMemoryBackend()) return memory.memoryCasesForOwner(owner);
+  return supabase.supabaseCasesForOwner(owner);
 }
 
-export function assertCaseOwned(
+export async function assertCaseOwned(
   caseId: string,
   owner: { userId?: string | null; anonymousSessionId?: string | null },
-): CropCaseRecord | null {
-  const record = getCropCase(caseId);
-  if (!record) return null;
-  if (owner.userId && record.userId === owner.userId) return record;
-  if (
-    owner.anonymousSessionId &&
-    record.anonymousSessionId === owner.anonymousSessionId &&
-    !record.userId
-  ) {
-    return record;
-  }
-  if (
-    owner.userId &&
-    record.anonymousSessionId &&
-    owner.anonymousSessionId &&
-    record.anonymousSessionId === owner.anonymousSessionId
-  ) {
-    return record;
-  }
-  return null;
+): Promise<CropCaseRecord | null> {
+  if (isMemoryBackend()) return memory.memoryAssertCaseOwned(caseId, owner);
+  return supabase.supabaseAssertCaseOwned(caseId, owner);
 }
 
-export function updateCaseFromConversation(
+export async function updateCaseFromConversation(
   caseId: string,
   message: string,
-  extras?: Partial<StructuredCaseFacts> & {
-    caseStatus?: CropCaseRecord["caseStatus"];
-    agronomistReviewed?: boolean;
-    diagnosisConfirmed?: boolean;
-  },
-): CropCaseRecord | null {
-  const current = getCropCase(caseId);
-  if (!current) return null;
-  const incoming = mergeCaseFacts(
-    {
-      ...emptyFacts(),
-      crop: current.crop,
-      variety: current.variety,
-      plantAge: current.plantAge,
-      productionSystem: current.productionSystem,
-      homeOrCommercial: current.homeOrCommercial,
-      userLevel: current.userLevel,
-      country: current.country,
-      district: current.district,
-      farm: current.farm,
-      area: current.area,
-      farmerProblemText: current.farmerProblemText,
-      problemCategory: current.problemCategory,
-      symptoms: current.symptoms,
-      fieldDistribution: current.fieldDistribution,
-      soilOrMedium: current.soilOrMedium,
-      irrigation: current.irrigation,
-      drainage: current.drainage,
-      fertilizerHistory: current.fertilizerHistory,
-      chemicalHistory: current.chemicalHistory,
-      recentWeather: current.recentWeather,
-      weatherRisk: current.weatherRisk,
-      possibleCauses: current.possibleCauses,
-      confidence: current.confidence,
-      severity: current.severity,
-      recommendedActions: current.recommendedActions,
-      productsRequested: current.productsRequested,
-      verifiedProductsShown: current.verifiedProductsShown,
-      humanEscalation: current.humanEscalation,
-    },
-    extractStructuredFacts(message, {
-      country: current.country,
-      district: current.district,
-    }),
-  );
-
-  const merged = extras
-    ? mergeCaseFacts(incoming, {
-        ...incoming,
-        ...extras,
-        symptoms: extras.symptoms ?? incoming.symptoms,
-        possibleCauses: extras.possibleCauses ?? incoming.possibleCauses,
-        recommendedActions: extras.recommendedActions ?? incoming.recommendedActions,
-        verifiedProductsShown:
-          extras.verifiedProductsShown ?? incoming.verifiedProductsShown,
-      })
-    : incoming;
-  const next: CropCaseRecord = {
-    ...current,
-    ...merged,
-    caseStatus: extras?.caseStatus ?? current.caseStatus,
-    agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
-    diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
-    updatedAt: nowIso(),
-  };
-  cases.set(caseId, next);
-  return next;
+  extras?: CaseUpdateExtras,
+): Promise<CropCaseRecord | null> {
+  if (isMemoryBackend()) return memory.memoryUpdateCaseFromConversation(caseId, message, extras);
+  return supabase.supabaseUpdateCaseFromConversation(caseId, message, extras);
 }
 
-export function addCaseMessage(input: {
+export async function addCaseMessage(input: {
   caseId: string;
   role: CaseMessageRecord["role"];
   content: string;
   hasImages?: boolean;
-}): CaseMessageRecord {
-  const row: CaseMessageRecord = {
-    id: crypto.randomUUID(),
-    caseId: input.caseId,
-    role: input.role,
-    content: input.content,
-    hasImages: Boolean(input.hasImages),
-    createdAt: nowIso(),
-  };
-  const list = messages.get(input.caseId) ?? [];
-  list.push(row);
-  messages.set(input.caseId, list);
-  return row;
+}): Promise<CaseMessageRecord> {
+  if (isMemoryBackend()) return memory.memoryAddCaseMessage(input);
+  return supabase.supabaseAddCaseMessage(input);
 }
 
-export function listCaseMessages(caseId: string): CaseMessageRecord[] {
-  return [...(messages.get(caseId) ?? [])];
+export async function listCaseMessages(caseId: string): Promise<CaseMessageRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListCaseMessages(caseId);
+  return supabase.supabaseListCaseMessages(caseId);
 }
 
-export function addCaseObservation(input: {
+export async function addCaseObservation(input: {
   caseId: string;
   observedFacts: string[];
   possibleCauses: string[];
   confidence: StructuredCaseFacts["confidence"];
   nextCheck?: string | null;
   recommendedAction?: string | null;
-}): CaseObservationRecord {
-  const row: CaseObservationRecord = {
-    id: crypto.randomUUID(),
-    caseId: input.caseId,
-    observedFacts: input.observedFacts,
-    possibleCauses: input.possibleCauses,
-    confidence: input.confidence,
-    nextCheck: input.nextCheck ?? null,
-    recommendedAction: input.recommendedAction ?? null,
-    createdAt: nowIso(),
-  };
-  const list = observations.get(input.caseId) ?? [];
-  list.push(row);
-  observations.set(input.caseId, list);
-  return row;
+}): Promise<CaseObservationRecord> {
+  if (isMemoryBackend()) return memory.memoryAddCaseObservation(input);
+  return supabase.supabaseAddCaseObservation(input);
 }
 
-export function addCasePhoto(input: {
+export async function addCasePhoto(input: {
   caseId: string;
   ownerUserId?: string | null;
   ownerSessionId?: string | null;
   storagePath: string;
   mimeType: string;
   fileSizeBytes: number;
-}): CasePhotoRecord {
-  const row: CasePhotoRecord = {
-    id: crypto.randomUUID(),
-    caseId: input.caseId,
-    ownerUserId: input.ownerUserId ?? null,
-    ownerSessionId: input.ownerSessionId ?? null,
-    storageBucket: "case-photos",
-    storagePath: input.storagePath,
-    mimeType: input.mimeType,
-    fileSizeBytes: input.fileSizeBytes,
-    publicUrl: null,
-    createdAt: nowIso(),
-  };
-  const list = photos.get(input.caseId) ?? [];
-  list.push(row);
-  photos.set(input.caseId, list);
-  return row;
+}): Promise<CasePhotoRecord> {
+  if (isMemoryBackend()) return memory.memoryAddCasePhoto(input);
+  return supabase.supabaseAddCasePhoto(input);
 }
 
-export function listCasePhotos(caseId: string): CasePhotoRecord[] {
-  return [...(photos.get(caseId) ?? [])];
+export async function listCasePhotos(caseId: string): Promise<CasePhotoRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListCasePhotos(caseId);
+  return supabase.supabaseListCasePhotos(caseId);
 }
 
 export function canAccessPhoto(
@@ -299,96 +138,84 @@ export function canAccessPhoto(
   return false;
 }
 
-export function linkGuestCasesToUser(anonymousSessionId: string, userId: string): number {
-  let linked = 0;
-  for (const record of cases.values()) {
-    if (record.anonymousSessionId === anonymousSessionId && !record.userId) {
-      record.userId = userId;
-      record.updatedAt = nowIso();
-      cases.set(record.id, record);
-      linked += 1;
-    }
-    const casePhotos = photos.get(record.id) ?? [];
-    for (const photo of casePhotos) {
-      if (photo.ownerSessionId === anonymousSessionId && !photo.ownerUserId) {
-        photo.ownerUserId = userId;
-      }
-    }
-  }
-  return linked;
+export async function linkGuestCasesToUser(
+  anonymousSessionId: string,
+  userId: string,
+): Promise<number> {
+  if (isMemoryBackend()) return memory.memoryLinkGuestCasesToUser(anonymousSessionId, userId);
+  return supabase.supabaseLinkGuestCasesToUser(anonymousSessionId, userId);
 }
 
-export function addCaseFollowup(input: Omit<CaseFollowupRecord, "id" | "createdAt">): CaseFollowupRecord {
-  const row: CaseFollowupRecord = {
-    ...input,
-    id: crypto.randomUUID(),
-    createdAt: nowIso(),
-  };
-  const list = followups.get(input.caseId) ?? [];
-  list.push(row);
-  followups.set(input.caseId, list);
-  return row;
+export async function addCaseFollowup(
+  input: Omit<CaseFollowupRecord, "id" | "createdAt">,
+): Promise<CaseFollowupRecord> {
+  if (isMemoryBackend()) return memory.memoryAddCaseFollowup(input);
+  return supabase.supabaseAddCaseFollowup(input);
 }
 
-export function recordFollowupOutcome(input: {
+export async function recordFollowupOutcome(input: {
   followupId: string;
   outcome: FollowUpOutcome;
   actionTaken?: string | null;
   notes?: string | null;
   newSeverity?: StructuredCaseFacts["severity"] | null;
-}): CaseFollowupRecord | null {
-  for (const list of followups.values()) {
-    const row = list.find((item) => item.id === input.followupId);
-    if (!row) continue;
-    row.outcome = input.outcome;
-    row.actionTaken = input.actionTaken ?? row.actionTaken;
-    row.notes = input.notes ?? row.notes;
-    row.newSeverity = input.newSeverity ?? row.newSeverity;
-    row.askedAt = nowIso();
-    const outcome: CaseOutcomeRecord = {
-      id: crypto.randomUUID(),
-      caseId: row.caseId,
-      outcome: input.outcome,
-      notes: input.notes ?? null,
-      createdAt: nowIso(),
-    };
-    const existing = outcomes.get(row.caseId) ?? [];
-    existing.push(outcome);
-    outcomes.set(row.caseId, existing);
-    const cropCase = cases.get(row.caseId);
-    if (cropCase && input.outcome === "problem_solved") {
-      cropCase.caseStatus = "resolved";
-      cropCase.updatedAt = nowIso();
-    }
-    return row;
-  }
-  return null;
+}): Promise<CaseFollowupRecord | null> {
+  if (isMemoryBackend()) return memory.memoryRecordFollowupOutcome(input);
+  return supabase.supabaseRecordFollowupOutcome(input);
 }
 
-export function optOutFollowups(caseId: string) {
-  const list = followups.get(caseId) ?? [];
-  for (const row of list) row.optedOut = true;
+export async function optOutFollowups(caseId: string) {
+  if (isMemoryBackend()) return memory.memoryOptOutFollowups(caseId);
+  return supabase.supabaseOptOutFollowups(caseId);
 }
 
-export function listFollowups(caseId?: string): CaseFollowupRecord[] {
-  if (caseId) return [...(followups.get(caseId) ?? [])];
-  return [...followups.values()].flat();
+export async function listFollowups(caseId?: string): Promise<CaseFollowupRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListFollowups(caseId);
+  return supabase.supabaseListFollowups(caseId);
 }
 
-export function listOutcomes(caseId?: string): CaseOutcomeRecord[] {
-  if (caseId) return [...(outcomes.get(caseId) ?? [])];
-  return [...outcomes.values()].flat();
+export async function listOutcomes(caseId?: string): Promise<CaseOutcomeRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListOutcomes(caseId);
+  return supabase.supabaseListOutcomes(caseId);
 }
 
-export function listObservations(caseId: string): CaseObservationRecord[] {
-  return [...(observations.get(caseId) ?? [])];
+export async function listObservations(caseId: string): Promise<CaseObservationRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListObservations(caseId);
+  return supabase.supabaseListObservations(caseId);
 }
 
-export function hasActiveCase(owner: {
+export async function addCaseAssessment(input: {
+  caseId: string;
+  payload: Record<string, unknown>;
+}): Promise<CaseAssessmentRecord> {
+  if (isMemoryBackend()) return memory.memoryAddCaseAssessment(input);
+  return supabase.supabaseAddCaseAssessment(input);
+}
+
+export async function addCaseAction(input: {
+  caseId: string;
+  actionText: string;
+}): Promise<CaseActionRecord> {
+  if (isMemoryBackend()) return memory.memoryAddCaseAction(input);
+  return supabase.supabaseAddCaseAction(input);
+}
+
+export async function listCaseAssessments(caseId: string): Promise<CaseAssessmentRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListCaseAssessments(caseId);
+  return supabase.supabaseListCaseAssessments(caseId);
+}
+
+export async function listCaseActions(caseId: string): Promise<CaseActionRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListCaseActions(caseId);
+  return supabase.supabaseListCaseActions(caseId);
+}
+
+export async function hasActiveCase(owner: {
   userId?: string | null;
   anonymousSessionId?: string | null;
-}): boolean {
-  return casesForOwner(owner).some(
-    (item) => item.caseStatus === "open" || item.caseStatus === "in_progress",
-  );
+}): Promise<boolean> {
+  if (isMemoryBackend()) return memory.memoryHasActiveCase(owner);
+  return supabase.supabaseHasActiveCase(owner);
 }
+
+export { caseIsOwnedBy };

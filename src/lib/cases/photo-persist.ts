@@ -42,7 +42,7 @@ export async function persistPrivateCaseImages(options: {
       }
     }
 
-    recordCasePhoto({
+    await recordCasePhoto({
       caseId: options.caseId,
       identity: options.identity,
       storagePath,

@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
     if (data.user) {
       grantEntitlement(`user:${data.user.id}`, "free_registered", "signup");
-      linkGuestCasesToUser(identity.guestSessionId, data.user.id);
+      await linkGuestCasesToUser(identity.guestSessionId, data.user.id);
     }
     grantEntitlement(ownerKey(identity), "free_registered", "signup");
 

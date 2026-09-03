@@ -4,8 +4,8 @@ import type { CropCaseRecord } from "./types";
 
 export { scheduleFollowUpDate } from "./followups";
 
-export function addCaseFollowupSafe(record: CropCaseRecord) {
-  const existing = listFollowups(record.id);
+export async function addCaseFollowupSafe(record: CropCaseRecord) {
+  const existing = await listFollowups(record.id);
   if (existing.some((item) => !item.outcome && !item.optedOut)) return existing[0];
   return addCaseFollowup({
     caseId: record.id,
