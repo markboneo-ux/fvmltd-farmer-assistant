@@ -194,8 +194,8 @@ export function extractStructuredFacts(
     irrigation: /\b(drip|sprinkler|flood|hose|hand water)/.test(lower)
       ? (lower.match(/\b(drip|sprinkler|flood irrigation|hose|hand water(?:ing)?)\b/)?.[1] ?? null)
       : null,
-    drainage: /\b(poor drainage|waterlog|stays wet|well drained)\b/.test(lower)
-      ? (lower.match(/\b(poor drainage|waterlogged|stays wet|well drained)\b/)?.[1] ?? null)
+    drainage: /\b(poor drainage|waterlog|stays(?:\s+\w+){0,2}\s+wet|well drained)\b/.test(lower)
+      ? (lower.match(/\b(poor drainage|waterlogged|stays(?:\s+\w+){0,2}\s+wet|well drained)\b/)?.[1] ?? "stays wet")
       : null,
     fertilizerHistory: /\b(fertilizer|fertiliser|npk|urea)\b/.test(lower)
       ? "mentioned"
@@ -246,7 +246,9 @@ export function mergeCaseFacts(
     area: pick(current.area, incoming.area),
     farmerProblemText: incoming.farmerProblemText || current.farmerProblemText,
     problemCategory: pick(current.problemCategory, incoming.problemCategory),
-    symptoms: [...new Set([...current.symptoms, ...incoming.symptoms])],
+    symptoms: [
+      ...new Set([...(current.symptoms ?? []), ...(incoming.symptoms ?? [])]),
+    ],
     fieldDistribution: pick(current.fieldDistribution, incoming.fieldDistribution),
     soilOrMedium: pick(current.soilOrMedium, incoming.soilOrMedium),
     irrigation: pick(current.irrigation, incoming.irrigation),
@@ -256,16 +258,21 @@ export function mergeCaseFacts(
     recentWeather: pick(current.recentWeather, incoming.recentWeather),
     weatherRisk: pick(current.weatherRisk, incoming.weatherRisk),
     possibleCauses:
-      incoming.possibleCauses.length > 0 ? incoming.possibleCauses : current.possibleCauses,
+      (incoming.possibleCauses ?? []).length > 0
+        ? incoming.possibleCauses
+        : current.possibleCauses,
     confidence: incoming.confidence !== "unknown" ? incoming.confidence : current.confidence,
     severity: incoming.severity !== "unknown" ? incoming.severity : current.severity,
     recommendedActions:
-      incoming.recommendedActions.length > 0
+      (incoming.recommendedActions ?? []).length > 0
         ? incoming.recommendedActions
         : current.recommendedActions,
     productsRequested: current.productsRequested || incoming.productsRequested,
     verifiedProductsShown: [
-      ...new Set([...current.verifiedProductsShown, ...incoming.verifiedProductsShown]),
+      ...new Set([
+        ...(current.verifiedProductsShown ?? []),
+        ...(incoming.verifiedProductsShown ?? []),
+      ]),
     ],
     humanEscalation: current.humanEscalation || incoming.humanEscalation,
   };

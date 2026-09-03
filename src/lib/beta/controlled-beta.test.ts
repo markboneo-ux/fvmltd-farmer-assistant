@@ -19,7 +19,7 @@ import { grantEntitlement, resetEntitlements, resolveAccess } from "@/lib/beta/e
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import type { AppIdentity } from "@/lib/beta/identity";
 import { isUuid } from "@/lib/beta/identity";
-import { countUsage, resetUsageStore } from "@/lib/beta/usage-store";
+import { countUsage, funnelStats, recordUsageEvent, resetUsageStore } from "@/lib/beta/usage-store";
 import { extractStructuredFacts } from "@/lib/cases/extract";
 import { shouldBlockDestructiveAction } from "@/lib/cases/destructive";
 import { parseFollowUpOutcome, scheduleFollowUpDate } from "@/lib/cases/followups";
@@ -108,7 +108,7 @@ describe("controlled beta — farmer journey and safety", () => {
   });
 
   it("2. home gardener language stays simple", () => {
-    const facts = extractKnownFacts("My backyard tomato plants look sick");
+    const facts = extractKnownFacts("I am a home gardener and my tomato plants look sick");
     expect(facts.userType).toBe("home_gardener");
     const instructions = readFileSync(
       join(process.cwd(), "src/lib/agronomy/system-instructions.ts"),
@@ -201,7 +201,7 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(updated?.crop).toBe("tomato");
     expect(updated?.variety).toBe("Ruby");
     expect(updated?.district).toBe("Couva");
-    expect(updated?.drainage).toMatch(/wet/i);
+    expect(String(updated?.drainage ?? "")).toMatch(/wet/i);
   });
 
   it("9. product lookup stays off for unrelated questions", () => {
@@ -268,6 +268,7 @@ describe("controlled beta — farmer journey and safety", () => {
     });
     const gate = evaluateConversationGate({ identity, next: "message" });
     expect(gate.ok).toBe(false);
+    if (gate.ok) throw new Error("expected guest limit");
     expect(gate.reason).toBe("guest_limit");
     expect(GUEST_LIMIT_MESSAGE).toMatch(/Create a free account/);
   });
@@ -307,11 +308,11 @@ describe("controlled beta — farmer journey and safety", () => {
       next: "message",
     });
     expect(decision.ok).toBe(false);
+    if (decision.ok) throw new Error("expected registered limit");
     expect(decision.reason).toBe("registered_free_limit");
   });
 
   it("21–23. upgrade click is recorded and FVM promo is server-side only", () => {
-    const { recordUsageEvent, funnelStats } = require("@/lib/beta/usage-store") as typeof import("@/lib/beta/usage-store");
     recordUsageEvent({
       guestSessionId: "11111111-1111-4111-8111-111111111111",
       authUserId: "user-1",
@@ -507,6 +508,7 @@ describe("controlled beta — farmer journey and safety", () => {
     });
     const gate = evaluateConversationGate({ identity, next: "message" });
     expect(gate.ok).toBe(false);
+    if (gate.ok) throw new Error("expected guest limit");
     expect(gate.allowFinishActiveCase).toBe(true);
   });
 

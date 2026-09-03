@@ -223,8 +223,10 @@ export function extractKnownFacts(
     farmerScale = "commercial";
     userType = "commercial_grower";
   } else if (
-    /\b(home|backyard|kitchen)\s+(garden|gardener|grower)\b/.test(lower) ||
-    /\bhome\s+gardener\b/.test(lower)
+    /\b(home|backyard|kitchen)\s+(garden|gardener|grower|tomato|pepper|crop|plants?)\b/.test(
+      lower,
+    ) ||
+    /\b(home\s+gardener|backyard)\b/.test(lower)
   ) {
     farmerScale = "home";
     userType = "home_gardener";

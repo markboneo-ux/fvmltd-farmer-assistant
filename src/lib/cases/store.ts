@@ -187,7 +187,17 @@ export function updateCaseFromConversation(
     }),
   );
 
-  const merged = extras ? mergeCaseFacts(incoming, extras as StructuredCaseFacts) : incoming;
+  const merged = extras
+    ? mergeCaseFacts(incoming, {
+        ...incoming,
+        ...extras,
+        symptoms: extras.symptoms ?? incoming.symptoms,
+        possibleCauses: extras.possibleCauses ?? incoming.possibleCauses,
+        recommendedActions: extras.recommendedActions ?? incoming.recommendedActions,
+        verifiedProductsShown:
+          extras.verifiedProductsShown ?? incoming.verifiedProductsShown,
+      })
+    : incoming;
   const next: CropCaseRecord = {
     ...current,
     ...merged,

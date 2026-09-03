@@ -9,7 +9,7 @@ import {
   hasActiveCase,
   updateCaseFromConversation,
 } from "@/lib/cases/store";
-import { scheduleFollowUpDate, addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
+import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
 import { countUsage, recordUsageEvent } from "./usage-store";
