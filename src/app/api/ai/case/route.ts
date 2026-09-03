@@ -5,6 +5,21 @@ import {
   runAgronomicCase,
   type CaseImageInput,
 } from "@/lib/agronomy/runCase";
+import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
+import {
+  evaluateConversationGate,
+  persistConversationTurn,
+  similarCaseHint,
+} from "@/lib/beta/conversation";
+import { farmerFacingError } from "@/lib/beta/farmer-error";
+import {
+  FARMER_GENERIC_ERROR,
+  GUEST_LIMIT_MESSAGE,
+  REGISTERED_LIMIT_HEADING,
+} from "@/lib/beta/limits";
+import { recordUsageEvent } from "@/lib/beta/usage-store";
+import { persistPrivateCaseImages } from "@/lib/cases/photo-persist";
+import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 import {
   CASE_IMAGE_MAX_COUNT,
   FARMER_PHOTO_TOO_LARGE,
@@ -14,6 +29,13 @@ import {
   validateCaseImageMeta,
 } from "@/lib/chat/case-images";
 import { getOpenAIModel } from "@/lib/openai/env";
+import {
+  checkCombinedRateLimit,
+  clientIp,
+  FARMER_RATE_LIMIT_MESSAGE,
+  RATE_LIMITS,
+} from "@/lib/security/rate-limit";
+import { logOps } from "@/lib/security/ops-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,15 +101,15 @@ function jsonError(
   diagnosticCode: string,
   error: string,
   status: number,
+  extras?: Record<string, unknown>,
 ) {
   return NextResponse.json(
     {
       case: null,
       responseId: null,
-      model,
-      diagnosticCode,
       requestCompleted: false,
-      error,
+      error: farmerFacingError(error),
+      ...extras,
     },
     { status },
   );
@@ -103,8 +125,23 @@ export async function POST(request: Request) {
 
   const apiKey = process.env.OPENAI_API_KEY;
   const model = getOpenAIModel();
+  const includeDiagnostics =
+    request.headers.get("x-fvm-debug") === "1" ||
+    request.headers.get("referer")?.includes("/ai-lab") === true;
+  const identity = await resolveIdentityFromRequest();
+  const rate = checkCombinedRateLimit({
+    rule: RATE_LIMITS.ai,
+    sessionId: identity.guestSessionId,
+    userId: identity.authUserId,
+    ip: clientIp(request),
+  });
+  if (!rate.ok) {
+    logOps("rate_limit", { route: "ai/case", retryAfterSec: rate.retryAfterSec });
+    return jsonError(model, "OPENAI_RATE_LIMIT", FARMER_RATE_LIMIT_MESSAGE, 429);
+  }
 
   const contentType = request.headers.get("content-type") || "";
+  let incomingCaseId: string | null = null;
 
   try {
     let message = "";
@@ -165,8 +202,10 @@ export async function POST(request: Request) {
       mode = parsed.mode;
       profile = parsed.profile;
 
+      incomingCaseId = String(form.get("caseId") || "").trim() || null;
       const parsedImages = await parseImagesFromFormData(form);
       if (!parsedImages.ok) {
+        logOps("photo_upload_failure", { reason: parsedImages.farmerError });
         return jsonError(model, "INVALID_REQUEST", parsedImages.farmerError, 400);
       }
       images = parsedImages.images;
@@ -206,6 +245,51 @@ export async function POST(request: Request) {
         }
       }
       images = parsed.images;
+      const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+      incomingCaseId =
+        typeof record.caseId === "string" ? record.caseId.trim() || null : incomingCaseId;
+    }
+
+    const imageGate =
+      images.length > 0
+        ? evaluateConversationGate({ identity, next: "image_analysis" })
+        : evaluateConversationGate({ identity, next: incomingCaseId ? "message" : "case" });
+    if (!imageGate.ok && !imageGate.allowFinishActiveCase) {
+      recordUsageEvent({
+        guestSessionId: identity.guestSessionId,
+        authUserId: identity.authUserId,
+        kind: "usage_limit",
+        caseId: incomingCaseId,
+      });
+      logOps("usage_limit", { access: identity.access });
+      return NextResponse.json(
+        {
+          case: null,
+          responseId: null,
+          requestCompleted: false,
+          error:
+            identity.access === "guest" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
+          usage: imageGate.used,
+          remaining: imageGate.remaining,
+          access: identity.access,
+          limitReached: true,
+          reason: imageGate.reason,
+        },
+        { status: 402 },
+      );
+    }
+
+    if (images.length > 0) {
+      const imageRate = checkCombinedRateLimit({
+        rule: RATE_LIMITS.image,
+        sessionId: identity.guestSessionId,
+        userId: identity.authUserId,
+        ip: clientIp(request),
+      });
+      if (!imageRate.ok) {
+        logOps("rate_limit", { route: "ai/case-image" });
+        return jsonError(model, "OPENAI_RATE_LIMIT", FARMER_RATE_LIMIT_MESSAGE, 429);
+      }
     }
 
     const result = await runAgronomicCase({
@@ -219,46 +303,72 @@ export async function POST(request: Request) {
     });
 
     if (!result.ok) {
+      logOps("openai_failure", { diagnosticCode: result.diagnosticCode });
       return NextResponse.json(
         {
           case: null,
           responseId: null,
-          model: result.model,
-          diagnosticCode: result.diagnosticCode,
           requestCompleted: result.requestCompleted,
-          error: result.error,
+          error: farmerFacingError(result.error) || FARMER_GENERIC_ERROR,
+          ...(includeDiagnostics
+            ? { model: result.model, diagnosticCode: result.diagnosticCode }
+            : {}),
         },
         { status: result.status },
       );
     }
 
-    // Never expose internalMissingInformation is handled by UI;
-    // still return full structured case for the client engine.
+    const assistantText = farmerHistoryContent(result.case);
+    const persisted = persistConversationTurn({
+      identity,
+      caseId: incomingCaseId,
+      userMessage: message,
+      assistantText,
+      payload: result.case,
+      imageCount: images.length,
+      profile,
+    });
+    if (images.length > 0) {
+      await persistPrivateCaseImages({
+        caseId: persisted.caseId,
+        identity,
+        images,
+      });
+    }
+
     return NextResponse.json({
       case: result.case,
       responseId: result.responseId,
-      model: result.model,
-      diagnosticCode: result.diagnosticCode,
       requestCompleted: result.requestCompleted,
       questionsAsked: result.questionsAsked,
+      caseId: persisted.caseId,
+      similarCaseHint: similarCaseHint(persisted.caseId),
+      access: identity.access,
+      usage: imageGate.used,
+      ...(includeDiagnostics
+        ? { model: result.model, diagnosticCode: result.diagnosticCode }
+        : {}),
     });
   } catch (error) {
-    console.error("[ai/case] route failure", error);
+    logOps("openai_failure", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     const messageText = error instanceof Error ? error.message : String(error);
     const farmerError =
       /payload|too large|413|body/i.test(messageText)
         ? FARMER_PHOTO_TOO_LARGE
         : /unsupported|mime|file type/i.test(messageText)
           ? FARMER_PHOTO_UNSUPPORTED
-          : "The AI case engine could not answer right now.";
+          : FARMER_GENERIC_ERROR;
     return NextResponse.json(
       {
         case: null,
         responseId: null,
-        model,
-        diagnosticCode: "OPENAI_REQUEST_FAILED",
         requestCompleted: false,
         error: farmerError,
+        ...(includeDiagnostics
+          ? { model, diagnosticCode: "OPENAI_REQUEST_FAILED" }
+          : {}),
       },
       { status: /413|too large/i.test(messageText) ? 413 : 502 },
     );

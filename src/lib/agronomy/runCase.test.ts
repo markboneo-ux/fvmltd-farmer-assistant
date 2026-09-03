@@ -343,12 +343,11 @@ describe("TEST 4 — Regional input verification via case route tools", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.case.verifiedInputOptions.length).toBeGreaterThan(0);
-    for (const option of result.case.verifiedInputOptions) {
-      expect(option.registrationStatus).toBeTruthy();
-      expect(option.availabilityStatus).toBeTruthy();
-      expect(option.lastVerifiedAt || option.officialSource).toBeTruthy();
-    }
+    // Farmer-facing lookup hides example/test catalogue brands.
+    expect(result.case.verifiedInputOptions).toEqual([]);
+    expect(result.case.preliminaryAssessment).toMatch(
+      /can.?t confirm a locally available registered product/i,
+    );
   });
 });
 
@@ -443,7 +442,7 @@ describe("TEST 6 — No data country", () => {
     if (!result.ok) return;
     expect(result.case.verifiedInputOptions).toEqual([]);
     expect(result.case.preliminaryAssessment).toMatch(
-      /could not verify a locally registered and available product/i,
+      /can.?t confirm a locally available registered product/i,
     );
   });
 });

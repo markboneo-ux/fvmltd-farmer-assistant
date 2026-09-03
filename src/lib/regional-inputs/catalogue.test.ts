@@ -108,6 +108,17 @@ describe("verified regional inputs — Trinidad tomato", () => {
     ).toBe(true);
   });
 
+  it("hides example/test catalogue brands from farmer-facing lookup", () => {
+    const result = getVerifiedRegionalInputs({
+      country: "Trinidad and Tobago",
+      crop: "tomato",
+      issue: "whiteflies",
+      forFarmerDisplay: true,
+    });
+    expect(result.options).toEqual([]);
+    expect(result.unmatchedMessage).toBe(NO_VERIFIED_PRODUCT_MESSAGE);
+  });
+
   it("can empty the catalogue for isolation tests", () => {
     setCatalogueStoreForTests({
       countries: [

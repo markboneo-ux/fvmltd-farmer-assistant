@@ -18,6 +18,14 @@ import {
   farmerFacingSendError,
 } from "@/lib/chat/case-images";
 import { farmerHistoryContent } from "@/lib/chat/visible-reply";
+import { getMainWebsiteUrl, MAIN_WEBSITE_LABEL } from "@/lib/config/urls";
+import {
+  GUEST_LIMIT_MESSAGE,
+  REGISTERED_LIMIT_HEADING,
+  UPGRADE_COMING_SOON,
+} from "@/lib/beta/limits";
+import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
+import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
 
 type ChatRole = "user" | "assistant";
 
@@ -48,6 +56,12 @@ type CaseApiPayload = {
   requestCompleted?: boolean;
   questionsAsked?: number;
   error?: string;
+  caseId?: string | null;
+  similarCaseHint?: string | null;
+  access?: string;
+  usage?: { messages?: number; cases?: number; imageAnalyses?: number };
+  limitReached?: boolean;
+  reason?: string;
 };
 
 type FarmerCaseChatProps = {
@@ -68,11 +82,6 @@ const STARTER_CHIPS = [
       "My crop has a problem. Can you help me work out what’s going on?",
   },
   { id: "photo", label: "Send a photo", prompt: "" },
-  {
-    id: "product",
-    label: "Ask about a product",
-    prompt: "What can I use for this in Trinidad?",
-  },
 ] as const;
 
 function messageId() {
@@ -106,6 +115,15 @@ export function FarmerCaseChat({
   const [attachedImages, setAttachedImages] = useState<AttachedCaseImage[]>([]);
   const [questionsAsked, setQuestionsAsked] = useState<number | null>(null);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
+  const [caseId, setCaseId] = useState<string | null>(null);
+  const [access, setAccess] = useState<string>("guest");
+  const [limitBanner, setLimitBanner] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [promoMessage, setPromoMessage] = useState<string | null>(null);
+  const [followup, setFollowup] = useState<{ id: string } | null>(null);
+  const [mainWebsiteUrl] = useState(() => getMainWebsiteUrl());
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
 
   const showWelcome = messages.length === 0 && !loading;
 
@@ -115,6 +133,31 @@ export function FarmerCaseChat({
       behavior: "smooth",
     });
   }, [messages, loading, error, attachedImages]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/session");
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          identity?: { access?: string; email?: string | null };
+          approaching?: boolean;
+          limitReached?: boolean;
+        };
+        if (payload.identity?.access) setAccess(payload.identity.access);
+        if (payload.identity?.email) setAccountEmail(payload.identity.email);
+        if (payload.limitReached) {
+          setLimitBanner(
+            payload.identity?.access === "guest"
+              ? GUEST_LIMIT_MESSAGE
+              : REGISTERED_LIMIT_HEADING,
+          );
+        }
+      } catch {
+        // Guest chat still works if session lookup fails.
+      }
+    })();
+  }, []);
 
   function clearQuickReplies() {
     setActiveQuestionId(null);
@@ -202,6 +245,7 @@ export function FarmerCaseChat({
       form.append("messages", JSON.stringify(historyForApi));
       form.append("previousResponseId", previousResponseId ?? "");
       form.append("mode", nextMode);
+      if (caseId) form.append("caseId", caseId);
       form.append(
         "profile",
         JSON.stringify({
@@ -217,6 +261,7 @@ export function FarmerCaseChat({
         method: "POST",
         body: form,
         signal: controller.signal,
+        headers: showDiagnostics ? { "x-fvm-debug": "1" } : undefined,
       });
 
       window.clearTimeout(timeout);
@@ -252,17 +297,30 @@ export function FarmerCaseChat({
         setQuestionsAsked(payload.questionsAsked);
       }
 
+      if (payload.caseId) setCaseId(payload.caseId);
+      if (payload.access) setAccess(payload.access);
+      if (payload.limitReached) {
+        setLimitBanner(
+          payload.reason === "guest_limit" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
+        );
+        if (payload.reason !== "guest_limit") setUpgradeOpen(true);
+      }
+
       if (!response.ok || !casePayload) {
         clearQuickReplies();
         const rawError = payload.error || "";
+        if (payload.limitReached) {
+          setError(rawError || limitBanner);
+          return;
+        }
         if (/openai_api_key|openai is not configured/i.test(rawError)) {
-          setError("I couldn’t get a reply right now. Please try again shortly.");
+          setError("I’m having trouble with that right now. Please try again.");
         } else if (response.status === 413) {
           setError(rawError || FARMER_PHOTO_TOO_LARGE);
         } else if (imagesSnapshot.length > 0) {
           setError(rawError || FARMER_PHOTO_UPLOAD_FAILED);
         } else {
-          setError(rawError || "I couldn’t get a reply right now.");
+          setError(rawError || "I’m having trouble with that right now. Please try again.");
         }
         return;
       }
@@ -289,6 +347,18 @@ export function FarmerCaseChat({
               : undefined,
         },
       ]);
+
+      if (payload.similarCaseHint) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: messageId(),
+            role: "assistant",
+            text: payload.similarCaseHint || "",
+            local: true,
+          },
+        ]);
+      }
     } catch (err) {
       clearQuickReplies();
       console.error("[farmer-chat] send failed", err);
@@ -332,6 +402,8 @@ export function FarmerCaseChat({
     setError(null);
     setPreviousResponseId(null);
     setQuestionsAsked(null);
+    setCaseId(null);
+    setFollowup(null);
     setMode("quick_help");
     setMenuOpen(false);
     setAttachMenuOpen(false);
@@ -366,6 +438,12 @@ export function FarmerCaseChat({
                   {subtitle}
                 </p>
               ) : null}
+              <a
+                href={mainWebsiteUrl}
+                className="mt-0.5 block truncate text-[11px] text-muted underline-offset-2 hover:underline"
+              >
+                {MAIN_WEBSITE_LABEL}
+              </a>
             </div>
           </div>
           <button
@@ -417,11 +495,25 @@ export function FarmerCaseChat({
                 </button>
               ) : null}
               <Link
-                href="/register"
+                href="/signin"
                 className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
                 onClick={() => setMenuOpen(false)}
               >
-                Save a farmer profile (optional)
+                {accountEmail ? "Account" : "Create a free account"}
+              </Link>
+              <Link
+                href="/privacy"
+                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                onClick={() => setMenuOpen(false)}
+              >
+                Privacy
+              </Link>
+              <Link
+                href="/terms"
+                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                onClick={() => setMenuOpen(false)}
+              >
+                Terms
               </Link>
               {showDiagnostics ? (
                 <p className="px-3 py-2 text-xs text-muted">
@@ -450,6 +542,16 @@ export function FarmerCaseChat({
             </p>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-muted">
               You can type your problem or send me a photo.
+            </p>
+            <p className="mt-4 max-w-md text-xs leading-relaxed text-muted">
+              {PRIVACY_SUMMARY}{" "}
+              <Link href="/privacy" className="underline underline-offset-2">
+                Privacy
+              </Link>
+              {" · "}
+              <Link href="/terms" className="underline underline-offset-2">
+                Terms
+              </Link>
             </p>
             <div className="mt-8 flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
               {STARTER_CHIPS.map((chip) => (
@@ -604,6 +706,115 @@ export function FarmerCaseChat({
 
       <div className="z-20 shrink-0 bg-sky/90 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md">
         <div className="mx-auto w-full max-w-3xl space-y-2">
+          {limitBanner ? (
+            <div className="rounded-2xl bg-surface px-3 py-3 text-sm text-ink shadow-sm ring-1 ring-line">
+              <p className="font-medium">{limitBanner}</p>
+              {access === "guest" ? (
+                <Link
+                  href="/signin"
+                  className="mt-2 inline-flex min-h-11 items-center rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+                >
+                  Create a free account
+                </Link>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <button
+                    type="button"
+                    className="mr-2 min-h-11 rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+                    onClick={() => {
+                      setUpgradeOpen(true);
+                      void fetch("/api/upgrade/click", {
+                        method: "POST",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ view: false }),
+                      });
+                    }}
+                  >
+                    Upgrade
+                  </button>
+                  <button
+                    type="button"
+                    className="min-h-11 rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+                    onClick={() => setUpgradeOpen(true)}
+                  >
+                    Enter promotional code
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {upgradeOpen ? (
+            <div className="rounded-2xl bg-surface px-3 py-3 text-sm shadow-sm ring-1 ring-line">
+              <p className="font-medium">{REGISTERED_LIMIT_HEADING}</p>
+              <p className="mt-1 text-muted">{UPGRADE_COMING_SOON}</p>
+              <form
+                className="mt-3 flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void (async () => {
+                    const response = await fetch("/api/promo/redeem", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ code: promoCode }),
+                    });
+                    const payload = (await response.json()) as {
+                      ok?: boolean;
+                      error?: string;
+                      message?: string;
+                    };
+                    setPromoMessage(payload.message || payload.error || null);
+                    if (payload.ok) {
+                      setLimitBanner(null);
+                      setAccess("promo");
+                    }
+                  })();
+                }}
+              >
+                <input
+                  value={promoCode}
+                  onChange={(event) => setPromoCode(event.target.value)}
+                  placeholder="Promotional code"
+                  className="min-h-11 flex-1 rounded-full bg-sky px-3 text-sm ring-1 ring-line"
+                  autoComplete="off"
+                />
+                <button
+                  type="submit"
+                  className="min-h-11 rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+                >
+                  Apply
+                </button>
+              </form>
+              {promoMessage ? <p className="mt-2 text-muted">{promoMessage}</p> : null}
+            </div>
+          ) : null}
+          {followup ? (
+            <div className="rounded-2xl bg-surface px-3 py-3 text-sm shadow-sm ring-1 ring-line">
+              <p className="font-medium">{FOLLOWUP_PROMPT}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {FOLLOWUP_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className="min-h-11 rounded-full bg-sky px-3 text-sm font-medium text-canopy ring-1 ring-line"
+                    onClick={() => {
+                      void fetch("/api/followups", {
+                        method: "POST",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({
+                          followupId: followup.id,
+                          caseId,
+                          outcome: option,
+                        }),
+                      });
+                      setFollowup(null);
+                    }}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {error ? (
             <p className="px-1 text-sm font-medium text-danger" role="alert">
               {error}

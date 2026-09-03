@@ -28,6 +28,11 @@ This version includes an **AI-first guest chat** on the homepage (no registratio
 | `/staff/login` | FVMLTD staff authentication (Supabase Auth) |
 | `/staff` | Secure staff review queue (new / urgent / awaiting review) |
 | `/staff/cases/[id]` | Staff case review detail + actions |
+| `/signin` | Short free-account signup (email / Google / Apple) |
+| `/privacy` | Privacy language |
+| `/terms` | Terms |
+| `/admin/insights` | FVMLTD-only usage and agronomic insights |
+| `/ai-lab` | Developer diagnostics (not linked from the farmer UI) |
 
 ## Project structure
 
@@ -284,6 +289,15 @@ In the Vercel project: **Settings → Environment Variables**, add:
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only | **Yes** | Service role key. **Never** prefix with `NEXT_PUBLIC_`. Bypass RLS — use only in trusted server code (`src/lib/supabase/admin.ts`). Still used for farms/crop-check/staff admin paths; **not required for farmer registration** once `register_farmer` is applied. |
 | `OPENAI_API_KEY` | Server only | **Yes** | OpenAI API key. **Never** prefix with `NEXT_PUBLIC_`. Used by guest chat (`/api/ai/chat`) and assessment routes. |
 | `OPENAI_MODEL` | Server only | No | Optional. Defaults to `gpt-4o`. |
+| `NEXT_PUBLIC_APP_URL` | Browser + server | No | Canonical app origin after the custom domain is attached. Used for auth callbacks. |
+| `NEXT_PUBLIC_MAIN_WEBSITE_URL` | Browser + server | No | Farmersvaluemart website. Defaults to `https://farmersvaluemart.com`. |
+| `NEXT_PUBLIC_BASE_PATH` | Browser + build | No | Optional `/crop-solution` when the app is mounted under a path. |
+| `FVM_GUEST_MAX_MESSAGES` | Server only | No | Guest message allowance. Default `20`. |
+| `FVM_GUEST_MAX_CASES` | Server only | No | Guest case allowance. Default `3`. |
+| `FVM_GUEST_MAX_IMAGE_ANALYSES` | Server only | No | Guest image-analysis allowance. Default `6`. |
+| `FVM_REGISTERED_FREE_MESSAGES` | Server only | No | Registered-free message allowance. Default `80`. |
+| `FVM_REGISTERED_FREE_CASES` | Server only | No | Registered-free case allowance. Default `10`. |
+| `FVM_REGISTERED_FREE_IMAGES` | Server only | No | Registered-free image allowance. Default `24`. |
 
 No **new** Vercel variable name is required beyond `OPENAI_API_KEY` / optional `OPENAI_MODEL` already listed above — ensure they are set for Production and Preview.
 

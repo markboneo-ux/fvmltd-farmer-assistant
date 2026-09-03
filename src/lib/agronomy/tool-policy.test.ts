@@ -16,6 +16,11 @@ describe("regional tool policy", () => {
     expect(shouldInvokeProductTool(facts)).toBe(false);
   });
 
+  it("does not invoke products for an unrelated wilt question", () => {
+    const facts = extractKnownFacts("My tomato plants are wilting");
+    expect(shouldInvokeProductTool(facts)).toBe(false);
+  });
+
   it("invokes verified products only when the farmer asks what to use", () => {
     const facts = extractKnownFacts(
       "What can I use for this in Trinidad?",
