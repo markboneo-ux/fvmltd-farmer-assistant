@@ -1,7 +1,11 @@
 import "server-only";
 
 import type { AccessState } from "@/lib/beta/limits";
-import { resolveCasePersistenceMode } from "./persistence";
+import {
+  assertSupabasePersistenceOrThrow,
+  logCaseCreated,
+  logCaseMessageSaved,
+} from "./persistence";
 import {
   caseIsOwnedBy,
   type CaseUpdateExtras,
@@ -23,14 +27,19 @@ import type {
 
 export { CasePersistenceError } from "./persistence";
 export {
+  logCaseCreated,
+  logCaseMessageSaved,
   logCasePersistenceBackend,
+  logCasePersistenceError,
+  logCasePersistenceStart,
+  logCasePersistenceSupabase,
   resolveCasePersistenceMode,
   setCasePersistenceModeForTests,
 } from "./persistence";
 export { setCaseStoreAdminClientForTests } from "./supabase-store";
 
 function isMemoryBackend() {
-  return resolveCasePersistenceMode() === "memory";
+  return assertSupabasePersistenceOrThrow() === "memory";
 }
 
 export function resetCaseStore() {
@@ -44,8 +53,11 @@ export async function createCropCase(input: {
   message: string;
   profile?: { country?: string | null; district?: string | null } | null;
 }): Promise<CropCaseRecord> {
-  if (isMemoryBackend()) return memory.memoryCreateCropCase(input);
-  return supabase.supabaseCreateCropCase(input);
+  const record = isMemoryBackend()
+    ? memory.memoryCreateCropCase(input)
+    : await supabase.supabaseCreateCropCase(input);
+  logCaseCreated(record.id);
+  return record;
 }
 
 export async function getCropCase(id: string): Promise<CropCaseRecord | null> {
@@ -83,14 +95,27 @@ export async function updateCaseFromConversation(
   return supabase.supabaseUpdateCaseFromConversation(caseId, message, extras);
 }
 
+export async function appendCaseMessage(input: {
+  caseId: string;
+  role: CaseMessageRecord["role"];
+  content: string;
+  hasImages?: boolean;
+}): Promise<CaseMessageRecord> {
+  const record = isMemoryBackend()
+    ? memory.memoryAddCaseMessage(input)
+    : await supabase.supabaseAddCaseMessage(input);
+  logCaseMessageSaved(record.caseId, record.role);
+  return record;
+}
+
+/** @deprecated Use appendCaseMessage — kept for existing call sites. */
 export async function addCaseMessage(input: {
   caseId: string;
   role: CaseMessageRecord["role"];
   content: string;
   hasImages?: boolean;
 }): Promise<CaseMessageRecord> {
-  if (isMemoryBackend()) return memory.memoryAddCaseMessage(input);
-  return supabase.supabaseAddCaseMessage(input);
+  return appendCaseMessage(input);
 }
 
 export async function listCaseMessages(caseId: string): Promise<CaseMessageRecord[]> {
@@ -216,6 +241,17 @@ export async function hasActiveCase(owner: {
 }): Promise<boolean> {
   if (isMemoryBackend()) return memory.memoryHasActiveCase(owner);
   return supabase.supabaseHasActiveCase(owner);
+}
+
+export async function findActiveCropCaseForOwner(owner: {
+  userId?: string | null;
+  anonymousSessionId?: string | null;
+}): Promise<CropCaseRecord | null> {
+  const owned = await casesForOwner(owner);
+  const active = owned
+    .filter((item) => item.caseStatus === "open" || item.caseStatus === "in_progress")
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return active[0] ?? null;
 }
 
 export { caseIsOwnedBy };

@@ -106,12 +106,17 @@ describe("Supabase case persistence layer", () => {
     });
 
     spy.mockRestore();
+    expect(logs).toContain("CASE_PERSISTENCE_START");
+    expect(logs).toContain("CASE_PERSISTENCE_SUPABASE");
     expect(logs).toContain("case_persistence=supabase");
     expect(persisted.createdNewCase).toBe(true);
     expect(fake.db.crop_cases).toHaveLength(1);
     expect(fake.db.case_messages).toHaveLength(2);
 
     const cropCase = fake.db.crop_cases[0];
+    expect(logs).toContain(`CASE_CREATED id=${cropCase.id}`);
+    expect(logs).toContain(`CASE_MESSAGE_SAVED case=${cropCase.id} role=user`);
+    expect(logs).toContain(`CASE_MESSAGE_SAVED case=${cropCase.id} role=assistant`);
     expect(cropCase.anonymous_session_id).toBe(GUEST_ID);
     expect(cropCase.user_id).toBeNull();
     expect(cropCase.crop).toBe("tomato");
@@ -158,6 +163,28 @@ describe("Supabase case persistence layer", () => {
     ]);
   });
 
+  it("continues the same guest case across serverless memory resets without a client caseId", async () => {
+    const first = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "Tomato wilt",
+      assistantText: "Check the stem.",
+      payload: payload(),
+    });
+    resetCaseStore();
+
+    const second = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "The soil stays wet after watering.",
+      assistantText: "Hold off on more water today.",
+      payload: payload(),
+    });
+
+    expect(second.caseId).toBe(first.caseId);
+    expect(second.createdNewCase).toBe(false);
+    expect(fake.db.crop_cases).toHaveLength(1);
+    expect(fake.db.case_messages).toHaveLength(4);
+  });
+
   it("stores registered farmer cases with user_id", async () => {
     await persistConversationTurn({
       identity: registered(),
@@ -178,6 +205,21 @@ describe("Supabase case persistence layer", () => {
       }),
     ).rejects.toBeInstanceOf(CasePersistenceError);
     expect(fake.db.crop_cases).toHaveLength(0);
+    const errors: string[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation((message?: unknown) => {
+      if (typeof message === "string") errors.push(message);
+    });
+    fake.failNext.add("crop_cases");
+    await expect(
+      createCropCase({
+        anonymousSessionId: GUEST_ID,
+        message: "Second attempt",
+      }),
+    ).rejects.toBeInstanceOf(CasePersistenceError);
+    errorSpy.mockRestore();
+    expect(errors.some((line) => line.startsWith("CASE_PERSISTENCE_ERROR "))).toBe(
+      true,
+    );
     setCasePersistenceModeForTests("memory");
     expect(await listCropCases()).toHaveLength(0);
   });
@@ -215,7 +257,22 @@ describe("case persistence mode", () => {
     setCasePersistenceModeForTests(null);
     delete process.env.CASE_PERSISTENCE;
     delete process.env.VERCEL_ENV;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     expect(resolveCasePersistenceMode()).toBe("memory");
+  });
+
+  it("never chooses memory when Supabase env vars are present, even on preview", () => {
+    setCasePersistenceModeForTests(null);
+    process.env.VERCEL_ENV = "preview";
+    process.env.CASE_PERSISTENCE = "memory";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    expect(isProductionRuntime()).toBe(false);
+    expect(isSupabaseAdminConfigured()).toBe(true);
+    expect(resolveCasePersistenceMode()).toBe("supabase");
   });
 
   it("never chooses memory in production when Supabase is configured", () => {

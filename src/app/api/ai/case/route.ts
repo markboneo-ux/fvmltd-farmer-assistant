@@ -11,10 +11,16 @@ import {
   evaluateConversationGate,
   loadPersistedConversationHistory,
   persistConversationTurn,
+  resolveContinuingCropCase,
   similarCaseHint,
 } from "@/lib/beta/conversation";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
-import { logCasePersistenceBackend } from "@/lib/cases/store";
+import { persistActiveCaseId, readActiveCaseId } from "@/lib/beta/session";
+import {
+  logCasePersistenceBackend,
+  logCasePersistenceError,
+  logCasePersistenceStart,
+} from "@/lib/cases/store";
 import {
   FARMER_GENERIC_ERROR,
   GUEST_LIMIT_MESSAGE,
@@ -254,6 +260,11 @@ export async function POST(request: Request) {
         typeof record.caseId === "string" ? record.caseId.trim() || null : incomingCaseId;
     }
 
+    incomingCaseId = await resolveContinuingCropCase({
+      identity,
+      requestedCaseId: incomingCaseId ?? (await readActiveCaseId()),
+    });
+
     const persistedHistory = await loadPersistedConversationHistory(
       incomingCaseId,
       message,
@@ -334,6 +345,7 @@ export async function POST(request: Request) {
     }
 
     const assistantText = farmerHistoryContent(result.case);
+    logCasePersistenceStart();
     const persisted = await persistConversationTurn({
       identity,
       caseId: incomingCaseId,
@@ -343,6 +355,7 @@ export async function POST(request: Request) {
       imageCount: images.length,
       profile,
     });
+    await persistActiveCaseId(persisted.caseId);
     if (images.length > 0) {
       await persistPrivateCaseImages({
         caseId: persisted.caseId,
@@ -366,6 +379,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof CasePersistenceError) {
+      logCasePersistenceError(error, error.table);
       logOps("database_failure", {
         error: error.message,
         table: error.table,

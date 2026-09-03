@@ -1,14 +1,16 @@
 import { cookies } from "next/headers";
 import {
+  CASE_COOKIE_NAME,
   createGuestSessionId,
   GUEST_COOKIE_NAME,
   guestCookieOptions,
+  isUuid,
   normalizeGuestSessionId,
   type AppIdentity,
 } from "./identity";
 import { resolveAccess } from "./entitlements";
 
-export { GUEST_COOKIE_NAME, guestCookieOptions };
+export { CASE_COOKIE_NAME, GUEST_COOKIE_NAME, guestCookieOptions };
 
 export async function readGuestSessionId(): Promise<string | null> {
   try {
@@ -16,6 +18,27 @@ export async function readGuestSessionId(): Promise<string | null> {
     return normalizeGuestSessionId(store.get(GUEST_COOKIE_NAME)?.value ?? null);
   } catch {
     return null;
+  }
+}
+
+export async function readActiveCaseId(): Promise<string | null> {
+  try {
+    const store = await cookies();
+    const value = store.get(CASE_COOKIE_NAME)?.value?.trim() ?? "";
+    return isUuid(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function persistActiveCaseId(caseId: string): Promise<void> {
+  const id = caseId.trim();
+  if (!isUuid(id)) return;
+  try {
+    const store = await cookies();
+    store.set(CASE_COOKIE_NAME, id, guestCookieOptions());
+  } catch {
+    // Route handlers may set the cookie on the NextResponse instead.
   }
 }
 
