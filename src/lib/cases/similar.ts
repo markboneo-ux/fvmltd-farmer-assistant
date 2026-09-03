@@ -1,4 +1,4 @@
-import { listCropCases, listOutcomes } from "./store";
+import { listCropCases, listOutcomes, logCasePersistenceBackend } from "./store";
 import type { SimilarCaseMatch, SimilarCaseQuery } from "./types";
 
 function overlap(a: string[] | undefined, b: string[] | undefined): number {
@@ -16,8 +16,16 @@ function overlap(a: string[] | undefined, b: string[] | undefined): number {
  * same region, same crop/variety, similar symptoms, similar weather.
  * Never includes another farmer's identity.
  */
-export function getSimilarCases(query: SimilarCaseQuery, limit = 5): SimilarCaseMatch[] {
-  const scored = listCropCases()
+export async function getSimilarCases(
+  query: SimilarCaseQuery,
+  limit = 5,
+): Promise<SimilarCaseMatch[]> {
+  const allCases = await listCropCases();
+  logCasePersistenceBackend();
+  const allOutcomes = await listOutcomes();
+  const casesWithOutcome = new Set(allOutcomes.map((item) => item.caseId));
+
+  const scored = allCases
     .map((item) => {
       let score = 0;
       const reasons: string[] = [];
@@ -30,8 +38,7 @@ export function getSimilarCases(query: SimilarCaseQuery, limit = 5): SimilarCase
         score += 30;
         reasons.push("confirmed diagnosis");
       }
-      const hasOutcome = listOutcomes(item.id).length > 0;
-      if (hasOutcome) {
+      if (casesWithOutcome.has(item.id)) {
         score += 25;
         reasons.push("recorded outcome");
       }

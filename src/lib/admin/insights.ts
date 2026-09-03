@@ -1,5 +1,5 @@
 import { funnelStats, listUsageEvents } from "@/lib/beta/usage-store";
-import { listCropCases, listFollowups, listOutcomes } from "@/lib/cases/store";
+import { listCropCases, listFollowups, listOutcomes, logCasePersistenceBackend } from "@/lib/cases/store";
 import type { TrendClass } from "@/lib/cases/types";
 
 export type InsightsFilters = {
@@ -37,8 +37,9 @@ export function topEntries(map: Map<string, number>, limit = 8) {
     .slice(0, limit);
 }
 
-export function buildInsights(filters: InsightsFilters = {}) {
-  const allCases = listCropCases().filter((item) => {
+export async function buildInsights(filters: InsightsFilters = {}) {
+  logCasePersistenceBackend();
+  const allCases = (await listCropCases()).filter((item) => {
     if (!inRange(item.createdAt, filters)) return false;
     if (!matches(item.country, filters.country)) return false;
     if (!matches(item.district, filters.district)) return false;
@@ -90,13 +91,15 @@ export function buildInsights(filters: InsightsFilters = {}) {
     if (item.problemCategory === "wilting" || item.symptoms.includes("wilting")) wilting += 1;
   }
 
-  const outcomes = listOutcomes().filter((row) => allCases.some((item) => item.id === row.caseId));
+  const outcomes = (await listOutcomes()).filter((row) =>
+    allCases.some((item) => item.id === row.caseId),
+  );
   const improved = outcomes.filter((row) => row.outcome === "improved").length;
   const unchanged = outcomes.filter((row) => row.outcome === "about_the_same").length;
   const worsened = outcomes.filter((row) => row.outcome === "worse").length;
   const solved = outcomes.filter((row) => row.outcome === "problem_solved").length;
 
-  const followups = listFollowups();
+  const followups = await listFollowups();
   photoAssisted = allCases.filter((item) =>
     followups.some((row) => row.caseId === item.id && row.followUpPhotoId),
   ).length;
@@ -163,9 +166,9 @@ export function classifyTrend(options: {
   return "emerging_pattern";
 }
 
-export function detectTrends(filters: InsightsFilters = {}) {
-  const insights = buildInsights(filters);
-  const previous = buildInsights({
+export async function detectTrends(filters: InsightsFilters = {}) {
+  const insights = await buildInsights(filters);
+  const previous = await buildInsights({
     ...filters,
     from: filters.from ? shiftMonth(filters.from, -1) : null,
     to: filters.from ?? null,

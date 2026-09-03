@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { buildInsights, detectTrends } from "@/lib/admin/insights";
 import { requireStaffApi } from "@/lib/staff/auth";
 import type { InsightsFilters } from "@/lib/admin/insights";
+import { CasePersistenceError } from "@/lib/cases/store";
+import { logOps } from "@/lib/security/ops-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +29,16 @@ export async function GET(request: Request) {
     outcome: url.searchParams.get("outcome"),
   };
 
-  return NextResponse.json({
-    insights: buildInsights(filters),
-    trends: detectTrends(filters),
-  });
+  try {
+    return NextResponse.json({
+      insights: await buildInsights(filters),
+      trends: await detectTrends(filters),
+    });
+  } catch (error) {
+    if (error instanceof CasePersistenceError) {
+      logOps("database_failure", { route: "admin/insights" });
+      return NextResponse.json({ error: "Insights are temporarily unavailable." }, { status: 503 });
+    }
+    throw error;
+  }
 }

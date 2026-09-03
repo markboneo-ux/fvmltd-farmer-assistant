@@ -7,11 +7,14 @@ import {
 } from "@/lib/agronomy/runCase";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import {
+  CasePersistenceError,
   evaluateConversationGate,
+  loadPersistedConversationHistory,
   persistConversationTurn,
   similarCaseHint,
 } from "@/lib/beta/conversation";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
+import { logCasePersistenceBackend } from "@/lib/cases/store";
 import {
   FARMER_GENERIC_ERROR,
   GUEST_LIMIT_MESSAGE,
@@ -122,6 +125,7 @@ function jsonError(
  */
 export async function POST(request: Request) {
   await connection();
+  logCasePersistenceBackend();
 
   const apiKey = process.env.OPENAI_API_KEY;
   const model = getOpenAIModel();
@@ -250,10 +254,21 @@ export async function POST(request: Request) {
         typeof record.caseId === "string" ? record.caseId.trim() || null : incomingCaseId;
     }
 
+    const persistedHistory = await loadPersistedConversationHistory(
+      incomingCaseId,
+      message,
+    );
+    if (persistedHistory && persistedHistory.length > 0) {
+      history = persistedHistory;
+    }
+
     const imageGate =
       images.length > 0
-        ? evaluateConversationGate({ identity, next: "image_analysis" })
-        : evaluateConversationGate({ identity, next: incomingCaseId ? "message" : "case" });
+        ? await evaluateConversationGate({ identity, next: "image_analysis" })
+        : await evaluateConversationGate({
+            identity,
+            next: incomingCaseId ? "message" : "case",
+          });
     if (!imageGate.ok && !imageGate.allowFinishActiveCase) {
       recordUsageEvent({
         guestSessionId: identity.guestSessionId,
@@ -319,7 +334,7 @@ export async function POST(request: Request) {
     }
 
     const assistantText = farmerHistoryContent(result.case);
-    const persisted = persistConversationTurn({
+    const persisted = await persistConversationTurn({
       identity,
       caseId: incomingCaseId,
       userMessage: message,
@@ -342,7 +357,7 @@ export async function POST(request: Request) {
       requestCompleted: result.requestCompleted,
       questionsAsked: result.questionsAsked,
       caseId: persisted.caseId,
-      similarCaseHint: similarCaseHint(persisted.caseId),
+      similarCaseHint: await similarCaseHint(persisted.caseId),
       access: identity.access,
       usage: imageGate.used,
       ...(includeDiagnostics
@@ -350,6 +365,24 @@ export async function POST(request: Request) {
         : {}),
     });
   } catch (error) {
+    if (error instanceof CasePersistenceError) {
+      logOps("database_failure", {
+        error: error.message,
+        table: error.table,
+      });
+      return NextResponse.json(
+        {
+          case: null,
+          responseId: null,
+          requestCompleted: false,
+          error: FARMER_GENERIC_ERROR,
+          ...(includeDiagnostics
+            ? { model, diagnosticCode: "DATABASE_FAILURE" }
+            : {}),
+        },
+        { status: 503 },
+      );
+    }
     logOps("openai_failure", {
       error: error instanceof Error ? error.message : String(error),
     });

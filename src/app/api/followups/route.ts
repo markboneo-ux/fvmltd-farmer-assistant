@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
-import { assertCaseOwned, listFollowups, optOutFollowups, recordFollowupOutcome } from "@/lib/cases/store";
+import {
+  assertCaseOwned,
+  CasePersistenceError,
+  listFollowups,
+  optOutFollowups,
+  recordFollowupOutcome,
+} from "@/lib/cases/store";
 import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT, parseFollowUpOutcome } from "@/lib/cases/followups";
 import { logOps } from "@/lib/security/ops-log";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
+import { FARMER_GENERIC_ERROR } from "@/lib/beta/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,18 +21,26 @@ export async function GET(request: Request) {
   if (!caseId) {
     return NextResponse.json({ prompt: FOLLOWUP_PROMPT, options: FOLLOWUP_OPTIONS, followups: [] });
   }
-  const owned = assertCaseOwned(caseId, {
-    userId: identity.authUserId,
-    anonymousSessionId: identity.guestSessionId,
-  });
-  if (!owned) {
-    return NextResponse.json({ error: "Case not found." }, { status: 404 });
+  try {
+    const owned = await assertCaseOwned(caseId, {
+      userId: identity.authUserId,
+      anonymousSessionId: identity.guestSessionId,
+    });
+    if (!owned) {
+      return NextResponse.json({ error: "Case not found." }, { status: 404 });
+    }
+    return NextResponse.json({
+      prompt: FOLLOWUP_PROMPT,
+      options: FOLLOWUP_OPTIONS,
+      followups: await listFollowups(caseId),
+    });
+  } catch (error) {
+    if (error instanceof CasePersistenceError) {
+      logOps("database_failure", { route: "followups" });
+      return NextResponse.json({ error: FARMER_GENERIC_ERROR }, { status: 500 });
+    }
+    throw error;
   }
-  return NextResponse.json({
-    prompt: FOLLOWUP_PROMPT,
-    options: FOLLOWUP_OPTIONS,
-    followups: listFollowups(caseId),
-  });
 }
 
 export async function POST(request: Request) {
@@ -42,12 +57,12 @@ export async function POST(request: Request) {
 
     const caseId = typeof body.caseId === "string" ? body.caseId : "";
     if (body.optOut && caseId) {
-      const owned = assertCaseOwned(caseId, {
+      const owned = await assertCaseOwned(caseId, {
         userId: identity.authUserId,
         anonymousSessionId: identity.guestSessionId,
       });
       if (!owned) return NextResponse.json({ error: "Case not found." }, { status: 404 });
-      optOutFollowups(caseId);
+      await optOutFollowups(caseId);
       return NextResponse.json({ ok: true, optedOut: true });
     }
 
@@ -56,7 +71,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Choose how the crop is doing." }, { status: 400 });
     }
 
-    const saved = recordFollowupOutcome({
+    const saved = await recordFollowupOutcome({
       followupId: body.followupId,
       outcome,
       actionTaken: typeof body.actionTaken === "string" ? body.actionTaken : null,
@@ -67,6 +82,10 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, followup: saved });
   } catch (error) {
+    if (error instanceof CasePersistenceError) {
+      logOps("database_failure", { route: "followups" });
+      return NextResponse.json({ error: FARMER_GENERIC_ERROR }, { status: 500 });
+    }
     logOps("followup_failure", {
       error: error instanceof Error ? error.message : "unknown",
     });

@@ -147,6 +147,20 @@ export type CaseOutcomeRecord = {
   createdAt: string;
 };
 
+export type CaseAssessmentRecord = {
+  id: string;
+  caseId: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type CaseActionRecord = {
+  id: string;
+  caseId: string;
+  actionText: string;
+  createdAt: string;
+};
+
 export type SimilarCaseQuery = {
   country?: string | null;
   district?: string | null;

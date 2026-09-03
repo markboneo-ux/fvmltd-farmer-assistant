@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     const guestMatch = cookieHeader.match(new RegExp(`${GUEST_COOKIE_NAME}=([^;]+)`));
     const guestId = normalizeGuestSessionId(guestMatch?.[1] ?? null);
     if (guestId) {
-      linkGuestCasesToUser(guestId, data.user.id);
+      await linkGuestCasesToUser(guestId, data.user.id);
     }
     grantEntitlement(`user:${data.user.id}`, "free_registered", "signup");
 
