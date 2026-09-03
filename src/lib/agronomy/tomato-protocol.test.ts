@@ -82,6 +82,18 @@ describe("tomato-protocol rapid triage", () => {
     ).toBe(true);
   });
 
+  it("extracts Ruby tomato, Couva and commercial acreage from natural speech", () => {
+    const facts = extractKnownFacts(
+      "My Ruby tomato in Couva is stunted across about 3 acres.",
+    );
+    expect(facts.crop).toBe("tomato");
+    expect(facts.variety).toBe("Ruby");
+    expect(facts.district).toMatch(/couva/i);
+    expect(facts.problemCategory).toBe("stunting");
+    expect(facts.areaPlanted).toMatch(/3 acres/);
+    expect(facts.userType).toBe("commercial_grower");
+  });
+
   it("does not force a follow-up when the model already answered usefully", () => {
     const guarded = applyCommercialSafetyGuards(
       basePayload({

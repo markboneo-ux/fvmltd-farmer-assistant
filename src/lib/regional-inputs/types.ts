@@ -122,7 +122,9 @@ export type GetVerifiedRegionalInputsArgs = {
   crop: string;
   issue: string;
   productType?: ProductType | "any" | null;
+  /** Farmer-facing lookups hide test/example catalogue rows. */
+  forFarmerDisplay?: boolean;
 };
 
 export const NO_VERIFIED_PRODUCT_MESSAGE =
-  "I could not verify a locally registered and available product for this use. Please confirm with FVMLTD or the relevant national authority.";
+  "I can suggest the type of treatment or active ingredient, but I can’t confirm a locally available registered product for your area yet. Check the product label before applying anything.";

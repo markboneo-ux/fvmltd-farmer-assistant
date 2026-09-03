@@ -353,7 +353,10 @@ function summarizeKnownFacts(
 function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string {
   const lines: string[] = [];
   if (facts.crop) lines.push(`- crop: ${facts.crop}`);
+  if (facts.variety) lines.push(`- variety: ${facts.variety}`);
   if (facts.suspectedIssue) lines.push(`- suspected issue: ${facts.suspectedIssue}`);
+  if (facts.problemCategory) lines.push(`- problem category: ${facts.problemCategory}`);
+  if (facts.userType) lines.push(`- user type: ${facts.userType}`);
   if (facts.country) lines.push(`- country/island: ${facts.country}`);
   if (facts.district) lines.push(`- district: ${facts.district}`);
   if (facts.productionSystem) {
@@ -441,6 +444,7 @@ async function enrichWithRegionalTools(
       country,
       crop,
       issue,
+      forFarmerDisplay: true,
     });
     productDataAsOf = inputs.productDataAsOf;
     verifiedInputOptions = inputs.options.map((option) => ({

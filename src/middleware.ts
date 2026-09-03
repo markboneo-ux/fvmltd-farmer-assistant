@@ -1,30 +1,50 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  createGuestSessionId,
+  GUEST_COOKIE_NAME,
+  guestCookieOptions,
+  normalizeGuestSessionId,
+} from "@/lib/beta/identity";
+
+function withGuestCookie(request: NextRequest, response: NextResponse) {
+  const existing = normalizeGuestSessionId(
+    request.cookies.get(GUEST_COOKIE_NAME)?.value ?? null,
+  );
+  if (existing) return response;
+  const created = createGuestSessionId();
+  response.cookies.set(GUEST_COOKIE_NAME, created, guestCookieOptions());
+  return response;
+}
 
 /**
- * Protect FVMLTD staff routes. Requires a Supabase Auth session.
- * Active staff membership is verified again in staff pages / API handlers.
+ * Guest cookie for all farmer routes.
+ * Staff/admin routes require a Supabase Auth session.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isStaffLogin = pathname === "/staff/login";
-  const isStaffPage = pathname === "/staff" || pathname.startsWith("/staff/");
-  const isStaffApi = pathname.startsWith("/api/staff");
+  const isProtectedPage =
+    pathname === "/staff" ||
+    pathname.startsWith("/staff/") ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/");
+  const isProtectedApi =
+    pathname.startsWith("/api/staff") || pathname.startsWith("/api/admin");
 
-  if (!isStaffPage && !isStaffApi) {
-    return NextResponse.next();
+  if (!isProtectedPage && !isProtectedApi) {
+    return withGuestCookie(request, NextResponse.next());
   }
 
-  // Login page is public (API still checks membership after sign-in).
   if (isStaffLogin) {
-    return NextResponse.next();
+    return withGuestCookie(request, NextResponse.next());
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    if (isStaffApi) {
+    if (isProtectedApi) {
       return NextResponse.json(
         {
           error:
@@ -67,7 +87,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    if (isStaffApi) {
+    if (isProtectedApi) {
       return NextResponse.json(
         { error: "Sign in with your FVMLTD staff account to continue." },
         { status: 401 },
@@ -79,9 +99,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return response;
+  return withGuestCookie(request, response);
 }
 
 export const config = {
-  matcher: ["/staff", "/staff/:path*", "/api/staff/:path*"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|brand/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

@@ -121,6 +121,19 @@ function inferProductTypes(
   return "any";
 }
 
+export function isTestOrExampleProduct(input: {
+  brandName?: string | null;
+  manufacturer?: string | null;
+  id?: string | null;
+}): boolean {
+  const text = `${input.brandName ?? ""} ${input.manufacturer ?? ""} ${input.id ?? ""}`.toLowerCase();
+  return (
+    /\b(example|test|placeholder|dummy|sample listing|verified listing)\b/.test(text) ||
+    text.includes("example manufacturer") ||
+    text.includes("example verified")
+  );
+}
+
 function brandDisplayAllowed(options: {
   registration: InputRegistrationRecord;
   cropUse: InputCropUseRecord;
@@ -213,6 +226,7 @@ export function getVerifiedRegionalInputs(
   }
 
   const wantedTypes = inferProductTypes(issue, args.productType);
+  const hideTest = args.forFarmerDisplay === true;
   const uses = store.cropUses.filter(
     (use) =>
       use.countryId === country.id &&
@@ -239,6 +253,7 @@ export function getVerifiedRegionalInputs(
   const inputs = sortByInterventionOrder(
     store.agriInputs.filter((input) => {
       if (!inputIds.includes(input.id)) return false;
+      if (hideTest && isTestOrExampleProduct(input)) return false;
       if (wantedTypes === "any") return true;
       return wantedTypes.includes(input.productType);
     }),

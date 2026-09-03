@@ -2,6 +2,7 @@
  * Rapid triage protocol for Caribbean crop problems (Quick Help + Full Crop Check).
  */
 
+import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import {
   emptyRegionalContext,
   isGuidanceStage,
@@ -71,15 +72,25 @@ export const WHITEFLY_QUICK_SEQUENCE = [
 ] as const;
 
 export type FarmerScale = "commercial" | "home" | null;
+export type FarmerUserType =
+  | "home_gardener"
+  | "farmer"
+  | "commercial_grower"
+  | "agronomist"
+  | "extension_officer"
+  | null;
 
 export type KnownFarmerFacts = {
   crop: string | null;
+  variety: string | null;
   suspectedIssue: string | null;
+  problemCategory: string | null;
   country: string | null;
   district: string | null;
   distributionHint: string | null;
   productionSystem: string | null;
   farmerScale: FarmerScale;
+  userType: FarmerUserType;
   areaPlanted: string | null;
   plantAge: string | null;
   suddenWilt: boolean;
@@ -127,15 +138,42 @@ export function extractKnownFacts(
   if (/\btomato(es)?\b/.test(lower)) crop = "tomato";
   else if (/\bpepper(s)?\b/.test(lower)) crop = "pepper";
   else if (/\bcucumber(s)?\b/.test(lower)) crop = "cucumber";
+  else if (/\bcelery\b/.test(lower)) crop = "celery";
+
+  let variety: string | null = null;
+  const namedVariety = rawText.match(
+    /\b(?:variety|cultivar)\s+([A-Za-z][A-Za-z0-9-]+)\b/i,
+  );
+  if (namedVariety?.[1]) {
+    variety = namedVariety[1];
+  } else {
+    const ruby = rawText.match(/\bRuby\b/i);
+    if (ruby && crop === "tomato") variety = "Ruby";
+    const beforeCrop = rawText.match(/\b([A-Z][a-z]+)\s+tomato(es)?\b/);
+    if (!variety && beforeCrop?.[1] && !/my|the|our|some/i.test(beforeCrop[1])) {
+      variety = beforeCrop[1];
+    }
+  }
 
   let suspectedIssue: string | null = null;
   if (/\bwhite\s*fl(y|ies)\b/.test(lower)) suspectedIssue = "whiteflies";
   else if (/\bholes?\b/.test(lower)) suspectedIssue = "leaf holes";
   else if (/\bwilt(ing|ed)?\b/.test(lower)) suspectedIssue = "wilt";
   else if (/\bstunt(ed|ing)?\b/.test(lower)) suspectedIssue = "stunting";
-  else if (/\b(blight|leaf\s+spot|fungal)\b/.test(lower)) {
+  else if (/\b(blight|leaf\s+spot|fungal|cercospora)\b/.test(lower)) {
     suspectedIssue = "foliar fungal disease";
   }
+
+  const problemCategory =
+    suspectedIssue === "whiteflies"
+      ? "whitefly"
+      : suspectedIssue === "wilt"
+        ? "wilting"
+        : suspectedIssue === "stunting"
+          ? "stunting"
+          : suspectedIssue === "foliar fungal disease"
+            ? "leaf_spot"
+            : null;
 
   let country: string | null = profile?.country?.trim() || null;
   if (!country) {
@@ -149,7 +187,7 @@ export function extractKnownFacts(
   let district: string | null = profile?.district?.trim() || null;
   if (!district) {
     const districtMatch = lower.match(
-      /\b(chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin)\b/,
+      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
     );
     if (districtMatch) district = districtMatch[1];
   }
@@ -170,16 +208,28 @@ export function extractKnownFacts(
   else if (/\bopen\s+field\b/.test(lower)) productionSystem = "open_field";
 
   let farmerScale: FarmerScale = null;
-  if (
+  let userType: FarmerUserType = null;
+  if (/\b(agronomist|plant patholog|crop advisor)\b/.test(lower)) {
+    userType = "agronomist";
+    farmerScale = "commercial";
+  } else if (/\b(extension officer|extension agent)\b/.test(lower)) {
+    userType = "extension_officer";
+    farmerScale = "commercial";
+  } else if (
     /\bcommercial\s+(farmer|grower|farm|production|field)\b/.test(lower) ||
-    /\bi('m| am)\s+a\s+commercial\b/.test(lower)
+    /\bi('m| am)\s+a\s+commercial\b/.test(lower) ||
+    /\b\d+(?:\.\d+)?\s*(acres?|hectares?|ha)\b/.test(lower)
   ) {
     farmerScale = "commercial";
+    userType = "commercial_grower";
   } else if (
     /\b(home|backyard|kitchen)\s+(garden|gardener|grower)\b/.test(lower) ||
     /\bhome\s+gardener\b/.test(lower)
   ) {
     farmerScale = "home";
+    userType = "home_gardener";
+  } else if (/\b(farmer|farm)\b/.test(lower)) {
+    userType = "farmer";
   }
 
   const areaMatch = lower.match(
@@ -196,12 +246,15 @@ export function extractKnownFacts(
 
   return {
     crop,
+    variety,
     suspectedIssue,
+    problemCategory,
     country,
     district,
     distributionHint,
     productionSystem,
     farmerScale,
+    userType,
     areaPlanted,
     plantAge,
     suddenWilt:
@@ -211,7 +264,7 @@ export function extractKnownFacts(
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
     asksForProducts:
-      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use)|what\s+can\s+i\s+use|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
@@ -327,6 +380,25 @@ export function applyCommercialSafetyGuards(
     }
     return true;
   });
+
+  const destructive = sanitizeDestructiveActions(safeActionsNow, {
+    observedFacts: [
+      options.knownFacts.rawText,
+      options.knownFacts.suspectedIssue ?? "",
+    ],
+    confidence: options.knownFacts.suddenWilt ? "medium" : "unknown",
+  });
+  if (destructive.blocked) {
+    safeActionsNow = destructive.actions;
+    ensureAvoid("Do not dump or destroy plants from vague symptoms alone.");
+    if (
+      destructive.farmerMessage &&
+      !preliminaryAssessment.includes("Before removing plants")
+    ) {
+      preliminaryAssessment = `${destructive.farmerMessage} ${preliminaryAssessment}`.trim();
+    }
+    escalationRecommended = true;
+  }
 
   // Never recommend chemical products from vague symptoms alone.
   if (isInterviewStage(stage) && !options.knownFacts.asksForProducts) {
