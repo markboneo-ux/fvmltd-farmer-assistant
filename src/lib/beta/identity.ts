@@ -17,6 +17,7 @@ export type AppIdentity = {
 };
 
 export const GUEST_COOKIE_NAME = "fvm_guest_session";
+export const CASE_COOKIE_NAME = "fvm_crop_case";
 export const GUEST_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 180;
 
 export function guestCookieOptions(secure = process.env.NODE_ENV === "production") {

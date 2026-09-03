@@ -4,15 +4,18 @@ import { getSimilarCases } from "@/lib/cases/similar";
 import {
   addCaseAction,
   addCaseAssessment,
-  addCaseMessage,
+  appendCaseMessage,
   addCaseObservation,
   addCasePhoto,
   CasePersistenceError,
+  assertCaseOwned,
   createCropCase,
+  findActiveCropCaseForOwner,
   getCropCase,
   hasActiveCase,
   listCaseMessages,
   logCasePersistenceBackend,
+  logCasePersistenceStart,
   updateCaseFromConversation,
 } from "@/lib/cases/store";
 import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
@@ -70,6 +73,23 @@ export async function loadPersistedConversationHistory(
   return history;
 }
 
+export async function resolveContinuingCropCase(options: {
+  identity: AppIdentity;
+  requestedCaseId?: string | null;
+}): Promise<string | null> {
+  const owner = {
+    userId: options.identity.authUserId,
+    anonymousSessionId: options.identity.guestSessionId,
+  };
+  const requested = options.requestedCaseId?.trim() || null;
+  if (requested) {
+    const owned = await assertCaseOwned(requested, owner);
+    if (owned) return owned.id;
+  }
+  const active = await findActiveCropCaseForOwner(owner);
+  return active?.id ?? null;
+}
+
 export async function persistConversationTurn(options: {
   identity: AppIdentity;
   caseId?: string | null;
@@ -79,10 +99,15 @@ export async function persistConversationTurn(options: {
   imageCount?: number;
   profile?: { country?: string | null; district?: string | null } | null;
 }): Promise<{ caseId: string; createdNewCase: boolean }> {
+  logCasePersistenceStart();
   logCasePersistenceBackend();
   const { identity } = options;
   let createdNewCase = false;
-  let record = options.caseId ? await getCropCase(options.caseId) : null;
+  const continuingId = await resolveContinuingCropCase({
+    identity,
+    requestedCaseId: options.caseId,
+  });
+  let record = continuingId ? await getCropCase(continuingId) : null;
 
   if (!record) {
     record = await createCropCase({
@@ -118,13 +143,13 @@ export async function persistConversationTurn(options: {
     });
   }
 
-  await addCaseMessage({
+  await appendCaseMessage({
     caseId: record.id,
     role: "user",
     content: options.userMessage,
     hasImages: (options.imageCount ?? 0) > 0,
   });
-  await addCaseMessage({
+  await appendCaseMessage({
     caseId: record.id,
     role: "assistant",
     content: options.assistantText,

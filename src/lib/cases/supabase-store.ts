@@ -5,6 +5,7 @@ import { tryCreateAdminClient } from "@/lib/supabase/helpers";
 import type { AccessState } from "@/lib/beta/limits";
 import {
   CasePersistenceError,
+  logCasePersistenceError,
 } from "./persistence";
 import {
   actionToRow,
@@ -88,6 +89,7 @@ export function setCaseStoreAdminClientForTests(client: CaseStoreAdminClient | n
 }
 
 function persistFail(table: string, message: string): never {
+  logCasePersistenceError(message, table);
   logOps("database_failure", {
     table,
     error: message,
