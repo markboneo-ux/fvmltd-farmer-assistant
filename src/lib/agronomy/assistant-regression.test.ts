@@ -119,6 +119,33 @@ describe("general assistant regressions", () => {
     expect(result.case.checksToday).toEqual([]);
   });
 
+  it("cashflow follow-up stays in cashflow and does not mention tomato", async () => {
+    let openaiCalled = false;
+    const result = await runAgronomicCase({
+      message: "Hot pepper on 2 acres",
+      history: [
+        { role: "user", content: "My tomato plants are stunted" },
+        { role: "user", content: "Help me make a cashflow for my farm" },
+        {
+          role: "assistant",
+          content: "What crop or enterprise is this cashflow for?",
+        },
+      ],
+      activeCase: { crop: null, conversationIntent: "cashflow" },
+      createResponse: async () => {
+        openaiCalled = true;
+        return { id: "should_not_run", output_text: "{}" };
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(openaiCalled).toBe(false);
+    expect(result.case.intent).toBe("cashflow");
+    expect(result.case.preliminaryAssessment.toLowerCase()).toMatch(/pepper/);
+    expect(result.case.preliminaryAssessment.toLowerCase()).not.toContain("tomato");
+    expect(result.case.preliminaryAssessment).toMatch(/yield|price|acre|cost/i);
+  });
+
   it("a genuine tomato follow-up keeps tomato context", async () => {
     let captured = "";
     const result = await runAgronomicCase({

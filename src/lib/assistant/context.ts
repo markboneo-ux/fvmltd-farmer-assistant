@@ -11,9 +11,11 @@ import {
 } from "./crops";
 import {
   classifyFarmerIntent,
+  isBusinessIntent,
   isCalculationIntent,
   isDiagnosticIntent,
   isLikelyFollowUp,
+  resolveConversationIntent,
   shouldStartNewCase,
   type ClassifiedIntent,
   type IntentCategory,
@@ -45,6 +47,34 @@ function userHistoryText(
     .join("\n");
 }
 
+export function historyIntentFrom(
+  history: Array<{ role: string; content: string }>,
+): IntentCategory | null {
+  const users = history.filter((item) => item.role === "user");
+  for (let index = users.length - 1; index >= 0; index -= 1) {
+    const intent = classifyFarmerIntent(users[index].content).intent;
+    if (intent !== "other") return intent;
+  }
+  return null;
+}
+
+export function sliceHistoryForCurrentIntent(
+  history: Array<{ role: string; content: string }>,
+  intent: IntentCategory,
+): Array<{ role: string; content: string }> {
+  if (!isBusinessIntent(intent) && !isCalculationIntent(intent)) return history;
+  let start = -1;
+  for (let index = 0; index < history.length; index += 1) {
+    const item = history[index];
+    if (item.role !== "user") continue;
+    const itemIntent = classifyFarmerIntent(item.content).intent;
+    if (itemIntent === intent || (intent === "cashflow" && itemIntent === "farm_business")) {
+      start = index;
+    }
+  }
+  return start >= 0 ? history.slice(start) : history;
+}
+
 export function resolveTurnContext(options: {
   message: string;
   history?: Array<{ role: string; content: string }>;
@@ -52,8 +82,9 @@ export function resolveTurnContext(options: {
   activeCase?: ActiveCaseContext | null;
 }): ResolvedTurnContext {
   const history = options.history ?? [];
-  const classified = classifyFarmerIntent(options.message);
   const prevCrop = extractLastCrop(userHistoryText(history)) ?? options.activeCase?.crop ?? null;
+  const historyIntent = historyIntentFrom(history);
+  const previousIntent = options.activeCase?.conversationIntent ?? historyIntent;
   const resetHistory = options.activeCase
     ? shouldStartNewCase({
         message: options.message,
@@ -63,13 +94,21 @@ export function resolveTurnContext(options: {
     : shouldStartNewCase({
         message: options.message,
         activeCrop: extractLastCrop(userHistoryText(history)),
-        activeIntent: classifyFarmerIntent(userHistoryText(history) || options.message)
-          .intent,
+        activeIntent: historyIntent,
       }) &&
       history.length > 0 &&
       !isLikelyFollowUp(options.message, {
         activeCrop: prevCrop,
         hasHistory: history.length > 0,
+      });
+
+  const classified = resetHistory
+    ? classifyFarmerIntent(options.message)
+    : resolveConversationIntent({
+        message: options.message,
+        activeIntent: previousIntent,
+        activeCrop: options.activeCase?.crop ?? prevCrop,
+        historyIntent,
       });
 
   const currentCrop = extractLastCrop(options.message);

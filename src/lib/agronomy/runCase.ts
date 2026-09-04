@@ -11,6 +11,7 @@ import {
   cropLockInstruction,
   resolveTurnContext,
   sanitizeFarmerFacingText,
+  sliceHistoryForCurrentIntent,
 } from "@/lib/assistant/context";
 import {
   isCalculationIntent,
@@ -639,15 +640,17 @@ export async function runAgronomicCase(options: {
     options.profile,
     options.activeCase,
   );
+  const classified = turn.classified;
   const history = (
-    turn.resetHistory ? [] : (options.history ?? [])
+    turn.resetHistory
+      ? []
+      : sliceHistoryForCurrentIntent(options.history ?? [], classified.intent)
   ).slice(-24);
   const previousResponseId = turn.resetHistory
     ? null
     : options.previousResponseId?.trim() || null;
   const questionsAskedBeforeThisTurn = countPriorAssistantQuestions(history);
   const knownFacts = turn.knownFacts;
-  const classified = turn.classified;
 
   if (isCalculationIntent(classified.intent) || classified.calculationType) {
     const calc = tryFarmerCalculation(effectiveMessage);
@@ -674,7 +677,7 @@ export async function runAgronomicCase(options: {
     }
   }
 
-  if (classified.intent === "cashflow") {
+  if (classified.intent === "cashflow" || classified.intent === "farm_business") {
     const cash = buildCashflowTurn({
       message: effectiveMessage,
       history,

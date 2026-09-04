@@ -303,6 +303,81 @@ export function isExplicitNewTopic(message: string): boolean {
   return NEW_TOPIC.test(message);
 }
 
+export function isSymptomLedProblem(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    isClearlyCropProblem(lower) ||
+    /\b(white\s*fl|aphid|thrips|mite|blight|leaf\s+spot|mildew|mould|mold|pest|disease|wilting|spots? on)\b/i.test(
+      lower,
+    )
+  );
+}
+
+function isStandaloneMathQuestion(message: string): boolean {
+  return (
+    hasArithmeticQuestion(message) &&
+    /\b(how much will|how many kg|what is the revenue|what is the total)\b/i.test(
+      message,
+    )
+  );
+}
+
+function asIntent(value: IntentCategory | string | null | undefined): IntentCategory | null {
+  if (!value) return null;
+  return INTENT_CATEGORIES.includes(value as IntentCategory)
+    ? (value as IntentCategory)
+    : null;
+}
+
+/**
+ * Keep cashflow/business (and diagnosis follow-ups) on the same thread when
+ * the farmer is answering, not starting a new topic.
+ */
+export function resolveConversationIntent(options: {
+  message: string;
+  activeIntent?: IntentCategory | string | null;
+  activeCrop?: string | null;
+  historyIntent?: IntentCategory | string | null;
+}): ClassifiedIntent {
+  const classified = classifyFarmerIntent(options.message);
+  const previous = asIntent(options.activeIntent) ?? asIntent(options.historyIntent);
+  if (!previous) return classified;
+
+  if (
+    shouldStartNewCase({
+      message: options.message,
+      activeCrop: options.activeCrop ?? null,
+      activeIntent: previous,
+    })
+  ) {
+    return classified;
+  }
+
+  if (isBusinessIntent(previous)) {
+    if (isSymptomLedProblem(options.message) || classified.intent === "crop_problem" || classified.intent === "pest_disease") {
+      return classified;
+    }
+    if (isStandaloneMathQuestion(options.message) && isCalculationIntent(classified.intent)) {
+      return classified;
+    }
+    return pack(previous);
+  }
+
+  if (
+    (isDiagnosticIntent(previous) || previous === "general_agriculture") &&
+    isLikelyFollowUp(options.message, {
+      activeCrop: options.activeCrop,
+      hasHistory: true,
+    }) &&
+    !isBusinessIntent(classified.intent) &&
+    !isCalculationIntent(classified.intent)
+  ) {
+    return pack(previous);
+  }
+
+  return classified;
+}
+
 export function shouldStartNewCase(options: {
   message: string;
   activeCrop: string | null;
@@ -311,26 +386,40 @@ export function shouldStartNewCase(options: {
   const classified = classifyFarmerIntent(options.message);
   if (isExplicitNewTopic(options.message)) return true;
 
+  const previous = asIntent(options.activeIntent);
   const namedCrop = extractLastCrop(options.message);
   if (
     namedCrop &&
     options.activeCrop &&
     namedCrop !== options.activeCrop.toLowerCase()
   ) {
-    return true;
+    if (previous && isBusinessIntent(previous) && !isSymptomLedProblem(options.message)) {
+      // Naming the enterprise during cashflow is not a new crop-problem case.
+    } else {
+      return true;
+    }
   }
 
-  const previous = (options.activeIntent || "crop_problem") as IntentCategory;
-  const prevBusiness = isBusinessIntent(previous) || isCalculationIntent(previous);
+  const prevIntent = previous || "crop_problem";
+  const prevBusiness = isBusinessIntent(prevIntent) || isCalculationIntent(prevIntent);
   const nextBusiness =
     isBusinessIntent(classified.intent) || isCalculationIntent(classified.intent);
-  const prevCrop = isDiagnosticIntent(previous) || previous === "general_agriculture";
-  const nextCrop = isDiagnosticIntent(classified.intent);
+  const prevCrop = isDiagnosticIntent(prevIntent) || prevIntent === "general_agriculture";
+  const nextCrop =
+    classified.intent === "crop_problem" || classified.intent === "pest_disease";
 
   if (prevCrop && nextBusiness) return true;
-  if (prevBusiness && nextCrop && !isLikelyFollowUp(options.message)) return true;
-  if (prevBusiness && nextBusiness && classified.intent !== previous) {
-    if (classified.intent === "cashflow" && previous !== "cashflow") return true;
+  if (prevBusiness && (nextCrop || isSymptomLedProblem(options.message))) return true;
+  if (prevBusiness && isStandaloneMathQuestion(options.message)) return true;
+  if (
+    prevBusiness &&
+    classified.intent === "nutrition" &&
+    /\bhow much\b/i.test(options.message)
+  ) {
+    return true;
+  }
+  if (prevBusiness && nextBusiness && classified.intent !== prevIntent) {
+    if (classified.intent === "cashflow" && prevIntent !== "cashflow") return true;
   }
 
   return false;

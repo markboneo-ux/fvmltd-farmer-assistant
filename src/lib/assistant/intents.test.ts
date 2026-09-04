@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyFarmerIntent,
+  resolveConversationIntent,
   shouldStartNewCase,
 } from "./intents";
 
@@ -60,5 +61,31 @@ describe("farmer intent classifier", () => {
         activeIntent: "crop_problem",
       }),
     ).toBe(false);
+  });
+
+  it("keeps cashflow answers on the same case", () => {
+    expect(
+      shouldStartNewCase({
+        message: "Hot pepper on 2 acres",
+        activeCrop: null,
+        activeIntent: "cashflow",
+      }),
+    ).toBe(false);
+    expect(classifyFarmerIntent("Hot pepper on 2 acres").intent).not.toBe("cashflow");
+    expect(
+      shouldStartNewCase({
+        message: "My pepper plants are wilting",
+        activeCrop: null,
+        activeIntent: "cashflow",
+      }),
+    ).toBe(true);
+  });
+
+  it("inherits cashflow intent while the farmer is answering", () => {
+    const turn = resolveConversationIntent({
+      message: "Hot pepper on 2 acres",
+      activeIntent: "cashflow",
+    });
+    expect(turn.intent).toBe("cashflow");
   });
 });

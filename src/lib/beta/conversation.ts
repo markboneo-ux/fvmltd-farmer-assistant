@@ -1,6 +1,9 @@
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import type { CaseChatMessage } from "@/lib/agronomy/runCase";
-import { classifyFarmerIntent, shouldStartNewCase } from "@/lib/assistant/intents";
+import {
+  resolveConversationIntent,
+  shouldStartNewCase,
+} from "@/lib/assistant/intents";
 import { getSimilarCases } from "@/lib/cases/similar";
 import {
   addCaseAction,
@@ -110,7 +113,6 @@ export async function persistConversationTurn(options: {
     requestedCaseId: options.caseId,
   });
   let record = continuingId ? await getCropCase(continuingId) : null;
-  const classified = classifyFarmerIntent(options.userMessage);
   if (
     record &&
     shouldStartNewCase({
@@ -121,6 +123,16 @@ export async function persistConversationTurn(options: {
   ) {
     record = null;
   }
+  const classified = record
+    ? resolveConversationIntent({
+        message: options.userMessage,
+        activeIntent: record.conversationIntent,
+        activeCrop: record.crop,
+      })
+    : resolveConversationIntent({
+        message: options.userMessage,
+        activeIntent: options.payload?.intent ?? null,
+      });
 
   if (!record) {
     record = await createCropCase({

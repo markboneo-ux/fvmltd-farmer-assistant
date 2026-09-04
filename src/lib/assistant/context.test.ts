@@ -70,6 +70,42 @@ describe("cashflow assistant", () => {
     expect(turn.readyForTable).toBe(false);
   });
 
+  it("continues cashflow after the farmer names the crop", () => {
+    const turn = resolveTurnContext({
+      message: "Hot pepper on 2 acres",
+      history: [
+        { role: "user", content: "Help me make a cashflow for my farm" },
+        {
+          role: "assistant",
+          content: "What crop or enterprise is this cashflow for?",
+        },
+      ],
+      activeCase: { crop: null, conversationIntent: "cashflow" },
+    });
+    expect(turn.resetHistory).toBe(false);
+    expect(turn.classified.intent).toBe("cashflow");
+    expect(turn.knownFacts.crop).toBe("pepper");
+    expect(turn.allowedCrops).not.toContain("tomato");
+  });
+
+  it("does not keep tomato in a cashflow follow-up after a tomato case", () => {
+    const turn = resolveTurnContext({
+      message: "Hot pepper on 2 acres",
+      history: [
+        { role: "user", content: "My tomato plants are wilting" },
+        { role: "user", content: "Help me make a cashflow for my farm" },
+        {
+          role: "assistant",
+          content: "What crop or enterprise is this cashflow for?",
+        },
+      ],
+      activeCase: { crop: null, conversationIntent: "cashflow" },
+    });
+    expect(turn.classified.intent).toBe("cashflow");
+    expect(turn.knownFacts.crop).toBe("pepper");
+    expect(turn.allowedCrops).not.toContain("tomato");
+  });
+
   it("builds totals from supplied figures only", () => {
     const turn = buildCashflowTurn({
       history: [
