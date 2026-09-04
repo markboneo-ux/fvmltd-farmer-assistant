@@ -27,6 +27,8 @@ export async function GET(request: Request) {
         ? (url.searchParams.get("homeOrCommercial") as "home" | "commercial")
         : null,
     outcome: url.searchParams.get("outcome"),
+    caseType: url.searchParams.get("caseType"),
+    status: url.searchParams.get("status"),
   };
 
   try {

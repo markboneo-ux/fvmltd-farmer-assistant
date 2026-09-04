@@ -1,5 +1,6 @@
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import type { CaseChatMessage } from "@/lib/agronomy/runCase";
+import { classifyFarmerIntent, shouldStartNewCase } from "@/lib/assistant/intents";
 import { getSimilarCases } from "@/lib/cases/similar";
 import {
   addCaseAction,
@@ -19,6 +20,7 @@ import {
   updateCaseFromConversation,
 } from "@/lib/cases/store";
 import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
+import { ingestCaseForTrends, relevantTrendHint } from "@/lib/trends/ingest";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
 import { countUsage, recordUsageEvent } from "./usage-store";
@@ -108,6 +110,17 @@ export async function persistConversationTurn(options: {
     requestedCaseId: options.caseId,
   });
   let record = continuingId ? await getCropCase(continuingId) : null;
+  const classified = classifyFarmerIntent(options.userMessage);
+  if (
+    record &&
+    shouldStartNewCase({
+      message: options.userMessage,
+      activeCrop: record.crop,
+      activeIntent: record.conversationIntent,
+    })
+  ) {
+    record = null;
+  }
 
   if (!record) {
     record = await createCropCase({
@@ -140,6 +153,10 @@ export async function persistConversationTurn(options: {
         : options.payload?.stage === "resolved"
           ? "resolved"
           : "in_progress",
+      conversationIntent: classified.intent,
+      questionCategory: classified.questionCategory,
+      calculationType: classified.calculationType,
+      caseType: classified.caseType,
     });
   }
 
@@ -199,6 +216,9 @@ export async function persistConversationTurn(options: {
   if (latest && !latest.humanEscalation) {
     await addCaseFollowupSafe(latest);
   }
+  if (latest) {
+    await ingestCaseForTrends(latest);
+  }
 
   return { caseId: record.id, createdNewCase };
 }
@@ -221,7 +241,14 @@ export async function similarCaseHint(caseId: string): Promise<string | null> {
       3,
     )
   ).filter((item) => item.caseId !== caseId);
-  return matches[0]?.farmerFacingSummary ?? null;
+  const trendHint = await relevantTrendHint({
+    crop: record.crop,
+    region: record.district,
+    country: record.country,
+    symptoms: record.symptoms,
+    suspectedIssue: record.problemCategory,
+  });
+  return trendHint ?? matches[0]?.farmerFacingSummary ?? null;
 }
 
 export async function recordCasePhoto(options: {

@@ -74,6 +74,12 @@ export function cropCaseToRow(record: CropCaseRecord): Record<string, unknown> {
     agronomist_reviewed: record.agronomistReviewed,
     diagnosis_confirmed: record.diagnosisConfirmed,
     case_status: record.caseStatus,
+    conversation_intent: record.conversationIntent,
+    question_category: record.questionCategory,
+    calculation_type: record.calculationType,
+    case_type: record.caseType,
+    knowledge_state: record.knowledgeState,
+    business_metadata: record.businessMetadata,
     created_at: record.createdAt,
     updated_at: record.updatedAt,
   };
@@ -117,6 +123,20 @@ export function rowToCropCase(row: Record<string, unknown>): CropCaseRecord {
     agronomistReviewed: asBoolean(row.agronomist_reviewed),
     diagnosisConfirmed: asBoolean(row.diagnosis_confirmed),
     caseStatus: (asString(row.case_status) || "open") as CropCaseRecord["caseStatus"],
+    conversationIntent:
+      (asNullableString(row.conversation_intent) as CropCaseRecord["conversationIntent"]) ??
+      null,
+    questionCategory:
+      (asNullableString(row.question_category) as CropCaseRecord["questionCategory"]) ??
+      null,
+    calculationType: asNullableString(row.calculation_type),
+    caseType: (asNullableString(row.case_type) as CropCaseRecord["caseType"]) ?? null,
+    knowledgeState:
+      (asNullableString(row.knowledge_state) as CropCaseRecord["knowledgeState"]) ?? "raw",
+    businessMetadata:
+      row.business_metadata && typeof row.business_metadata === "object"
+        ? (row.business_metadata as Record<string, unknown>)
+        : null,
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };

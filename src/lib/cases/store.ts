@@ -12,6 +12,7 @@ import {
 } from "./records";
 import * as memory from "./memory-store";
 import * as supabase from "./supabase-store";
+import { resetMemoryTrends } from "@/lib/trends/store";
 import type {
   CaseActionRecord,
   CaseAssessmentRecord,
@@ -44,6 +45,7 @@ function isMemoryBackend() {
 
 export function resetCaseStore() {
   memory.resetMemoryCaseStore();
+  resetMemoryTrends();
 }
 
 export async function createCropCase(input: {

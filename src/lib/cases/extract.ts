@@ -1,3 +1,4 @@
+import { extractLastCrop } from "@/lib/assistant/crops";
 import type { UserLevel } from "@/lib/beta/identity";
 import type { HomeOrCommercial, StructuredCaseFacts } from "./types";
 
@@ -19,19 +20,6 @@ const TT_DISTRICTS = [
   "diego martin",
   "toco",
   "cedros",
-];
-
-const CROPS: Array<{ match: RegExp; name: string }> = [
-  { match: /\btomato(es)?\b/, name: "tomato" },
-  { match: /\bpepper(s)?\b/, name: "pepper" },
-  { match: /\bcucumber(s)?\b/, name: "cucumber" },
-  { match: /\bcelery\b/, name: "celery" },
-  { match: /\blettuce\b/, name: "lettuce" },
-  { match: /\bcabbage\b/, name: "cabbage" },
-  { match: /\bokra\b/, name: "okra" },
-  { match: /\bcassava\b/, name: "cassava" },
-  { match: /\bbanana(s)?\b/, name: "banana" },
-  { match: /\bhot\s+pepper(s)?\b/, name: "pepper" },
 ];
 
 function titleCase(value: string): string {
@@ -73,7 +61,7 @@ export function inferHomeOrCommercial(text: string, level: UserLevel | null): Ho
 export function inferProblemCategory(text: string): string | null {
   const lower = text.toLowerCase();
   if (/\bwhite\s*fl/.test(lower)) return "whitefly";
-  if (/\b(cercospora|leaf\s+spot)\b/.test(lower)) return "leaf_spot";
+  if (/\b(cercospora|leaf\s+spot|leaves?\s+have\s+spots?)\b/.test(lower)) return "leaf_spot";
   if (/\b(blight|late blight|early blight)\b/.test(lower)) return "blight";
   if (/\bwilt/.test(lower)) return "wilting";
   if (/\bstunt/.test(lower)) return "stunting";
@@ -118,6 +106,8 @@ export function extractSymptoms(text: string): string[] {
     [/\byellow/, "yellowing"],
     [/\bwhite\s*fl/, "whiteflies"],
     [/\bleaf\s+spot/, "leaf spot"],
+    [/\bleaves?\s+have\s+spots?/, "leaf spot"],
+    [/\bspots?\b/, "leaf spot"],
     [/\bholes?\b/, "leaf holes"],
     [/\bsticky/, "honeydew"],
     [/\bsooty/, "sooty mould"],
@@ -134,13 +124,7 @@ export function extractStructuredFacts(
   profile?: { country?: string | null; district?: string | null } | null,
 ): StructuredCaseFacts {
   const lower = text.toLowerCase();
-  let crop: string | null = null;
-  for (const item of CROPS) {
-    if (item.match.test(lower)) {
-      crop = item.name;
-      break;
-    }
-  }
+  const crop = extractLastCrop(text);
 
   const userLevel = inferUserLevel(text);
   const district = extractDistrict(text) || profile?.district?.trim() || null;

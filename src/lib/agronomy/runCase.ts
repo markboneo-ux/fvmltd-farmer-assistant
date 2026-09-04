@@ -5,6 +5,17 @@ import {
   type AiDiagnosticCode,
   type GuestChatMessage,
 } from "@/lib/ai/guestChat";
+import { formatCalculationReply, tryFarmerCalculation } from "@/lib/assistant/calculator";
+import { buildCashflowTurn } from "@/lib/assistant/cashflow";
+import {
+  cropLockInstruction,
+  resolveTurnContext,
+  sanitizeFarmerFacingText,
+} from "@/lib/assistant/context";
+import {
+  isCalculationIntent,
+  isDiagnosticIntent,
+} from "@/lib/assistant/intents";
 import { getWeatherDiseaseRisk } from "@/lib/agronomy/get-weather-disease-risk";
 import { getOpenAIEnvDiagnostics, getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
@@ -29,7 +40,7 @@ import {
 import {
   applyCommercialSafetyGuards,
   countPriorAssistantQuestions,
-  extractKnownFacts,
+  type KnownFarmerFacts,
 } from "./tomato-protocol";
 
 export type CaseChatMessage = GuestChatMessage;
@@ -239,6 +250,12 @@ export type CaseProfileContext = {
   district?: string | null;
 };
 
+export type CaseActiveContext = {
+  crop?: string | null;
+  conversationIntent?: string | null;
+  farmerProblemText?: string | null;
+};
+
 export function parseCaseRequestBody(body: unknown): {
   message: string;
   history: CaseChatMessage[];
@@ -342,17 +359,26 @@ function summarizeKnownFacts(
   history: CaseChatMessage[],
   message: string,
   profile?: CaseProfileContext | null,
-): ReturnType<typeof extractKnownFacts> {
-  const combined = [
-    ...history.filter((item) => item.role === "user").map((item) => item.content),
+  activeCase?: CaseActiveContext | null,
+) {
+  return resolveTurnContext({
+    history,
     message,
-  ].join("\n");
-  return extractKnownFacts(combined, profile);
+    profile,
+    activeCase: activeCase
+      ? {
+          crop: activeCase.crop ?? null,
+          conversationIntent: activeCase.conversationIntent ?? null,
+          farmerProblemText: activeCase.farmerProblemText ?? null,
+        }
+      : null,
+  });
 }
 
-function knownFactsSummary(facts: ReturnType<typeof extractKnownFacts>): string {
+function knownFactsSummary(facts: KnownFarmerFacts): string {
   const lines: string[] = [];
   if (facts.crop) lines.push(`- crop: ${facts.crop}`);
+  else lines.push("- crop: unknown — do not assume tomato or any other crop");
   if (facts.variety) lines.push(`- variety: ${facts.variety}`);
   if (facts.suspectedIssue) lines.push(`- suspected issue: ${facts.suspectedIssue}`);
   if (facts.problemCategory) lines.push(`- problem category: ${facts.problemCategory}`);
@@ -401,21 +427,21 @@ function buildUserContent(
 
 async function enrichWithRegionalTools(
   payload: AgronomicCasePayload,
-  facts: ReturnType<typeof extractKnownFacts>,
+  facts: KnownFarmerFacts,
 ): Promise<AgronomicCasePayload> {
   const country = facts.country || "Trinidad and Tobago";
-  const crop = facts.crop || "tomato";
+  const crop = facts.crop;
   const issue = facts.suspectedIssue || "general crop problem";
 
-  const shouldFetchWeather = shouldInvokeWeatherTool(facts);
-  const shouldFetchInputs = shouldInvokeProductTool(facts);
+  const shouldFetchWeather = Boolean(crop) && shouldInvokeWeatherTool(facts);
+  const shouldFetchInputs = Boolean(crop) && shouldInvokeProductTool(facts);
 
   let weatherRisks: WeatherRiskOption[] = [];
   let weatherDataAsOf: string | null = null;
   let productDataAsOf: string | null = null;
   let verifiedInputOptions: VerifiedInputDisplay[] = [];
 
-  if (shouldFetchWeather) {
+  if (shouldFetchWeather && crop) {
     const weather = await getWeatherDiseaseRisk({
       country,
       district: facts.district,
@@ -439,7 +465,7 @@ async function enrichWithRegionalTools(
     }));
   }
 
-  if (shouldFetchInputs) {
+  if (shouldFetchInputs && crop) {
     const inputs = getVerifiedRegionalInputs({
       country,
       crop,
@@ -503,6 +529,67 @@ async function enrichWithRegionalTools(
   };
 }
 
+function assistantPayloadFromText(options: {
+  text: string;
+  intent: string;
+  questionCategory?: string;
+  calculationType?: string | null;
+  nextQuestion?: string;
+}): AgronomicCasePayload {
+  return {
+    mode: "quick_help",
+    stage: "assessment",
+    questionId: "",
+    questionType: "",
+    nextQuestion: options.nextQuestion ?? "",
+    quickReplies: [],
+    preliminaryAssessment: options.text,
+    severity: "unknown",
+    checksToday: [],
+    safeActionsNow: [],
+    actionsToAvoid: [],
+    photoRecommended: false,
+    escalationRecommended: false,
+    regionalContext: emptyRegionalContext(),
+    weatherRisks: [],
+    verifiedInputOptions: [],
+    internalMissingInformation: [],
+    intent: options.intent,
+    questionCategory: options.questionCategory ?? options.intent,
+    calculationType: options.calculationType ?? null,
+  };
+}
+
+function attachIntent(
+  payload: AgronomicCasePayload,
+  turn: ReturnType<typeof resolveTurnContext>,
+): AgronomicCasePayload {
+  const sanitizedAssessment = sanitizeFarmerFacingText(
+    payload.preliminaryAssessment,
+    turn.allowedCrops,
+  );
+  const sanitizedQuestion = sanitizeFarmerFacingText(
+    payload.nextQuestion,
+    turn.allowedCrops,
+  );
+  const sanitizedChecks = payload.checksToday.map((item) =>
+    sanitizeFarmerFacingText(item, turn.allowedCrops),
+  );
+  const sanitizedActions = payload.safeActionsNow.map((item) =>
+    sanitizeFarmerFacingText(item, turn.allowedCrops),
+  );
+  return {
+    ...payload,
+    preliminaryAssessment: sanitizedAssessment,
+    nextQuestion: sanitizedQuestion,
+    checksToday: sanitizedChecks,
+    safeActionsNow: sanitizedActions,
+    intent: turn.classified.intent,
+    questionCategory: turn.classified.questionCategory,
+    calculationType: turn.classified.calculationType,
+  };
+}
+
 /**
  * Runs one Agronomic Case Engine turn via the OpenAI Responses API.
  */
@@ -514,6 +601,7 @@ export async function runAgronomicCase(options: {
   profile?: CaseProfileContext | null;
   images?: CaseImageInput[];
   apiKey?: string | undefined;
+  activeCase?: CaseActiveContext | null;
   /** Injected for automated tests — bypasses the network. */
   createResponse?: (
     params: Record<string, unknown>,
@@ -529,7 +617,7 @@ export async function runAgronomicCase(options: {
   if (!message && images.length === 0) {
     return {
       ok: false,
-      error: "Please describe the crop problem first.",
+      error: "Please type your farming question first.",
       status: 400,
       diagnosticCode: "INVALID_REQUEST",
       model,
@@ -545,14 +633,71 @@ export async function runAgronomicCase(options: {
   const effectiveMode: CaseMode =
     /start full crop check/i.test(effectiveMessage) ? "full_crop_check" : mode;
 
-  const history = (options.history ?? []).slice(-24);
-  const previousResponseId = options.previousResponseId?.trim() || null;
-  const questionsAskedBeforeThisTurn = countPriorAssistantQuestions(history);
-  const knownFacts = summarizeKnownFacts(
-    history,
+  const turn = summarizeKnownFacts(
+    options.history ?? [],
     effectiveMessage,
     options.profile,
+    options.activeCase,
   );
+  const history = (
+    turn.resetHistory ? [] : (options.history ?? [])
+  ).slice(-24);
+  const previousResponseId = turn.resetHistory
+    ? null
+    : options.previousResponseId?.trim() || null;
+  const questionsAskedBeforeThisTurn = countPriorAssistantQuestions(history);
+  const knownFacts = turn.knownFacts;
+  const classified = turn.classified;
+
+  if (isCalculationIntent(classified.intent) || classified.calculationType) {
+    const calc = tryFarmerCalculation(effectiveMessage);
+    if (calc.handled) {
+      const text = formatCalculationReply(calc);
+      const payload = attachIntent(
+        assistantPayloadFromText({
+          text,
+          intent: classified.intent,
+          questionCategory: classified.questionCategory,
+          calculationType: calc.handled ? calc.calculationType : classified.calculationType,
+        }),
+        turn,
+      );
+      return {
+        ok: true,
+        case: payload,
+        responseId: `calc_${Date.now()}`,
+        model: "farmer-calculator",
+        diagnosticCode: "AI_READY",
+        requestCompleted: true,
+        questionsAsked: 0,
+      };
+    }
+  }
+
+  if (classified.intent === "cashflow") {
+    const cash = buildCashflowTurn({
+      message: effectiveMessage,
+      history,
+    });
+    const payload = attachIntent(
+      assistantPayloadFromText({
+        text: cash.farmerText,
+        intent: "cashflow",
+        questionCategory: "cashflow",
+        nextQuestion: "",
+      }),
+      turn,
+    );
+    return {
+      ok: true,
+      case: payload,
+      responseId: `cashflow_${Date.now()}`,
+      model: "farmer-cashflow",
+      diagnosticCode: "AI_READY",
+      requestCompleted: true,
+      questionsAsked: cash.missingField ? 1 : 0,
+    };
+  }
 
   const createResponse: (
     params: Record<string, unknown>,
@@ -593,6 +738,13 @@ export async function runAgronomicCase(options: {
     questionsAskedBeforeThisTurn,
     knownFactsSummary: knownFactsSummary(knownFacts),
     hasImages: images.length > 0,
+    intent: classified.intent,
+    cropLock: cropLockInstruction({
+      crop: knownFacts.crop,
+      allowedCrops: turn.allowedCrops,
+      askForCrop: turn.askForCrop,
+    }),
+    askForCrop: turn.askForCrop,
   });
 
   const textFormat = {
@@ -606,6 +758,7 @@ export async function runAgronomicCase(options: {
 
   const turnContext = [
     `Farmer mode: ${effectiveMode}.`,
+    `Intent: ${classified.intent}.`,
     `Follow-up questions already asked: ${questionsAskedBeforeThisTurn}.`,
     effectiveMode === "quick_help"
       ? "Answer now if you safely can. Ask one follow-up only if it would change the advice. If three follow-ups were already asked, give useful guidance now."
@@ -614,6 +767,11 @@ export async function runAgronomicCase(options: {
       ? `Farmer attached ${images.length} photo(s). Describe only observable features. If blurry, distant, missing leaf underside, or missing root/stem base, say so and request a better photo.`
       : "No photo attached on this turn.",
     `Farmer message: ${effectiveMessage}`,
+    cropLockInstruction({
+      crop: knownFacts.crop,
+      allowedCrops: turn.allowedCrops,
+      askForCrop: turn.askForCrop,
+    }),
     "Never invent weather conditions or product availability. The server attaches verified weather or product results only when those tools are relevant to this turn.",
   ].join("\n");
 
@@ -623,7 +781,7 @@ export async function runAgronomicCase(options: {
     model,
     instructions,
     temperature: 0.3,
-    max_output_tokens: 1100,
+    max_output_tokens: 1800,
     store: true,
     text: textFormat,
   };
@@ -691,10 +849,20 @@ export async function runAgronomicCase(options: {
           mode: effectiveMode,
           questionsAskedBeforeThisTurn,
           knownFacts,
+          intent: classified.intent,
+          askForCrop: turn.askForCrop,
         },
       );
+      parsed = attachIntent(parsed, turn);
 
-      if (!options.skipRegionalTools) {
+      const allowTools =
+        !options.skipRegionalTools &&
+        Boolean(knownFacts.crop) &&
+        (isDiagnosticIntent(classified.intent) ||
+          knownFacts.asksForProducts ||
+          knownFacts.asksAboutWeather);
+
+      if (allowTools) {
         parsed = await enrichWithRegionalTools(parsed, knownFacts);
       } else {
         parsed = {

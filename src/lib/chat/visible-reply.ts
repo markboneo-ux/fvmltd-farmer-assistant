@@ -1,5 +1,6 @@
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import { isGuidanceStage } from "@/lib/agronomy/case-schema";
+import { isDiagnosticIntent, type IntentCategory } from "@/lib/assistant/intents";
 
 /**
  * Farmer-visible assistant text: conversational prose, no questionnaire chrome.
@@ -20,15 +21,18 @@ export function buildFarmerVisibleReply(payload: AgronomicCasePayload): string {
 }
 
 export function shouldUseDiagnosisLayout(payload: AgronomicCasePayload): boolean {
+  const intent = payload.intent as IntentCategory | undefined;
+  if (intent && !isDiagnosticIntent(intent)) {
+    return false;
+  }
+
   if (!isGuidanceStage(payload.stage) && payload.stage !== "questioning") {
     return false;
   }
 
   return (
     payload.checksToday.length > 0 ||
-    payload.safeActionsNow.length > 0 ||
-    (isGuidanceStage(payload.stage) &&
-      payload.preliminaryAssessment.trim().length > 40)
+    payload.safeActionsNow.length > 0
   );
 }
 

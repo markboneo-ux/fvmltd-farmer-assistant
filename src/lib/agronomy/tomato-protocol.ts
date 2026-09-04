@@ -3,6 +3,12 @@
  */
 
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
+import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
+import {
+  isBusinessIntent,
+  isCalculationIntent,
+  type IntentCategory,
+} from "@/lib/assistant/intents";
 import {
   emptyRegionalContext,
   isGuidanceStage,
@@ -134,11 +140,7 @@ export function extractKnownFacts(
   const rawText = text.trim();
   const lower = rawText.toLowerCase();
 
-  let crop: string | null = null;
-  if (/\btomato(es)?\b/.test(lower)) crop = "tomato";
-  else if (/\bpepper(s)?\b/.test(lower)) crop = "pepper";
-  else if (/\bcucumber(s)?\b/.test(lower)) crop = "cucumber";
-  else if (/\bcelery\b/.test(lower)) crop = "celery";
+  const crop = extractLastCrop(rawText);
 
   let variety: string | null = null;
   const namedVariety = rawText.match(
@@ -346,6 +348,8 @@ export function applyCommercialSafetyGuards(
     mode: CaseMode;
     questionsAskedBeforeThisTurn: number;
     knownFacts: KnownFarmerFacts;
+    intent?: IntentCategory | null;
+    askForCrop?: boolean;
   },
 ): AgronomicCasePayload {
   const mode = options.mode;
@@ -362,6 +366,26 @@ export function applyCommercialSafetyGuards(
   let photoRecommended = payload.photoRecommended;
   let escalationRecommended = payload.escalationRecommended;
   const internalMissingInformation = [...payload.internalMissingInformation];
+
+  const skipDiagnosisWorkflow =
+    isCalculationIntent((options.intent ?? "crop_problem") as IntentCategory) ||
+    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory);
+
+  if (skipDiagnosisWorkflow) {
+    return {
+      ...payload,
+      mode,
+      nextQuestion,
+      preliminaryAssessment,
+      checksToday: [],
+      safeActionsNow,
+      actionsToAvoid,
+      photoRecommended: false,
+      questionId: nextQuestion ? payload.questionId : "",
+      questionType: nextQuestion ? payload.questionType : "",
+      quickReplies: nextQuestion ? quickReplies : [],
+    };
+  }
 
   const ensureAvoid = (text: string) => {
     if (!actionsToAvoid.some((item) => item.toLowerCase() === text.toLowerCase())) {
@@ -502,7 +526,7 @@ export function applyCommercialSafetyGuards(
     }
   }
 
-  if (isGuidanceStage(stage)) {
+  if (isGuidanceStage(stage) && !skipDiagnosisWorkflow) {
     if (!preliminaryAssessment.toLowerCase().includes("preliminary")) {
       preliminaryAssessment = `Preliminary guidance: ${preliminaryAssessment}`;
     }
@@ -632,6 +656,10 @@ function pickFallbackQuestion(
   facts: KnownFarmerFacts,
   questionsAskedBeforeThisTurn: number,
 ): string {
+  if (!facts.crop) {
+    return ASK_CROP_QUESTION;
+  }
+
   if (
     facts.crop === "tomato" &&
     facts.suspectedIssue === "whiteflies"
@@ -707,8 +735,9 @@ function buildForcedQuickGuidance(
   }
 
   if (facts.suspectedIssue === "whiteflies") {
+    const cropLabel = facts.crop ?? "the crop";
     return {
-      preliminaryAssessment: `Preliminary guidance: Tomato whiteflies are a likely concern based on your report. Severity and next steps depend on how widespread the infestation is and whether leaves show sticky residue, mould, or yellowing. This is preliminary only.`,
+      preliminaryAssessment: `Preliminary guidance: Whiteflies on ${cropLabel} are a likely concern based on your report. Severity and next steps depend on how widespread the infestation is and whether leaves show sticky residue, mould, or yellowing. This is preliminary only.`,
       severity:
         facts.distributionHint === "most of field" ? "high" : payload.severity === "unknown" ? "medium" : payload.severity,
       checksToday: [
