@@ -19,6 +19,13 @@ export type CaseUpdateExtras = Partial<StructuredCaseFacts> & {
   caseStatus?: CropCaseRecord["caseStatus"];
   agronomistReviewed?: boolean;
   diagnosisConfirmed?: boolean;
+  diagnosisIncorrect?: boolean;
+  needsReview?: boolean;
+  usefulForTrend?: boolean;
+  excludeFromLearning?: boolean;
+  reviewNotes?: string | null;
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
   conversationIntent?: CropCaseRecord["conversationIntent"];
   questionCategory?: CropCaseRecord["questionCategory"];
   calculationType?: string | null;
@@ -113,6 +120,13 @@ export function buildNewCropCase(input: {
     humanEscalation: facts.humanEscalation,
     agronomistReviewed: false,
     diagnosisConfirmed: false,
+    diagnosisIncorrect: false,
+    needsReview: false,
+    usefulForTrend: false,
+    excludeFromLearning: false,
+    reviewNotes: null,
+    reviewedAt: null,
+    reviewedBy: null,
     caseStatus: "open",
     conversationIntent: classified.intent,
     questionCategory: classified.questionCategory,
@@ -159,17 +173,26 @@ export function mergeUpdatedCase(
     caseStatus: extras?.caseStatus ?? current.caseStatus,
     agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
     diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
+    diagnosisIncorrect: extras?.diagnosisIncorrect ?? current.diagnosisIncorrect,
+    needsReview: extras?.needsReview ?? current.needsReview,
+    usefulForTrend: extras?.usefulForTrend ?? current.usefulForTrend,
+    excludeFromLearning: extras?.excludeFromLearning ?? current.excludeFromLearning,
+    reviewNotes: extras?.reviewNotes ?? current.reviewNotes,
+    reviewedAt: extras?.reviewedAt ?? current.reviewedAt,
+    reviewedBy: extras?.reviewedBy ?? current.reviewedBy,
     conversationIntent: extras?.conversationIntent ?? current.conversationIntent,
     questionCategory: extras?.questionCategory ?? current.questionCategory,
     calculationType: extras?.calculationType ?? current.calculationType,
     caseType: extras?.caseType ?? current.caseType,
     knowledgeState:
-      extras?.knowledgeState ??
-      knowledgeStateFromCase({
-        agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
-        diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
-        knowledgeState: current.knowledgeState,
-      }),
+      extras?.excludeFromLearning || extras?.diagnosisIncorrect
+        ? "rejected"
+        : extras?.knowledgeState ??
+          knowledgeStateFromCase({
+            agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
+            diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
+            knowledgeState: current.knowledgeState,
+          }),
     businessMetadata: extras?.businessMetadata ?? current.businessMetadata,
     updatedAt: nowIso(),
   };
@@ -278,6 +301,45 @@ export function buildCaseAction(input: {
     caseId: input.caseId,
     actionText: input.actionText,
     createdAt: nowIso(),
+  };
+}
+
+export function applyCaseReview(
+  current: CropCaseRecord,
+  review: {
+    diagnosisConfirmed?: boolean;
+    diagnosisIncorrect?: boolean;
+    needsReview?: boolean;
+    resolved?: boolean;
+    usefulForTrend?: boolean;
+    excludeFromLearning?: boolean;
+    reviewNotes?: string | null;
+    reviewedBy?: string | null;
+  },
+): CropCaseRecord {
+  const diagnosisConfirmed = review.diagnosisConfirmed ?? current.diagnosisConfirmed;
+  const diagnosisIncorrect = review.diagnosisIncorrect ?? current.diagnosisIncorrect;
+  const excludeFromLearning = review.excludeFromLearning ?? current.excludeFromLearning;
+  const agronomistReviewed = true;
+  let knowledgeState: CropCaseRecord["knowledgeState"] = current.knowledgeState;
+  if (excludeFromLearning || diagnosisIncorrect) knowledgeState = "rejected";
+  else if (diagnosisConfirmed) knowledgeState = "validated";
+  else if (review.usefulForTrend) knowledgeState = "candidate";
+
+  return {
+    ...current,
+    agronomistReviewed,
+    diagnosisConfirmed,
+    diagnosisIncorrect,
+    needsReview: review.needsReview ?? current.needsReview,
+    usefulForTrend: review.usefulForTrend ?? current.usefulForTrend,
+    excludeFromLearning,
+    reviewNotes: review.reviewNotes ?? current.reviewNotes,
+    reviewedAt: nowIso(),
+    reviewedBy: review.reviewedBy ?? current.reviewedBy,
+    caseStatus: review.resolved ? "resolved" : current.caseStatus,
+    knowledgeState,
+    updatedAt: nowIso(),
   };
 }
 

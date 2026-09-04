@@ -6,7 +6,7 @@ import {
   type TrendStatus,
 } from "./types";
 
-const EMERGING_MIN_UNIQUE_SESSIONS = 2;
+const EMERGING_MIN_UNIQUE_SESSIONS = 3;
 const RECURRING_MIN_UNIQUE_SESSIONS = 4;
 const ESTABLISHED_MIN_UNIQUE_SESSIONS = 8;
 const ESTABLISHED_CONFIRMED_ALT = 2;
@@ -111,7 +111,9 @@ export function aggregateCluster(
   members: TrendClusterInput[],
   existing?: CaseTrendRecord | null,
 ): CaseTrendRecord | null {
-  const eligible = members.filter((item) => !item.rejected);
+  const eligible = members.filter(
+    (item) => !item.rejected && !item.excludeFromLearning && !item.diagnosisIncorrect,
+  );
   const sessions = new Set(eligible.map((item) => item.sessionKey));
   const caseIds = [...new Set(eligible.map((item) => item.caseId))];
   if (caseIds.length === 0) {
@@ -160,6 +162,20 @@ export function aggregateCluster(
     });
 
   if (sessions.size < EMERGING_MIN_UNIQUE_SESSIONS && !staffReviewed) {
+    if (existing) {
+      return {
+        ...existing,
+        caseCount: caseIds.length,
+        uniqueSessionCount: sessions.size,
+        confidenceScore: 0,
+        reviewedCaseCount,
+        confirmedCaseCount,
+        positiveOutcomeCount,
+        trendStatus: "rejected",
+        contributingCaseIds: caseIds,
+        contributingSessionKeys: [...sessions],
+      };
+    }
     return null;
   }
 

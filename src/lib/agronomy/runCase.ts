@@ -15,13 +15,24 @@ import {
 } from "@/lib/assistant/context";
 import {
   isCalculationIntent,
-  isDiagnosticIntent,
+  type IntentCategory,
 } from "@/lib/assistant/intents";
 import { getWeatherDiseaseRisk } from "@/lib/agronomy/get-weather-disease-risk";
+import {
+  formatForecastTimingBrief,
+  forecastLooksHot,
+  forecastLooksWetOrHumid,
+} from "@/lib/agronomy/weather-brief";
+import { formatSupportingWeatherNote } from "@/lib/agronomy/weather-relevance";
 import { getOpenAIEnvDiagnostics, getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
 import { getVerifiedRegionalInputs } from "@/lib/regional-inputs/get-verified-regional-inputs";
 import { NO_VERIFIED_PRODUCT_MESSAGE } from "@/lib/regional-inputs/types";
+import { shouldUseWebResearch } from "@/lib/research/should-research";
+import { formatResearchBriefForModel, runWebResearch } from "@/lib/research/run";
+import { sanitizeUnverifiedPesticideClaims } from "@/lib/research/pesticides";
+import type { WebResearchResult } from "@/lib/research/types";
+import { getForecast } from "@/lib/weather/get-forecast";
 import {
   CASE_RESPONSE_JSON_SCHEMA,
   emptyRegionalContext,
@@ -31,12 +42,14 @@ import {
   type AgronomicCasePayload,
   type CaseMode,
   type VerifiedInputDisplay,
+  type WeatherRelevanceLevel,
   type WeatherRiskOption,
 } from "./case-schema";
 import { buildCaseSystemInstructions } from "./system-instructions";
 import {
   shouldInvokeProductTool,
   shouldInvokeWeatherTool,
+  weatherRelevanceFor,
 } from "./tool-policy";
 import {
   applyCommercialSafetyGuards,
@@ -429,41 +442,66 @@ function buildUserContent(
 async function enrichWithRegionalTools(
   payload: AgronomicCasePayload,
   facts: KnownFarmerFacts,
+  intent?: string | null,
+  research?: WebResearchResult | null,
 ): Promise<AgronomicCasePayload> {
   const country = facts.country || "Trinidad and Tobago";
   const crop = facts.crop;
   const issue = facts.suspectedIssue || "general crop problem";
+  const relevance = weatherRelevanceFor(facts, intent as IntentCategory | null);
 
-  const shouldFetchWeather = Boolean(crop) && shouldInvokeWeatherTool(facts);
+  const shouldFetchWeather = shouldInvokeWeatherTool(facts, intent as IntentCategory | null);
   const shouldFetchInputs = Boolean(crop) && shouldInvokeProductTool(facts);
 
   let weatherRisks: WeatherRiskOption[] = [];
   let weatherDataAsOf: string | null = null;
   let productDataAsOf: string | null = null;
   let verifiedInputOptions: VerifiedInputDisplay[] = [];
+  let weatherBrief: string | null = payload.weatherBrief ?? null;
+  const weatherRelevance: WeatherRelevanceLevel = relevance;
 
-  if (shouldFetchWeather && crop) {
-    const weather = await getWeatherDiseaseRisk({
-      country,
-      district: facts.district,
-      crop,
-      productionSystem: facts.productionSystem,
-      recentSymptoms: facts.suspectedIssue,
-    });
-    weatherDataAsOf = weather.weatherDataAsOf;
-    weatherRisks = weather.alerts.map((alert) => ({
-      diseaseOrPest: alert.diseaseOrPest,
-      riskLevel: alert.riskLevel,
-      riskWindow: alert.riskWindow,
-      weatherDrivers: alert.weatherDrivers,
-      cropStage: alert.cropStage,
-      recommendedChecks: alert.recommendedChecks,
-      preventiveActions: alert.preventiveActions,
-      confidence: alert.confidence,
-      dataSource: alert.dataSource,
-      generatedAt: alert.generatedAt,
-      disclaimer: alert.disclaimer,
-    }));
+  if (shouldFetchWeather) {
+    try {
+      const forecast = await getForecast({
+        country,
+        district: facts.district,
+      });
+      weatherDataAsOf = forecast.retrievedAt;
+      if (relevance === "central") {
+        weatherBrief = formatForecastTimingBrief(forecast);
+      } else if (relevance === "supporting") {
+        weatherBrief = formatSupportingWeatherNote({
+          wetOrHumid: forecastLooksWetOrHumid(forecast),
+          heat: forecastLooksHot(forecast),
+          rainLikely: (forecast.daily[0]?.rainfallMm ?? 0) >= 2,
+        });
+      }
+      if (crop) {
+        const weather = await getWeatherDiseaseRisk({
+          country,
+          district: facts.district,
+          crop,
+          productionSystem: facts.productionSystem,
+          recentSymptoms: facts.suspectedIssue,
+        });
+        weatherDataAsOf = weather.weatherDataAsOf;
+        weatherRisks = weather.alerts.map((alert) => ({
+          diseaseOrPest: alert.diseaseOrPest,
+          riskLevel: alert.riskLevel,
+          riskWindow: alert.riskWindow,
+          weatherDrivers: alert.weatherDrivers,
+          cropStage: alert.cropStage,
+          recommendedChecks: alert.recommendedChecks,
+          preventiveActions: alert.preventiveActions,
+          confidence: alert.confidence,
+          dataSource: alert.dataSource,
+          generatedAt: alert.generatedAt,
+          disclaimer: alert.disclaimer,
+        }));
+      }
+    } catch {
+      // Weather is optional supporting context — never fail the farmer reply.
+    }
   }
 
   if (shouldFetchInputs && crop) {
@@ -507,14 +545,25 @@ async function enrichWithRegionalTools(
     }
   }
 
-  // Attach weather checks into checksToday without claiming diagnosis.
-  if (weatherRisks.length > 0) {
+  // Supporting weather must not take over "what to check".
+  if (relevance === "central" && weatherRisks.length > 0) {
     const top = weatherRisks[0];
     for (const check of top.recommendedChecks.slice(0, 2)) {
       if (!payload.checksToday.includes(check)) {
         payload.checksToday = [...payload.checksToday, check];
       }
     }
+  }
+
+  const webSources = research?.citations ?? payload.webSources ?? [];
+  if (research?.pesticide && !research.pesticide.verified) {
+    payload = {
+      ...payload,
+      preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
+        payload.preliminaryAssessment,
+        research.pesticide,
+      ),
+    };
   }
 
   return {
@@ -525,8 +574,11 @@ async function enrichWithRegionalTools(
       productDataAsOf,
       weatherDataAsOf,
     }),
-    weatherRisks,
+    weatherRisks: relevance === "omit" ? [] : weatherRisks,
     verifiedInputOptions,
+    weatherRelevance,
+    weatherBrief,
+    webSources,
   };
 }
 
@@ -558,6 +610,9 @@ function assistantPayloadFromText(options: {
     intent: options.intent,
     questionCategory: options.questionCategory ?? options.intent,
     calculationType: options.calculationType ?? null,
+    weatherRelevance: "omit",
+    weatherBrief: null,
+    webSources: [],
   };
 }
 
@@ -588,6 +643,9 @@ function attachIntent(
     intent: turn.classified.intent,
     questionCategory: turn.classified.questionCategory,
     calculationType: turn.classified.calculationType,
+    weatherRelevance: payload.weatherRelevance ?? "omit",
+    weatherBrief: payload.weatherBrief ?? null,
+    webSources: payload.webSources ?? [],
   };
 }
 
@@ -609,6 +667,8 @@ export async function runAgronomicCase(options: {
   ) => Promise<CaseModelResponse>;
   /** Skip live tool calls in unit tests when tools are asserted separately. */
   skipRegionalTools?: boolean;
+  /** Injected web research for tests. */
+  researchFn?: typeof runWebResearch;
 }): Promise<AgronomicCaseResult> {
   const model = getOpenAIModel();
   const message = options.message.trim();
@@ -750,6 +810,21 @@ export async function runAgronomicCase(options: {
     askForCrop: turn.askForCrop,
   });
 
+  const weatherRelevance = weatherRelevanceFor(knownFacts, classified.intent);
+  let research: WebResearchResult | null = null;
+  if (!options.skipRegionalTools || options.researchFn) {
+    if (shouldUseWebResearch({ message: effectiveMessage, intent: classified.intent })) {
+      const run = options.researchFn ?? runWebResearch;
+      research = await run({
+        message: effectiveMessage,
+        country: knownFacts.country,
+        crop: knownFacts.crop,
+        issue: knownFacts.suspectedIssue,
+        intent: classified.intent,
+      });
+    }
+  }
+
   const textFormat = {
     format: {
       type: "json_schema" as const,
@@ -775,8 +850,16 @@ export async function runAgronomicCase(options: {
       allowedCrops: turn.allowedCrops,
       askForCrop: turn.askForCrop,
     }),
+    weatherRelevance === "omit"
+      ? "WEATHER GATE: Weather is not central to this question. Do not make weather or disease-pressure the main answer."
+      : weatherRelevance === "supporting"
+        ? "WEATHER GATE: Weather is supporting context only. Answer the farmer's crop question first. You may add one short weather sentence at the end."
+        : "WEATHER GATE: Weather or spray/plant timing is central. Prioritise the forecast in your answer.",
+    research ? formatResearchBriefForModel(research) : "No web research was attached for this turn. Do not invent current prices, registrations, or programmes.",
     "Never invent weather conditions or product availability. The server attaches verified weather or product results only when those tools are relevant to this turn.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const userContent = buildUserContent(turnContext, images);
 
@@ -858,15 +941,18 @@ export async function runAgronomicCase(options: {
       );
       parsed = attachIntent(parsed, turn);
 
+      const allowWeather = shouldInvokeWeatherTool(knownFacts, classified.intent);
+      const allowProducts = Boolean(knownFacts.crop) && shouldInvokeProductTool(knownFacts);
       const allowTools =
-        !options.skipRegionalTools &&
-        Boolean(knownFacts.crop) &&
-        (isDiagnosticIntent(classified.intent) ||
-          knownFacts.asksForProducts ||
-          knownFacts.asksAboutWeather);
+        !options.skipRegionalTools && (allowWeather || allowProducts || Boolean(research));
 
       if (allowTools) {
-        parsed = await enrichWithRegionalTools(parsed, knownFacts);
+        parsed = await enrichWithRegionalTools(
+          parsed,
+          knownFacts,
+          classified.intent,
+          research,
+        );
       } else {
         parsed = {
           ...parsed,
@@ -874,7 +960,19 @@ export async function runAgronomicCase(options: {
             country: knownFacts.country,
             district: knownFacts.district,
           }),
+          weatherRelevance,
+          weatherBrief: null,
+          webSources: research?.citations ?? [],
         };
+        if (research?.pesticide && !research.pesticide.verified) {
+          parsed = {
+            ...parsed,
+            preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
+              parsed.preliminaryAssessment,
+              research.pesticide,
+            ),
+          };
+        }
       }
     } catch (parseError) {
       logReason("OPENAI_REQUEST_FAILED", {

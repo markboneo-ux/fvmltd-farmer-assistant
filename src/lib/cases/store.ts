@@ -125,6 +125,24 @@ export async function listCaseMessages(caseId: string): Promise<CaseMessageRecor
   return supabase.supabaseListCaseMessages(caseId);
 }
 
+export async function listAllCaseMessages(): Promise<CaseMessageRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListAllCaseMessages();
+  return supabase.supabaseListAllCaseMessages();
+}
+
+export async function listAllCasePhotos(): Promise<CasePhotoRecord[]> {
+  if (isMemoryBackend()) return memory.memoryListAllCasePhotos();
+  return supabase.supabaseListAllCasePhotos();
+}
+
+export async function updateCaseReview(
+  caseId: string,
+  review: Parameters<typeof memory.memoryUpdateCaseReview>[1],
+): Promise<CropCaseRecord | null> {
+  if (isMemoryBackend()) return memory.memoryUpdateCaseReview(caseId, review);
+  return supabase.supabaseUpdateCaseReview(caseId, review);
+}
+
 export async function addCaseObservation(input: {
   caseId: string;
   observedFacts: string[];

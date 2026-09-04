@@ -45,6 +45,8 @@ export type TrendClusterInput = {
   diagnosisConfirmed: boolean;
   positiveOutcome: boolean;
   rejected: boolean;
+  excludeFromLearning?: boolean;
+  diagnosisIncorrect?: boolean;
   staffVerifiedOutbreak?: boolean;
 };
 

@@ -12,6 +12,13 @@ describe("farmer intent classifier", () => {
     expect(result.caseType).toBe("crop_problem");
   });
 
+  it("classifies market price questions as pricing", () => {
+    expect(classifyFarmerIntent("What is the current price of pumpkin?").intent).toBe(
+      "pricing",
+    );
+    expect(classifyFarmerIntent("How much should I sell celery for?").intent).toBe("pricing");
+  });
+
   it("classifies cashflow requests", () => {
     expect(classifyFarmerIntent("Help me prepare a cashflow for the bank").intent).toBe(
       "cashflow",

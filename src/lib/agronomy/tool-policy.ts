@@ -1,27 +1,35 @@
+import type { IntentCategory } from "@/lib/assistant/intents";
 import type { KnownFarmerFacts } from "./tomato-protocol";
+import {
+  assessWeatherRelevance,
+  shouldInvokeWeatherTool as weatherToolFromRelevance,
+  type WeatherRelevanceLevel,
+} from "./weather-relevance";
 
 /**
  * Weather and product catalogues stay available, but must not decorate
  * every generic chat turn.
  */
+export function weatherRelevanceFor(
+  facts: KnownFarmerFacts,
+  intent?: IntentCategory | null,
+): WeatherRelevanceLevel {
+  return assessWeatherRelevance({
+    message: facts.rawText,
+    facts,
+    intent,
+  }).level;
+}
 
-export function shouldInvokeWeatherTool(facts: KnownFarmerFacts): boolean {
-  if (facts.asksAboutWeather) return true;
-
-  const text = facts.rawText.toLowerCase();
-  const weatherRelevantProblem =
-    /\b(leaf\s+(spot|disease|blight)|blight|cercospora|mildew|mould|mold|sooty|humid|humidity|wet\s+soil|waterlog|heavy\s+rain|rainfall|rainy|heat\s+stress|too\s+hot|irrigation|leaf\s+wet|dew\b)\b/.test(
-      text,
-    ) ||
-    facts.suspectedIssue === "foliar fungal disease" ||
-    facts.suspectedIssue === "wilt";
-
-  return (
-    weatherRelevantProblem ||
-    /\b(weather|forecast|disease\s+pressure)\b/.test(text) ||
-    /\bcould this weather\b/.test(text) ||
-    /\bwhy am i suddenly seeing more\b/.test(text)
-  );
+export function shouldInvokeWeatherTool(
+  facts: KnownFarmerFacts,
+  intent?: IntentCategory | null,
+): boolean {
+  return weatherToolFromRelevance({
+    message: facts.rawText,
+    facts,
+    intent,
+  });
 }
 
 export function shouldInvokeProductTool(facts: KnownFarmerFacts): boolean {

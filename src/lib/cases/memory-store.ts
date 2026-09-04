@@ -11,6 +11,7 @@ import {
   caseIsOwnedBy,
   mergeUpdatedCase,
   nowIso,
+  applyCaseReview,
   type CaseUpdateExtras,
 } from "./records";
 import type {
@@ -116,6 +117,25 @@ export function memoryAddCaseMessage(input: {
 
 export function memoryListCaseMessages(caseId: string): CaseMessageRecord[] {
   return [...(messages.get(caseId) ?? [])];
+}
+
+export function memoryListAllCaseMessages(): CaseMessageRecord[] {
+  return [...messages.values()].flat();
+}
+
+export function memoryListAllCasePhotos(): CasePhotoRecord[] {
+  return [...photos.values()].flat();
+}
+
+export function memoryUpdateCaseReview(
+  caseId: string,
+  review: Parameters<typeof applyCaseReview>[1],
+): CropCaseRecord | null {
+  const current = memoryGetCropCase(caseId);
+  if (!current) return null;
+  const next = applyCaseReview(current, review);
+  cases.set(caseId, next);
+  return next;
 }
 
 export function memoryAddCaseObservation(input: {

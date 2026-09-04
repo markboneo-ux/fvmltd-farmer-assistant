@@ -70,7 +70,17 @@ export default async function StaffReviewPage({ searchParams }: PageProps) {
       title="Staff review dashboard"
       subtitle="Review new, urgent, and awaiting-review crop cases from farmers."
       staffName={session.staff.fullName}
-      actions={<StaffSignOutButton />}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="/admin/insights"
+            className="rounded-full bg-sky px-3 py-2 text-sm font-medium text-canopy ring-1 ring-line"
+          >
+            Insights
+          </a>
+          <StaffSignOutButton />
+        </div>
+      }
     >
       <StaffQueue cases={cases} stats={stats} filter={filter} />
     </StaffShell>
