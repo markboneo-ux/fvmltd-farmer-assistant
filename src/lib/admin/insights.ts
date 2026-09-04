@@ -1,6 +1,8 @@
 import { funnelStats, listUsageEvents } from "@/lib/beta/usage-store";
 import { listCropCases, listFollowups, listOutcomes, logCasePersistenceBackend } from "@/lib/cases/store";
 import type { TrendClass } from "@/lib/cases/types";
+import { canExposeTrend } from "@/lib/trends/engine";
+import { listCaseTrends } from "@/lib/trends/store";
 
 export type InsightsFilters = {
   from?: string | null;
@@ -12,6 +14,8 @@ export type InsightsFilters = {
   problem?: string | null;
   homeOrCommercial?: "home" | "commercial" | null;
   outcome?: string | null;
+  caseType?: string | null;
+  status?: string | null;
 };
 
 function inRange(iso: string, filters: InsightsFilters): boolean {
@@ -49,6 +53,8 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     if (filters.homeOrCommercial && item.homeOrCommercial !== filters.homeOrCommercial) {
       return false;
     }
+    if (!matches(item.caseType, filters.caseType)) return false;
+    if (!matches(item.caseStatus, filters.status)) return false;
     return true;
   });
 
@@ -70,12 +76,18 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const byVariety = new Map<string, number>();
   const byProblem = new Map<string, number>();
   const byWeek = new Map<string, number>();
+  const bySymptom = new Map<string, number>();
+  const byIntent = new Map<string, number>();
+  const byCaseType = new Map<string, number>();
+  const byCalculation = new Map<string, number>();
   let photoAssisted = 0;
   let unresolved = 0;
   let escalations = 0;
   let nutrient = 0;
   let stunting = 0;
   let wilting = 0;
+  let confirmedDiagnoses = 0;
+  let agronomistReviewed = 0;
 
   for (const item of allCases) {
     increment(byCrop, item.crop);
@@ -84,11 +96,17 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     increment(byVariety, item.variety);
     increment(byProblem, item.problemCategory);
     increment(byWeek, item.createdAt.slice(0, 7));
+    increment(byIntent, item.conversationIntent);
+    increment(byCaseType, item.caseType);
+    if (item.calculationType) increment(byCalculation, item.calculationType);
+    for (const symptom of item.symptoms) increment(bySymptom, symptom);
     if (item.humanEscalation || item.caseStatus === "human_review") escalations += 1;
     if (item.caseStatus !== "resolved" && item.caseStatus !== "closed") unresolved += 1;
     if (item.problemCategory === "nutrient") nutrient += 1;
     if (item.problemCategory === "stunting" || item.symptoms.includes("stunting")) stunting += 1;
     if (item.problemCategory === "wilting" || item.symptoms.includes("wilting")) wilting += 1;
+    if (item.diagnosisConfirmed) confirmedDiagnoses += 1;
+    if (item.agronomistReviewed) agronomistReviewed += 1;
   }
 
   const outcomes = (await listOutcomes()).filter((row) =>
@@ -100,13 +118,25 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const solved = outcomes.filter((row) => row.outcome === "problem_solved").length;
 
   const followups = await listFollowups();
+  const caseFollowups = followups.filter((row) => allCases.some((item) => item.id === row.caseId));
   photoAssisted = allCases.filter((item) =>
     followups.some((row) => row.caseId === item.id && row.followUpPhotoId),
   ).length;
+  const followupAsked = caseFollowups.filter((row) => row.askedAt).length;
+  const followupWithOutcome = caseFollowups.filter((row) => row.outcome).length;
+  const followupPending = caseFollowups.filter((row) => !row.outcome && !row.optedOut).length;
+  const averageFollowupCompletion =
+    caseFollowups.length === 0 ? 0 : Math.round((followupWithOutcome / caseFollowups.length) * 100);
 
   const messages = usage.filter((event) => event.kind === "message").length;
   const imageAnalyses = usage.filter((event) => event.kind === "image_analysis").length;
   const funnel = funnelStats();
+  const trends = (await listCaseTrends()).filter(canExposeTrend);
+  const emergingTrends = trends.filter((item) => item.trendStatus === "emerging");
+  const businessIntents = ["farm_business", "cashflow", "costing", "pricing"];
+  const nonDiagnostic = allCases.filter(
+    (item) => item.caseType && item.caseType !== "crop_problem",
+  );
 
   return {
     users: {
@@ -143,6 +173,37 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       casesUnchanged: unchanged,
       casesWorsened: worsened,
       problemSolved: solved,
+      topSymptoms: topEntries(bySymptom),
+      topSuspectedIssues: topEntries(byProblem),
+      casesByCountry: topEntries(byCountry),
+      casesByRegion: topEntries(byDistrict),
+      casesOverTime: topEntries(byWeek, 12),
+      confirmedDiagnoses,
+      agronomistReviewed,
+      solvedCount: solved,
+      unresolvedCount: unresolved,
+      photoUsage: imageAnalyses,
+      averageFollowupCompletionPercent: averageFollowupCompletion,
+      followupAsked,
+      followupPending,
+      followupWithOutcome,
+      mostCommonBusinessQuestions: topEntries(byIntent).filter((item) =>
+        businessIntents.includes(item.label),
+      ),
+      mostCommonCalculations: topEntries(byCalculation),
+      mostCommonNonDiagnosticNeeds: topEntries(byIntent).filter(
+        (item) =>
+          item.label !== "crop_problem" &&
+          item.label !== "pest_disease" &&
+          item.label !== "unknown",
+      ),
+      casesByType: topEntries(byCaseType),
+      emergingTrends: emergingTrends.map((item) => ({
+        label: [item.crop, item.region, item.symptomCluster].filter(Boolean).join(" · "),
+        count: item.caseCount,
+        status: item.trendStatus,
+      })),
+      nonDiagnosticCaseCount: nonDiagnostic.length,
     },
   };
 }

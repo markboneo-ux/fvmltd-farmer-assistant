@@ -88,6 +88,10 @@ export function setCaseStoreAdminClientForTests(client: CaseStoreAdminClient | n
   clientOverride = client;
 }
 
+export function getCaseStoreAdminClientForTests(): CaseStoreAdminClient | null {
+  return clientOverride;
+}
+
 function persistFail(table: string, message: string): never {
   logCasePersistenceError(message, table);
   logOps("database_failure", {

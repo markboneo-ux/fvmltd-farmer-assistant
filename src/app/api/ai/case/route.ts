@@ -16,10 +16,12 @@ import {
 } from "@/lib/beta/conversation";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import { persistActiveCaseId, readActiveCaseId } from "@/lib/beta/session";
+import { shouldStartNewCase } from "@/lib/assistant/intents";
 import {
   logCasePersistenceBackend,
   logCasePersistenceError,
   logCasePersistenceStart,
+  getCropCase,
 } from "@/lib/cases/store";
 import {
   FARMER_GENERIC_ERROR,
@@ -265,6 +267,22 @@ export async function POST(request: Request) {
       requestedCaseId: incomingCaseId ?? (await readActiveCaseId()),
     });
 
+    const continuingCase = incomingCaseId ? await getCropCase(incomingCaseId) : null;
+    let topicReset = false;
+    if (
+      continuingCase &&
+      shouldStartNewCase({
+        message,
+        activeCrop: continuingCase.crop,
+        activeIntent: continuingCase.conversationIntent,
+      })
+    ) {
+      incomingCaseId = null;
+      history = [];
+      previousResponseId = null;
+      topicReset = true;
+    }
+
     const persistedHistory = await loadPersistedConversationHistory(
       incomingCaseId,
       message,
@@ -326,6 +344,14 @@ export async function POST(request: Request) {
       profile,
       images,
       apiKey,
+      activeCase:
+        !topicReset && continuingCase
+          ? {
+              crop: continuingCase.crop,
+              conversationIntent: continuingCase.conversationIntent,
+              farmerProblemText: continuingCase.farmerProblemText,
+            }
+          : null,
     });
 
     if (!result.ok) {

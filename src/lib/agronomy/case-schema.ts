@@ -99,6 +99,9 @@ export type AgronomicCasePayload = {
   verifiedInputOptions: VerifiedInputDisplay[];
   /** Engine-only — never show in farmer UI. */
   internalMissingInformation: string[];
+  intent?: string;
+  questionCategory?: string;
+  calculationType?: string | null;
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
@@ -282,6 +285,9 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     weatherRisks: [],
     verifiedInputOptions: [],
     internalMissingInformation: asStringArray(data.internalMissingInformation),
+    intent: asTrimmedString(data.intent) || undefined,
+    questionCategory: asTrimmedString(data.questionCategory) || undefined,
+    calculationType: asTrimmedString(data.calculationType) || null,
   };
 }
 

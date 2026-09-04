@@ -1,5 +1,6 @@
 import type { UserLevel } from "@/lib/beta/identity";
 import type { AccessState } from "@/lib/beta/limits";
+import type { CaseType, IntentCategory } from "@/lib/assistant/intents";
 
 export type HomeOrCommercial = "home" | "commercial" | "unknown";
 
@@ -18,6 +19,8 @@ export type TrendClass =
   | "elevated_reports"
   | "possible_outbreak"
   | "verified_outbreak";
+
+export type KnowledgeState = "raw" | "candidate" | "validated" | "rejected";
 
 export type StructuredCaseFacts = {
   crop: string | null;
@@ -86,6 +89,12 @@ export type CropCaseRecord = {
   agronomistReviewed: boolean;
   diagnosisConfirmed: boolean;
   caseStatus: CaseStatus;
+  conversationIntent: IntentCategory | null;
+  questionCategory: IntentCategory | null;
+  calculationType: string | null;
+  caseType: CaseType | null;
+  knowledgeState: KnowledgeState;
+  businessMetadata: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 };

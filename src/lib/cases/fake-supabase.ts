@@ -26,6 +26,7 @@ export function createFakeCaseSupabase(): FakeCaseSupabase {
       case_outcomes: [],
       case_photos: [],
       case_followups: [],
+      case_trends: [],
     };
   }
 

@@ -5,16 +5,22 @@ import { emptyRegionalContext, type AgronomicCasePayload } from "@/lib/agronomy/
 import { createFakeCaseSupabase } from "@/lib/cases/fake-supabase";
 import {
   addCaseMessage,
+  addCasePhoto,
   CasePersistenceError,
   createCropCase,
   getCropCase,
   listCaseMessages,
+  listCasePhotos,
   listCropCases,
   logCasePersistenceBackend,
   resetCaseStore,
   setCasePersistenceModeForTests,
   setCaseStoreAdminClientForTests,
+  updateCaseFromConversation,
 } from "@/lib/cases/store";
+import { getSimilarCases } from "@/lib/cases/similar";
+import { ingestCaseForTrends } from "@/lib/trends/ingest";
+import { listCaseTrends } from "@/lib/trends/store";
 import { resetUsageStore } from "@/lib/beta/usage-store";
 import {
   isProductionRuntime,
@@ -239,6 +245,93 @@ describe("Supabase case persistence layer", () => {
     expect(loaded?.id).toBe(created.id);
     expect(loaded?.anonymousSessionId).toBe(GUEST_ID);
     expect(await listCaseMessages(created.id)).toHaveLength(1);
+  });
+
+  it("starts a new case when the farmer changes to cashflow and still persists guest data", async () => {
+    const first = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "Tomato wilt",
+      assistantText: "Check the stem.",
+      payload: payload(),
+    });
+    const second = await persistConversationTurn({
+      identity: guest(),
+      caseId: first.caseId,
+      userMessage: "Help me make a cashflow for my farm",
+      assistantText: "What crop or enterprise is this cashflow for?",
+      payload: payload({
+        preliminaryAssessment: "I can help you build a practical cashflow.",
+        checksToday: [],
+        safeActionsNow: [],
+      }),
+    });
+    expect(second.createdNewCase).toBe(true);
+    expect(second.caseId).not.toBe(first.caseId);
+    expect(fake.db.crop_cases).toHaveLength(2);
+    expect(fake.db.case_messages.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("keeps guest photo records on the case", async () => {
+    const persisted = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "Here is a photo of the leaf.",
+      assistantText: "The photo helps. I will look at the affected area.",
+      payload: payload(),
+      imageCount: 1,
+    });
+    await addCasePhoto({
+      caseId: persisted.caseId,
+      ownerSessionId: GUEST_ID,
+      storagePath: `${GUEST_ID}/${persisted.caseId}/leaf.jpg`,
+      mimeType: "image/jpeg",
+      fileSizeBytes: 1200,
+    });
+    const photos = await listCasePhotos(persisted.caseId);
+    expect(photos).toHaveLength(1);
+    expect(photos[0]?.ownerSessionId).toBe(GUEST_ID);
+    expect(photos[0]?.storagePath).toContain(persisted.caseId);
+  });
+
+  it("does not treat a rejected case as trusted similar knowledge", async () => {
+    const rejected = await createCropCase({
+      anonymousSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      message: "Cucumber leaf spots in Couva",
+    });
+    await updateCaseFromConversation(rejected.id, "incorrect", {
+      agronomistReviewed: true,
+      diagnosisConfirmed: false,
+      knowledgeState: "rejected",
+    });
+    const trusted = await createCropCase({
+      anonymousSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      message: "Cucumber leaf spots in Couva after rain",
+    });
+    await updateCaseFromConversation(trusted.id, "reviewed", {
+      agronomistReviewed: true,
+      diagnosisConfirmed: true,
+      knowledgeState: "validated",
+    });
+    const ranked = await getSimilarCases({
+      country: "Trinidad and Tobago",
+      district: "Couva",
+      crop: "cucumber",
+      symptoms: ["leaf spot"],
+      problemCategory: "leaf_spot",
+    });
+    expect(ranked.some((item) => item.caseId === rejected.id)).toBe(false);
+    expect(ranked[0]?.caseId).toBe(trusted.id);
+  });
+
+  it("does not create an established trend from one guest case", async () => {
+    const created = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "Cucumber leaves have spots in Couva",
+      assistantText: "Check the underside of a few leaves.",
+      payload: payload(),
+    });
+    const trend = await ingestCaseForTrends((await getCropCase(created.caseId))!);
+    expect(trend).toBeNull();
+    expect(await listCaseTrends()).toHaveLength(0);
   });
 });
 

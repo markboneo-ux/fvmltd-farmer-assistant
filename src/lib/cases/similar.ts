@@ -1,5 +1,6 @@
 import { listCropCases, listOutcomes, logCasePersistenceBackend } from "./store";
 import type { SimilarCaseMatch, SimilarCaseQuery } from "./types";
+import { trustedCaseForSimilarity } from "@/lib/trends/ingest";
 
 function overlap(a: string[] | undefined, b: string[] | undefined): number {
   if (!a?.length || !b?.length) return 0;
@@ -27,6 +28,10 @@ export async function getSimilarCases(
 
   const scored = allCases
     .map((item) => {
+      const trusted = trustedCaseForSimilarity(item, casesWithOutcome.has(item.id));
+      if (!trusted) {
+        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
+      }
       let score = 0;
       const reasons: string[] = [];
 
@@ -112,12 +117,9 @@ function buildFarmerFacingSimilarSummary(
   item: { district: string | null; crop: string | null; drainage: string | null; weatherRisk: string | null },
   reasons: string[],
 ): string {
-  const area = item.district ? ` in this area` : "";
+  const area = item.district ? " in your area" : "";
   if (item.drainage || /wet/i.test(item.weatherRisk ?? "") || reasons.includes("similar weather")) {
-    return `We have seen similar cases${area} where wet roots were part of the problem. Check whether the soil is staying wet too long before adding more fertilizer.`;
+    return `We have seen similar reports recently${area}, so this is worth checking. Check whether the soil is staying wet too long before adding more fertilizer.`;
   }
-  if (item.crop) {
-    return `We have seen similar ${item.crop} cases${area}. Check the plants closely over the next few days before making a big change.`;
-  }
-  return `We have seen similar cases${area}. Check the plants closely before making a big change.`;
+  return `We have seen similar reports recently${area}, so this is worth checking. Look at the plants closely before making a big change.`;
 }

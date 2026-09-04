@@ -1,4 +1,6 @@
 import type { AccessState } from "@/lib/beta/limits";
+import { classifyFarmerIntent } from "@/lib/assistant/intents";
+import { knowledgeStateFromCase } from "@/lib/assistant/knowledge";
 import { extractStructuredFacts, mergeCaseFacts } from "./extract";
 import type {
   CaseActionRecord,
@@ -17,6 +19,12 @@ export type CaseUpdateExtras = Partial<StructuredCaseFacts> & {
   caseStatus?: CropCaseRecord["caseStatus"];
   agronomistReviewed?: boolean;
   diagnosisConfirmed?: boolean;
+  conversationIntent?: CropCaseRecord["conversationIntent"];
+  questionCategory?: CropCaseRecord["questionCategory"];
+  calculationType?: string | null;
+  caseType?: CropCaseRecord["caseType"];
+  knowledgeState?: CropCaseRecord["knowledgeState"];
+  businessMetadata?: Record<string, unknown> | null;
 };
 
 export function nowIso() {
@@ -68,6 +76,7 @@ export function buildNewCropCase(input: {
   profile?: { country?: string | null; district?: string | null } | null;
 }): CropCaseRecord {
   const facts = extractStructuredFacts(input.message, input.profile);
+  const classified = classifyFarmerIntent(input.message);
   const createdAt = nowIso();
   return {
     id: crypto.randomUUID(),
@@ -105,6 +114,12 @@ export function buildNewCropCase(input: {
     agronomistReviewed: false,
     diagnosisConfirmed: false,
     caseStatus: "open",
+    conversationIntent: classified.intent,
+    questionCategory: classified.questionCategory,
+    calculationType: classified.calculationType,
+    caseType: classified.caseType,
+    knowledgeState: "raw",
+    businessMetadata: null,
     createdAt,
     updatedAt: createdAt,
   };
@@ -144,6 +159,18 @@ export function mergeUpdatedCase(
     caseStatus: extras?.caseStatus ?? current.caseStatus,
     agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
     diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
+    conversationIntent: extras?.conversationIntent ?? current.conversationIntent,
+    questionCategory: extras?.questionCategory ?? current.questionCategory,
+    calculationType: extras?.calculationType ?? current.calculationType,
+    caseType: extras?.caseType ?? current.caseType,
+    knowledgeState:
+      extras?.knowledgeState ??
+      knowledgeStateFromCase({
+        agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
+        diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
+        knowledgeState: current.knowledgeState,
+      }),
+    businessMetadata: extras?.businessMetadata ?? current.businessMetadata,
     updatedAt: nowIso(),
   };
 }
