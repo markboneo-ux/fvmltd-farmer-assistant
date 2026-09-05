@@ -116,6 +116,39 @@ describe("admin dashboard metrics", () => {
     expect(insights.cases.every((item) => !("email" in item))).toBe(true);
   });
 
+  it("keeps unknown-country cases out of Trinidad analytics", async () => {
+    await persistConversationTurn({
+      identity: guest("33333333-3333-4333-8333-333333333333"),
+      userMessage: "My lettuce has brown leaf edges.",
+      assistantText: "Check whether the brown starts at the tips.",
+      payload,
+    });
+    await persistConversationTurn({
+      identity: guest("44444444-4444-4444-8444-444444444444"),
+      userMessage: "My lettuce has brown leaf edges in Trinidad.",
+      assistantText: "Check whether the brown starts at the tips.",
+      payload,
+      profile: { country: "Trinidad and Tobago", district: "Couva" },
+    });
+
+    const insights = await buildInsights();
+    const countries = insights.agronomy.casesByCountry.map((row) => row.label);
+    expect(countries).toContain("unknown");
+    expect(countries).toContain("Trinidad and Tobago");
+
+    const trinidadOnly = await buildInsights({ country: "Trinidad and Tobago" });
+    expect(trinidadOnly.summary.totalCropCases).toBe(1);
+    expect(trinidadOnly.agronomy.casesByCountry.some((row) => row.label === "unknown")).toBe(
+      false,
+    );
+
+    const unknownOnly = await buildInsights({ country: "unknown" });
+    expect(unknownOnly.summary.totalCropCases).toBe(1);
+    expect(unknownOnly.agronomy.casesByCountry.some((row) => row.label === "unknown")).toBe(
+      true,
+    );
+  });
+
   it("requires multiple unique farmers for a trend and ignores excluded cases", async () => {
     const one = await report("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Cucumber leaf spot in Couva");
     expect((await listCaseTrends()).filter(canExposeTrend)).toHaveLength(0);

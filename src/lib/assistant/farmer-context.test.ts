@@ -22,6 +22,9 @@ describe("farmer country and region", () => {
     expect(extractCountryName("This is in Grenada")).toBe("Grenada");
     expect(extractCountryName("Saint Lucia market price")).toBe("Saint Lucia");
     expect(extractCountryName("Trinidad and Tobago celery")).toBe("Trinidad and Tobago");
+    expect(extractCountryName("I'm in Trinidad. My celery is burning.")).toBe(
+      "Trinidad and Tobago",
+    );
   });
 
   it("uses region when it changes the location", () => {
@@ -60,14 +63,14 @@ describe("farmer country and region", () => {
         continuing: null,
         registered: { country: "Guyana", district: "Berbice" },
       }),
-    ).toEqual({ country: "Guyana", district: "Berbice" });
+    ).toEqual({ country: "Guyana", district: "Berbice", countrySource: "registered" });
     expect(
       mergeCaseProfileContext({
         client: { country: "Jamaica", district: "" },
         continuing: { country: "Trinidad and Tobago", district: "Couva" },
         registered: { country: "Guyana", district: "Berbice" },
       }),
-    ).toEqual({ country: "Jamaica", district: "Couva" });
+    ).toEqual({ country: "Jamaica", district: "Couva", countrySource: "client" });
   });
 
   it("asks country only when local facts matter and country is unknown", () => {

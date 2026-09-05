@@ -6,7 +6,6 @@ import { Button } from "@/components/Button";
 import { RegistrationSuccess } from "@/components/RegistrationSuccess";
 import {
   COUNTRY_OPTIONS,
-  DEFAULT_COUNTRY,
   isOtherCountryOption,
 } from "@/data/countries";
 import {
@@ -29,7 +28,7 @@ import {
 const initialValues: FarmerRegistrationInput = {
   fullName: "",
   whatsappNumber: "",
-  country: DEFAULT_COUNTRY,
+  country: "",
   countryOther: "",
   district: "",
   farmSize: "",

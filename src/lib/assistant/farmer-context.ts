@@ -44,8 +44,21 @@ export type FarmerContext = {
 
 export const ASK_COUNTRY_QUESTION = "What country are you farming in?";
 
+export const LOCATION_CONFIDENCE = [
+  "explicit",
+  "profile_confirmed",
+  "conversation_inferred",
+  "unknown",
+] as const;
+
+export type LocationConfidence = (typeof LOCATION_CONFIDENCE)[number];
+
+export type ProfileCountrySource = "client" | "continuing" | "registered" | null;
+
 const COUNTRY_ALIASES: Array<{ pattern: RegExp; name: string }> = [
-  { pattern: /\b(trinidad\s*(and|&)?\s*tobago|tobago|t&t)\b/i, name: "Trinidad and Tobago" },
+  { pattern: /\b(trinidad\s*(and|&)\s*tobago|t&t)\b/i, name: "Trinidad and Tobago" },
+  { pattern: /\btrinidad\b/i, name: "Trinidad and Tobago" },
+  { pattern: /\btobago\b/i, name: "Trinidad and Tobago" },
   { pattern: /\bguyana\b/i, name: "Guyana" },
   { pattern: /\bgrenada\b/i, name: "Grenada" },
   { pattern: /\b(saint|st\.?)\s+lucia\b/i, name: "Saint Lucia" },
@@ -155,22 +168,52 @@ export function mergeCaseProfileContext(parts: {
   client?: CaseProfileFields | null;
   continuing?: CaseProfileFields | null;
   registered?: CaseProfileFields | null;
-}): { country: string | null; district: string | null } {
-  const pick = (...values: Array<string | null | undefined>) => {
-    for (const value of values) {
-      const trimmed = value?.trim();
-      if (trimmed) return trimmed;
+}): { country: string | null; district: string | null; countrySource: ProfileCountrySource } {
+  const pick = (
+    ...entries: Array<{ value?: string | null; source: ProfileCountrySource }>
+  ) => {
+    for (const entry of entries) {
+      const trimmed = entry.value?.trim();
+      if (trimmed) return { value: trimmed, source: entry.source };
     }
-    return null;
+    return { value: null as string | null, source: null as ProfileCountrySource };
   };
+  const country = pick(
+    { value: parts.client?.country, source: "client" },
+    { value: parts.continuing?.country, source: "continuing" },
+    { value: parts.registered?.country, source: "registered" },
+  );
+  const district = pick(
+    { value: parts.client?.district, source: "client" },
+    { value: parts.continuing?.district, source: "continuing" },
+    { value: parts.registered?.district, source: "registered" },
+  );
   return {
-    country: pick(parts.client?.country, parts.continuing?.country, parts.registered?.country),
-    district: pick(
-      parts.client?.district,
-      parts.continuing?.district,
-      parts.registered?.district,
-    ),
+    country: country.value,
+    district: district.value,
+    countrySource: country.source,
   };
+}
+
+export function resolveLocationConfidence(options: {
+  spokenCountry: string | null;
+  countryFromRegion: boolean;
+  profileCountry?: string | null;
+  profileSource?: ProfileCountrySource;
+}): LocationConfidence {
+  if (options.spokenCountry && !options.countryFromRegion) return "explicit";
+  if (options.spokenCountry && options.countryFromRegion) return "conversation_inferred";
+  if (options.profileCountry?.trim() && options.profileSource === "continuing") {
+    return "conversation_inferred";
+  }
+  if (options.profileCountry?.trim()) return "profile_confirmed";
+  return "unknown";
+}
+
+export function countryReliableForLocalFacts(
+  confidence: LocationConfidence | null | undefined,
+): boolean {
+  return confidence === "explicit" || confidence === "profile_confirmed";
 }
 
 export function emptyFarmerContext(): FarmerContext {
@@ -412,6 +455,26 @@ export function localSpecificityMatters(options: {
   return false;
 }
 
+export function shouldConfirmCountry(options: {
+  country: string | null | undefined;
+  confidence?: LocationConfidence | null;
+  asksForProducts?: boolean;
+  researchNeed?: string | null;
+}): boolean {
+  if (!options.country?.trim()) return false;
+  if (countryReliableForLocalFacts(options.confidence ?? "unknown")) return false;
+  if (options.asksForProducts) return true;
+  const need = options.researchNeed;
+  return (
+    need === "pesticide_registration" ||
+    need === "product_label" ||
+    need === "market_prices" ||
+    need === "government_guidance" ||
+    need === "regulatory" ||
+    need === "financing"
+  );
+}
+
 export function shouldAskCountry(options: {
   country: string | null | undefined;
   intent?: IntentCategory | null;
@@ -523,15 +586,20 @@ export function farmerContextSummary(context: FarmerContext): string {
 export function depthInstructionForLevel(level: FarmerLevel | null): string {
   switch (level) {
     case "HOME_GARDENER":
-      return `FARMER LEVEL: HOME_GARDENER (use very simple language, lower-risk actions, almost no jargon. Explain any technical word in the same sentence.)`;
+      return `FARMER LEVEL: HOME_GARDENER
+Write a simple practical explanation. Short sentences. Almost no jargon. Prefer watering, drainage, and lower-risk actions. If you must use a technical word, explain it in the same sentence. Do not discuss FRAC, EC, epidemiology, or resistance programmes.`;
     case "SMALL_FARMER":
-      return `FARMER LEVEL: SMALL_FARMER (practical field checks, simple treatment options, cost awareness. Keep language clear.)`;
+      return `FARMER LEVEL: SMALL_FARMER
+Give a field diagnosis plus practical management. Include useful checks, simple treatment options, and cost awareness. Keep language clear. Mention production risk only when it changes what they should do today.`;
     case "COMMERCIAL_FARMER":
-      return `FARMER LEVEL: COMMERCIAL_FARMER (precise management, economics, production risk, resistance management, spray timing. Rates/intervals only when verified from a current label.)`;
+      return `FARMER LEVEL: COMMERCIAL_FARMER
+Give a deeper differential with production implications: yield, harvest timing, spray windows, resistance management, and labour/input cost when relevant. Rates and intervals only when verified from a current label. Do not write a backyard-garden answer.`;
     case "TECHNICAL_USER":
-      return `FARMER LEVEL: TECHNICAL_USER (deeper physiology, disease differential, active ingredients, FRAC/IRAC where appropriate, nutrient interactions, pH/EC, epidemiology. Do not oversimplify.)`;
+      return `FARMER LEVEL: TECHNICAL_USER
+Use technical terminology. Include physiological or pathological reasoning, disease differential, pH/EC and nutrient interactions where they apply, and active ingredients. FRAC/IRAC when a chemical class is discussed. Do not oversimplify.`;
     case "AGRONOMIST":
-      return `FARMER LEVEL: AGRONOMIST (full technical depth. Include differentials, active ingredients, FRAC/IRAC, nutrient interactions, pH/EC, epidemiology, and source-backed regulatory notes. Never dumb this down.)`;
+      return `FARMER LEVEL: AGRONOMIST
+Full technical differential. Include epidemiology, competing aetiologies, active ingredients, FRAC/IRAC where appropriate, nutrient interactions, pH/EC, and literature-backed caveats. Never dumb this down. Diagnosis remains possible/likely until lab or specialist confirmation.`;
     default:
       return `FARMER LEVEL: unknown — write clearly for a practical Caribbean farmer. Increase technical depth if their wording is technical.`;
   }

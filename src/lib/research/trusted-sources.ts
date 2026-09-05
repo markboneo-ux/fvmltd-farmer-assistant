@@ -81,6 +81,27 @@ export const TRUSTED_SOURCES: TrustedSource[] = [
     lastCheckedAt: SEED_CHECKED,
   },
   {
+    id: "fao-plant-production",
+    name: "FAO plant production and protection",
+    country: "International",
+    url: "https://www.fao.org/plant-production-protection/en",
+    domain: "fao.org",
+    category: "research",
+    trustLevel: "research_institution",
+    lastCheckedAt: SEED_CHECKED,
+    notes: "General agronomy only. Never proof of national pesticide registration.",
+  },
+  {
+    id: "cabi-plantwise",
+    name: "CABI Plantwise",
+    country: "International",
+    url: "https://plantwiseplusknowledgebank.org/",
+    domain: "plantwiseplusknowledgebank.org",
+    category: "research",
+    trustLevel: "research_institution",
+    lastCheckedAt: SEED_CHECKED,
+  },
+  {
     id: "gy-ptccb",
     name: "Guyana Pesticides and Toxic Chemicals Control Board",
     country: "Guyana",
@@ -172,14 +193,52 @@ export function domainFromUrl(url: string): string {
 export function sourcesForCountry(country: string | null | undefined): TrustedSource[] {
   const needle = (country ?? "").trim().toLowerCase();
   return TRUSTED_SOURCES.filter((source) => {
-    if (source.country === "Caribbean") return true;
-    if (!needle) return source.country === "Caribbean";
+    if (source.country === "Caribbean" || source.country === "International") return true;
+    if (!needle) return source.country === "Caribbean" || source.country === "International";
     return (
       source.country.toLowerCase() === needle ||
       (needle.includes("trinidad") && source.country === "Trinidad and Tobago") ||
       (needle.includes("tobago") && source.country === "Trinidad and Tobago")
     );
   });
+}
+
+export function localOfficialSources(
+  country: string | null | undefined,
+  category: SourceCategory,
+): TrustedSource[] {
+  const needle = (country ?? "").trim().toLowerCase();
+  return TRUSTED_SOURCES.filter((source) => {
+    if (source.category !== category) return false;
+    if (!needle) return false;
+    return (
+      source.country.toLowerCase() === needle ||
+      (needle.includes("trinidad") && source.country === "Trinidad and Tobago") ||
+      (needle.includes("tobago") && source.country === "Trinidad and Tobago")
+    );
+  }).sort((a, b) => TRUST_RANK[b.trustLevel] - TRUST_RANK[a.trustLevel]);
+}
+
+/** Official local → regional research → international research. Never another country's pesticide register. */
+export function researchTargetsForNeed(
+  country: string | null | undefined,
+  category: SourceCategory | null,
+  need: string,
+): TrustedSource[] {
+  if (need === "pesticide_registration" || need === "product_label" || need === "regulatory") {
+    const local = category ? localOfficialSources(country, category) : [];
+    if (local.length > 0) return local.slice(0, 3);
+    return TRUSTED_SOURCES.filter(
+      (source) =>
+        (source.country === "Caribbean" || source.country === "International") &&
+        source.category === "research",
+    ).slice(0, 2);
+  }
+  if (category) {
+    const local = localOfficialSources(country, category);
+    if (local.length > 0) return local.slice(0, 3);
+  }
+  return sourcesForCountry(country).slice(0, 3);
 }
 
 export function sourcesByCategory(

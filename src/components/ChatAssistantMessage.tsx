@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
+import { diagnosisConfidenceLabel } from "@/lib/agronomy/diagnosis-confidence";
 import {
   buildFarmerVisibleReply,
   shouldUseDiagnosisLayout,
@@ -42,7 +43,7 @@ function SourcesUsed({
       {verificationLine ? <p className="mb-1">{verificationLine}</p> : null}
       <details>
         <summary className="cursor-pointer text-muted hover:text-ink">
-          Sources used ▾
+          Sources used ({sources.length}) ▾
         </summary>
         <ul className="mt-1.5 space-y-1.5">
           {sources.slice(0, 6).map((source) => (
@@ -55,17 +56,17 @@ function SourcesUsed({
                     rel="noreferrer"
                     className="text-leaf underline-offset-2 hover:underline"
                   >
-                    {source.name}
+                    {source.organization && source.organization !== source.name
+                      ? source.organization
+                      : source.name}
                   </a>
                 ) : (
-                  source.name
+                  source.organization || source.name
                 )}
               </p>
-              {source.organization && source.organization !== source.name ? (
-                <p>{source.organization}</p>
-              ) : null}
-              {source.publishedAt ? (
-                <p>Updated {source.publishedAt.slice(0, 10)}</p>
+              {source.supported ? <p>{source.supported}</p> : null}
+              {source.checkedAt || source.publishedAt ? (
+                <p>Checked {(source.checkedAt || source.publishedAt || "").slice(0, 10)}</p>
               ) : null}
             </li>
           ))}
@@ -131,6 +132,11 @@ export function ChatAssistantMessage({
             </h3>
             {likelyCauses.length > 0 ? (
               <BulletList items={likelyCauses} ordered />
+            ) : null}
+            {payload.diagnosisConfidence ? (
+              <p className="mt-1 text-xs text-muted">
+                {diagnosisConfidenceLabel(payload.diagnosisConfidence)}
+              </p>
             ) : null}
             <p className="mt-1 whitespace-pre-wrap">{payload.diagnosisWhy || assessment}</p>
           </section>

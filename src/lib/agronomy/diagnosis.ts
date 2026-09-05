@@ -6,6 +6,7 @@
 import {
   ASK_COUNTRY_QUESTION,
   shouldAskCountry,
+  shouldConfirmCountry,
   type FarmerLevel,
 } from "@/lib/assistant/farmer-context";
 import { ASK_CROP_QUESTION } from "@/lib/assistant/crops";
@@ -14,7 +15,9 @@ import {
   type IntentCategory,
 } from "@/lib/assistant/intents";
 import { isGuidanceStage, type AgronomicCasePayload } from "./case-schema";
+import { assignDiagnosisConfidence } from "./diagnosis-confidence";
 import { questionAsksForKnownFact, type KnownFarmerFacts } from "./tomato-protocol";
+import { extractWorkingCase, highestValueMissingQuestion } from "./working-case";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -92,6 +95,27 @@ const CELERY_BURN: DiagnosticPlaybook = {
   photoHelpful: true,
 };
 
+const CELERY_BURN_SMALL: DiagnosticPlaybook = {
+  ...CELERY_BURN,
+  id: "celery_burn_small",
+  likelyCauses: [
+    "Uneven watering or salt around the roots",
+    "Potassium or calcium imbalance affecting the planting",
+    "Spray or fertilizer injury",
+  ],
+  why: "On a small farm planting, tip or edge burn is usually a field-management problem first: irrigation uniformity, salt around the roots, or a recent spray. Walk the beds and see which patches are worse before changing the spray programme. Disease only rises if you see separate spots rather than a clean margin burn.",
+  checks: [
+    "Walk the beds — is the burn in dry patches, wet patches, or everywhere?",
+    "Did you fertigate or spray in the last week?",
+    "Are older leaves worse than new growth?",
+  ],
+  actionsToday: [
+    "Hold extra fertilizer and extra pesticide today",
+    "Fix obvious dry or waterlogged spots in the beds",
+    "Scout new growth over 24–72 hours before changing the spray programme",
+  ],
+};
+
 const CELERY_BURN_HOME: DiagnosticPlaybook = {
   ...CELERY_BURN,
   id: "celery_burn_home",
@@ -114,6 +138,56 @@ const CELERY_BURN_HOME: DiagnosticPlaybook = {
   avoid: [
     "Do not mix homemade chemical sprays",
     "Do not keep adding feed while the plants look burnt",
+  ],
+};
+
+const CELERY_BURN_COMMERCIAL: DiagnosticPlaybook = {
+  ...CELERY_BURN,
+  id: "celery_burn_commercial",
+  likelyCauses: [
+    "Irrigation uniformity / root-zone EC concentrating at the margins",
+    "K/Ca imbalance affecting marketable petiole quality",
+    "Phytotoxicity from a recent spray or foliar feed",
+    "Foliar disease only if discrete lesions appear (yield and harvest delay risk)",
+  ],
+  why: "On a commercial celery planting, tip or margin burn is first a production-quality problem: uneven watering, salt/EC, potassium or calcium supply, or spray injury. Disease matters if lesions are discrete because it can force extra sprays, harvest delays, and resistance pressure. Do not treat this as a home-garden watering tip only.",
+  checks: [
+    "Map whether burn follows beds, drippers, or spray swaths",
+    "Check irrigation uniformity and recent EC/fertigation records",
+    "Review the last spray/foliar-feed rate, mix, and interval",
+    "Look for discrete lesions versus uniform margin necrosis",
+  ],
+  actionsToday: [
+    "Hold extra N and extra pesticide until the pattern is mapped",
+    "Correct obvious dry or waterlogged zones; do not blanket-leach unless drainage is free and EC is high",
+    "Protect harvest quality by scouting new growth over 24–72 hours",
+  ],
+};
+
+const CELERY_BURN_AGRONOMIST: DiagnosticPlaybook = {
+  ...CELERY_BURN,
+  id: "celery_burn_agronomist",
+  likelyCauses: [
+    "Root-zone water potential / NaCl or high EC osmotic scorch",
+    "Ca/K antagonism or Ca transport failure (tip burn) vs Cl phytotoxicity",
+    "Xenobiotic injury (tank-mix incompatibility, surfactant, or high-temperature application)",
+    "Foliar mycosis (Cercospora apii / Septoria apiicola) if discrete lesions, halos, or pycnidia; consider bacterial blight if water-soaked",
+  ],
+  why: "Treat this as an epidemiological differential, not a single diagnosis. Marginal necrosis implicates rhizosphere water relations, salinity/EC, Ca/K physiology, or xenobiotic injury. Discrete lesions shift prior toward Cercospora/Septoria; confirm with lesion anatomy before invoking a QoI/DMI (FRAC 11/3) programme. Humidity can increase both abiotic scorch and infection risk without proving either.",
+  checks: [
+    "Lesion architecture: tip/margin necrosis vs discrete lesions, halo, pycnidia, or water-soaking",
+    "Root-zone moisture, drainage, pH, and EC; recent fertigation recipe",
+    "Spray log: products, rates, FRAC/IRAC groups, tank-mix, and weather at application",
+    "Spatial pattern: row, irrigation zone, or random foci",
+  ],
+  actionsToday: [
+    "Do not start a fungicide programme until lesion type supports a pathogen",
+    "If a QoI or DMI becomes justified later, plan FRAC rotation; do not invent a rate",
+    "Hold further N until root-zone status is clearer; photograph lesion margin, whole plant, and root zone",
+  ],
+  whatWouldChange: [
+    "Pycnidia, chlorotic halo, or lab isolation would elevate Cercospora/Septoria to likely",
+    "A documented high-EC reading or incompatible tank-mix would elevate abiotic injury",
   ],
 };
 
@@ -173,9 +247,10 @@ export function playbookFor(
 ): DiagnosticPlaybook | null {
   if (isCeleryBurn(facts)) {
     if (farmerLevel === "HOME_GARDENER") return CELERY_BURN_HOME;
-    if (farmerLevel === "TECHNICAL_USER" || farmerLevel === "AGRONOMIST") {
-      return CELERY_BURN_TECHNICAL;
-    }
+    if (farmerLevel === "SMALL_FARMER") return CELERY_BURN_SMALL;
+    if (farmerLevel === "COMMERCIAL_FARMER") return CELERY_BURN_COMMERCIAL;
+    if (farmerLevel === "AGRONOMIST") return CELERY_BURN_AGRONOMIST;
+    if (farmerLevel === "TECHNICAL_USER") return CELERY_BURN_TECHNICAL;
     return CELERY_BURN;
   }
   if (facts.suspectedIssue === "whiteflies" || facts.suddenWilt) {
@@ -183,7 +258,9 @@ export function playbookFor(
   }
   const text = facts.rawText.toLowerCase();
   if (
-    /\b(burn|burning|yellowing|spots?|stunt|wilt|holes?|leaf\s+spot)\b/.test(text) &&
+    /\b(burn|burning|yellowing|spots?|stunt|wilt|holes?|leaf\s+spot|scorch|necrosis|brown(ing)?|leaf\s+edges?|tip\s*burn)\b/.test(
+      text,
+    ) &&
     facts.crop
   ) {
     return GENERIC_DIFFERENTIAL;
@@ -213,9 +290,24 @@ export function pickHighestValueFollowUp(options: {
     return ASK_CROP_QUESTION;
   }
 
+  if (
+    shouldConfirmCountry({
+      country: facts.country,
+      confidence: facts.locationConfidence,
+      asksForProducts: facts.asksForProducts,
+      researchNeed: options.researchNeed,
+    })
+  ) {
+    return `Just to confirm, are you farming in ${facts.country}?`;
+  }
+
+  const working = extractWorkingCase(facts);
   const playbook = playbookFor(facts, options.farmerLevel ?? null);
   if (playbook?.id.startsWith("celery") && playbook.oneQuestion) {
-    if (!questionAsksForKnownFact(playbook.oneQuestion, facts)) {
+    if (
+      !working.symptomLocation &&
+      !questionAsksForKnownFact(playbook.oneQuestion, facts)
+    ) {
       return playbook.oneQuestion;
     }
   }
@@ -231,9 +323,21 @@ export function pickHighestValueFollowUp(options: {
 
   if (
     playbook?.oneQuestion &&
+    !working.symptomLocation &&
     !questionAsksForKnownFact(playbook.oneQuestion, facts)
   ) {
     return playbook.oneQuestion;
+  }
+
+  const missing = highestValueMissingQuestion({
+    working,
+    locationConfidence: facts.locationConfidence,
+    asksForProducts: facts.asksForProducts,
+    photoRecommended: payload.photoRecommended,
+    diagnostic: Boolean(facts.crop),
+  });
+  if (missing && !questionAsksForKnownFact(missing, facts)) {
+    return missing;
   }
 
   if (
@@ -276,14 +380,18 @@ export function applyDiagnosticPlaybook(
       diagnosisWhy: null,
       whatWouldChangeDiagnosis: [],
       monitorNext: null,
+      locationConfidence: facts.locationConfidence,
     };
   }
 
   if (!playbook) {
-    return {
-      ...payload,
-      preliminaryAssessment: weatherMustNotLead(payload.preliminaryAssessment),
-    };
+    return withDiagnosisConfidence(
+      {
+        ...payload,
+        preliminaryAssessment: weatherMustNotLead(payload.preliminaryAssessment),
+      },
+      facts,
+    );
   }
 
   let next = { ...payload };
@@ -344,5 +452,31 @@ export function applyDiagnosticPlaybook(
     }
   }
 
-  return next;
+  return withDiagnosisConfidence(next, facts);
+}
+
+function withDiagnosisConfidence(
+  payload: AgronomicCasePayload,
+  facts: KnownFarmerFacts,
+): AgronomicCasePayload {
+  const evidenceCount = [
+    facts.distributionHint,
+    facts.plantAge,
+    facts.irrigationType,
+    facts.recentFertilizer,
+    facts.recentPesticide,
+    facts.variety,
+  ].filter(Boolean).length;
+  return {
+    ...payload,
+    locationConfidence: facts.locationConfidence,
+    diagnosisConfidence: assignDiagnosisConfidence({
+      claimed: payload.diagnosisConfidence,
+      farmerReportedLab: /\b(lab(oratory)? (said|confirmed|result)|agronomist confirmed)\b/i.test(
+        facts.rawText,
+      ),
+      causeCount: (payload.likelyCauses ?? []).length,
+      evidenceCount,
+    }),
+  };
 }

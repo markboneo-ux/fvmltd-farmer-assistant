@@ -62,10 +62,31 @@ export function stripCitedSourceNames(
   return next.replace(/\s+([.,;:])/g, "$1").trim();
 }
 
+const SUPPORT_LABEL: Record<SourceCategory, string> = {
+  market_prices: "market prices",
+  pesticide_registration: "pesticide registration",
+  manufacturer_label: "product label",
+  government_guidance: "government guidance",
+  research: "agronomic research",
+  extension: "extension guidance",
+  weather: "weather",
+  financing: "financing",
+  pest_alerts: "pest alert",
+  regulatory: "regulation",
+  other: "background",
+};
+
+export function supportLabelForCategory(category?: SourceCategory | null): string | null {
+  if (!category) return null;
+  return SUPPORT_LABEL[category] ?? null;
+}
+
 export function enrichCitations(citations: WebSourceCitation[]): WebSourceCitation[] {
   return dedupeCitations(citations).map((item) => ({
     ...item,
     organization: item.organization || item.name,
     publishedAt: item.publishedAt ?? null,
+    checkedAt: item.checkedAt ?? item.publishedAt ?? null,
+    supported: item.supported ?? supportLabelForCategory(item.category),
   }));
 }

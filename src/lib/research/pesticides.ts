@@ -151,7 +151,7 @@ export function verifyPesticideForCountry(options: {
       sourceName: null,
       sourceUrl: null,
       lastVerifiedAt: null,
-      farmerMessage: unverifiedRegistrationMessage(country),
+      farmerMessage: unverifiedRegistrationMessage(country, options.crop),
     };
   }
 
@@ -166,7 +166,7 @@ export function verifyPesticideForCountry(options: {
       sourceName: null,
       sourceUrl: null,
       lastVerifiedAt: null,
-      farmerMessage: unverifiedRegistrationMessage(country),
+      farmerMessage: unverifiedRegistrationMessage(country, options.crop),
     };
   }
 
@@ -203,7 +203,7 @@ export function sanitizeUnverifiedPesticideClaims(
   if (!text.trim()) return text;
   if (verification?.verified) return text;
 
-  let next = text;
+  let next = text.replace(/\btherefore you can use it\.?/gi, "").replace(/\s{2,}/g, " ").trim();
   const country = verification?.country;
   if (country) {
     const escaped = country.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -227,12 +227,35 @@ export function sanitizeUnverifiedPesticideClaims(
   });
 
   if (!verification?.verified && /\b(registered|approved)\b/i.test(text)) {
-    const warning = verification?.farmerMessage ?? unverifiedRegistrationMessage(country || "your country");
-    if (!next.includes("I cannot confirm")) {
+    const warning =
+      verification?.farmerMessage ?? unverifiedRegistrationMessage(country || "your country");
+    if (!next.toLowerCase().includes("haven't verified registration") && !next.includes("I cannot confirm")) {
       next = `${next.trim()} ${warning}`.trim();
     }
   }
+  next = stripOtherCountryRegistration(next, verification);
   return next;
+}
+
+function stripOtherCountryRegistration(
+  text: string,
+  verification: PesticideVerification | null,
+): string {
+  if (!verification?.country) return text;
+  const here = verification.country.toLowerCase();
+  return text.replace(
+    /\b(registered|approved|legal)\s+in\s+(Trinidad(?:\s+and\s+Tobago)?|Tobago|Guyana|Jamaica|Barbados|Grenada|Saint Lucia)[^.]*therefore you can use it/gi,
+    `not verified as registered in ${verification.country}`,
+  ).replace(
+    new RegExp(
+      `\\b(registered|approved)\\s+in\\s+(?!${verification.country.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})([A-Z][A-Za-z\\s]{2,30})\\b`,
+      "gi",
+    ),
+    (_match, _status, other: string) => {
+      if (other.trim().toLowerCase() === here) return _match;
+      return `not a substitute for registration in ${verification.country}`;
+    },
+  );
 }
 
 function countryMatches(left: string, right: string): boolean {

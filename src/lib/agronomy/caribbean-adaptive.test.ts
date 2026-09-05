@@ -231,7 +231,7 @@ describe("adaptive Caribbean assistant", () => {
       join(process.cwd(), "src/components/ChatAssistantMessage.tsx"),
       "utf8",
     );
-    expect(chat).toMatch(/Sources used/);
+    expect(chat).toMatch(/Sources used \(/);
     expect(chat).toMatch(/<details>/);
     const sources = enrichCitations([
       {
@@ -260,10 +260,12 @@ describe("adaptive Caribbean assistant", () => {
   });
 
   it("gives celery burning a specific differential and does not let weather hijack it", async () => {
+    let modelCalls = 0;
     const result = await runAgronomicCase({
       message: "Why is my celery burning?",
       profile: { country: "Trinidad and Tobago" },
       createResponse: async (params) => {
+        modelCalls += 1;
         expect(JSON.stringify(params.input)).toMatch(/WEATHER GATE: Weather is not central/);
         return {
           id: "resp_celery_burn",
@@ -276,6 +278,7 @@ describe("adaptive Caribbean assistant", () => {
       },
     });
     expect(result.ok).toBe(true);
+    expect(modelCalls).toBe(1);
     if (!result.ok) return;
     expect(result.case.weatherRelevance).toBe("omit");
     expect(result.case.weatherRisks).toEqual([]);
@@ -340,7 +343,7 @@ describe("adaptive Caribbean assistant", () => {
     expect(asked.ok).toBe(true);
     if (!asked.ok) return;
     expect(asked.case.verifiedInputOptions).toEqual([]);
-    expect(asked.case.preliminaryAssessment).toMatch(/cannot confirm that this product is registered in Guyana/i);
+    expect(asked.case.preliminaryAssessment).toMatch(/haven't verified registration/i);
   });
 
   it("keeps guest persistence and photo upload working", async () => {

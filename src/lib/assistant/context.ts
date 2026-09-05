@@ -82,7 +82,11 @@ export function sliceHistoryForCurrentIntent(
 export function resolveTurnContext(options: {
   message: string;
   history?: Array<{ role: string; content: string }>;
-  profile?: { country?: string | null; district?: string | null } | null;
+  profile?: {
+    country?: string | null;
+    district?: string | null;
+    countrySource?: "client" | "continuing" | "registered" | null;
+  } | null;
   activeCase?: ActiveCaseContext | null;
 }): ResolvedTurnContext {
   const history = options.history ?? [];
@@ -145,17 +149,20 @@ export function resolveTurnContext(options: {
     knownFacts = extractKnownFacts(options.message, options.profile);
   }
 
-  const stableFacts = extractKnownFacts(
-    `${options.profile?.country ?? ""} ${options.profile?.district ?? ""}\n${userHistoryText(history)}`,
-    options.profile,
-  );
+  const stableFacts = extractKnownFacts(userHistoryText(history), options.profile);
   if (options.activeCase?.country && !knownFacts.country) {
     knownFacts.country = options.activeCase.country;
+    if (knownFacts.locationConfidence === "unknown") {
+      knownFacts.locationConfidence = "conversation_inferred";
+    }
   }
   if (options.activeCase?.district && !knownFacts.district) {
     knownFacts.district = options.activeCase.district;
   }
-  if (!knownFacts.country && stableFacts.country) knownFacts.country = stableFacts.country;
+  if (!knownFacts.country && stableFacts.country) {
+    knownFacts.country = stableFacts.country;
+    knownFacts.locationConfidence = stableFacts.locationConfidence;
+  }
   if (!knownFacts.district && stableFacts.district) knownFacts.district = stableFacts.district;
   if (!knownFacts.farmerLevel && stableFacts.farmerLevel) {
     knownFacts.farmerLevel = stableFacts.farmerLevel;

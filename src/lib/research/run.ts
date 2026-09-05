@@ -1,7 +1,7 @@
 import type { IntentCategory } from "@/lib/assistant/intents";
 import type { ResearchNeed, WebResearchResult } from "./types";
 import { classifyResearchNeed } from "./should-research";
-import { isSourceStale, sourcesByCategory, sourcesForCountry } from "./trusted-sources";
+import { isSourceStale, researchTargetsForNeed } from "./trusted-sources";
 import { fetchTrustedDocument, optionalWebSearch, type FetchFn } from "./fetch";
 import {
   detectPriceKind,
@@ -81,9 +81,7 @@ export async function runWebResearch(
   }
 
   const category = categoryForNeed(need);
-  const targets = category
-    ? sourcesByCategory(country, category).slice(0, 3)
-    : sourcesForCountry(country).slice(0, 2);
+  const targets = researchTargetsForNeed(country, category, need);
 
   const documents = await Promise.all(
     targets.map((source) => fetchTrustedDocument(source, { fetchFn: options.fetchFn })),
@@ -147,6 +145,9 @@ export async function runWebResearch(
       message: options.message,
     });
     brief = pesticide.farmerMessage;
+    if (!pesticide.verified) {
+      brief += " Do not use another country's pesticide registration as proof.";
+    }
     if (pesticide.sourceName && pesticide.verified) {
       citations.unshift({
         name: pesticide.sourceName,
@@ -162,37 +163,48 @@ export async function runWebResearch(
   if (need === "market_prices") {
     const crop = extractMarketCrop(options.message, options.crop) || "produce";
     const kind = detectPriceKind(options.message);
-    const namis = okDocs.find((doc) => /namis|namdevco/i.test(doc.source.domain + doc.source.name));
-    const parsed = namis ? parseNamisPriceHtml(namis.excerpt, crop) : { amount: null, unit: "kg" };
-    const asOf = namis?.retrievedAt ?? null;
-    const quote = {
-      crop,
-      country,
-      priceKind: kind,
-      unit: parsed.unit,
-      amount: parsed.amount,
-      currency: "TT$",
-      marketName: namis ? "NAMDEVCO wholesale market" : null,
-      asOf,
-      stale: quoteIsStale(asOf, now),
-      sourceName: namis?.source.name ?? "NAMDEVCO",
-      sourceUrl: namis?.url ?? null,
-      note: null,
-    };
-    marketQuotes = [quote];
-    brief = [
-      formatMarketQuote(quote),
-      distinguishPriceKindsReminder(kind),
-    ].join("\n");
-    if (!citations.some((item) => /namdevco|namis/i.test(item.name))) {
-      citations.unshift({
-        name: "NAMDEVCO market data",
-        url: namis?.url ?? "https://namistt.com/",
-        organization: "NAMDEVCO",
-        publishedAt: asOf,
-        category: "market_prices",
-        trustLevel: "statutory_authority",
-      });
+    const localMarket = okDocs.find(
+      (doc) =>
+        doc.source.country.toLowerCase() === country.toLowerCase() ||
+        (country.toLowerCase().includes("trinidad") &&
+          /namis|namdevco/i.test(doc.source.domain + doc.source.name)),
+    );
+    if (!localMarket) {
+      brief = `I do not have a verified current market-price source for ${country}. Do not quote another Caribbean country's prices as local.`;
+    } else {
+      const namis = localMarket;
+      const parsed = /namis|namdevco/i.test(namis.source.domain + namis.source.name)
+        ? parseNamisPriceHtml(namis.excerpt, crop)
+        : { amount: null, unit: "kg" };
+      const asOf = namis.retrievedAt ?? null;
+      const quote = {
+        crop,
+        country,
+        priceKind: kind,
+        unit: parsed.unit,
+        amount: parsed.amount,
+        currency: country.toLowerCase().includes("trinidad") ? "TT$" : "local",
+        marketName: /namdevco|namis/i.test(namis.source.name) ? "NAMDEVCO wholesale market" : namis.source.name,
+        asOf,
+        stale: quoteIsStale(asOf, now),
+        sourceName: namis.source.name,
+        sourceUrl: namis.url,
+        note: null,
+      };
+      marketQuotes = [quote];
+      brief = [formatMarketQuote(quote), distinguishPriceKindsReminder(kind)].join("\n");
+      if (!citations.some((item) => item.url === namis.url)) {
+        citations.unshift({
+          name: namis.source.name,
+          url: namis.url,
+          organization: namis.source.name,
+          publishedAt: asOf,
+          category: "market_prices",
+          trustLevel: namis.source.trustLevel,
+          supported: "market prices",
+          checkedAt: asOf,
+        });
+      }
     }
   }
 
@@ -245,6 +257,7 @@ export function formatResearchBriefForModel(result: WebResearchResult): string {
   if (result.needed === "pesticide_registration" || result.needed === "product_label") {
     lines.push(
       "Pesticide logic: country → crop → problem → active ingredient → local registration → label → local trade name only if verified. Never assume a trade name is legal. Only include rates, PHI, REI, or intervals if this brief verifies a current label.",
+      "Fallback order: official local source → regional research institution → recognized international research → general agronomy. Never use another Caribbean country's pesticide registration as proof.",
     );
   }
   return lines.join("\n");

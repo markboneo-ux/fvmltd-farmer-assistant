@@ -1,7 +1,5 @@
-import {
-  isOtherCountryOption,
-  resolveStoredCountry,
-} from "@/data/countries";
+import { isOtherCountryOption } from "@/data/countries";
+import { storedCountryForNewFarmer } from "./stored-country";
 import type { FarmSizeUnit, FarmerRegistrationInput } from "./types";
 
 export type FieldErrors = Partial<
@@ -47,7 +45,10 @@ export function validateFarmerRegistration(
     errors.countryOther = "Country name must be 120 characters or fewer.";
   }
 
-  const country = resolveStoredCountry(countrySelected, countryOther);
+  const country = storedCountryForNewFarmer(countrySelected, countryOther) ?? "";
+  if (!errors.country && !errors.countryOther && !country) {
+    errors.country = "Select your country.";
+  }
 
   const district = input.district.trim();
   if (!district) {

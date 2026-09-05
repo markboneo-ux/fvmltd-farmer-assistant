@@ -3,7 +3,8 @@
  * Used by OpenAI Structured Outputs and the farmer UI.
  */
 
-import type { FarmerLevel } from "@/lib/assistant/farmer-context";
+import type { FarmerLevel, LocationConfidence } from "@/lib/assistant/farmer-context";
+import type { DiagnosisConfidence } from "./diagnosis-confidence";
 import type { WebSourceCitation } from "@/lib/research/types";
 import {
   isQuestionType,
@@ -114,6 +115,8 @@ export type AgronomicCasePayload = {
   whatWouldChangeDiagnosis?: string[];
   monitorNext?: string | null;
   farmerLevel?: FarmerLevel | null;
+  locationConfidence?: LocationConfidence | null;
+  diagnosisConfidence?: DiagnosisConfidence | null;
   sourceVerificationLine?: string | null;
   sourcesCollapsed?: boolean;
 };
@@ -310,6 +313,8 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     whatWouldChangeDiagnosis: asStringArray(data.whatWouldChangeDiagnosis),
     monitorNext: asTrimmedString(data.monitorNext) || null,
     farmerLevel: null,
+    locationConfidence: null,
+    diagnosisConfidence: null,
     sourceVerificationLine: null,
     sourcesCollapsed: true,
   };

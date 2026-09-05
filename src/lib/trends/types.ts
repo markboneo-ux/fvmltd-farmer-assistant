@@ -57,6 +57,18 @@ export function symptomClusterFrom(symptoms: string[], suspectedIssue: string | 
   return unique.join("|") || "unspecified";
 }
 
+export function trendCountryKey(country: string | null | undefined): string {
+  const trimmed = country?.trim().toLowerCase() ?? "";
+  return trimmed || "unknown";
+}
+
+export function sameTrendCountry(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  return trendCountryKey(left) === trendCountryKey(right);
+}
+
 export function trendClusterKey(input: {
   country: string | null;
   region: string | null;
@@ -66,7 +78,7 @@ export function trendClusterKey(input: {
   suspectedIssue: string | null;
 }): string {
   return [
-    (input.country || "unknown").toLowerCase(),
+    trendCountryKey(input.country),
     (input.region || "unknown").toLowerCase(),
     (input.crop || "unknown").toLowerCase(),
     (input.variety || "any").toLowerCase(),

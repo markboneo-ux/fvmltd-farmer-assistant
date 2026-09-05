@@ -11,9 +11,13 @@ import {
   inferFarmerLevel,
   inferIrrigation,
   inferProductionSystem,
+  resolveLocationConfidence,
   shouldAskCountry,
+  shouldConfirmCountry,
   userLevelToFarmerLevel,
   type FarmerLevel,
+  type LocationConfidence,
+  type ProfileCountrySource,
 } from "@/lib/assistant/farmer-context";
 import {
   isBusinessIntent,
@@ -106,6 +110,7 @@ export type KnownFarmerFacts = {
   problemCategory: string | null;
   country: string | null;
   district: string | null;
+  locationConfidence: LocationConfidence;
   distributionHint: string | null;
   productionSystem: string | null;
   farmerScale: FarmerScale;
@@ -118,6 +123,8 @@ export type KnownFarmerFacts = {
   stuntedWholeField: boolean;
   asksForProducts: boolean;
   asksAboutWeather: boolean;
+  recentFertilizer: boolean;
+  recentPesticide: boolean;
   rawText: string;
 };
 
@@ -150,7 +157,11 @@ const PLANT_AGE_QUESTION =
  */
 export function extractKnownFacts(
   text: string,
-  profile?: { country?: string | null; district?: string | null } | null,
+  profile?: {
+    country?: string | null;
+    district?: string | null;
+    countrySource?: ProfileCountrySource;
+  } | null,
 ): KnownFarmerFacts {
   const rawText = text.trim();
   const lower = rawText.toLowerCase();
@@ -195,6 +206,12 @@ export function extractKnownFacts(
   const located = extractRegionAndCountry(rawText);
   let country: string | null = located.country || profile?.country?.trim() || null;
   let district: string | null = located.region || profile?.district?.trim() || null;
+  const locationConfidence = resolveLocationConfidence({
+    spokenCountry: located.country,
+    countryFromRegion: located.countryFromRegion,
+    profileCountry: profile?.country,
+    profileSource: profile?.countrySource ?? null,
+  });
 
   let distributionHint: string | null = null;
   if (/\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower)) {
@@ -237,6 +254,7 @@ export function extractKnownFacts(
     problemCategory,
     country,
     district,
+    locationConfidence,
     distributionHint,
     productionSystem,
     farmerScale,
@@ -259,6 +277,14 @@ export function extractKnownFacts(
       /\b(weather|forecast|will it rain|is it (going to|gonna) rain|before i spray|spray tomorrow|humidity|humid weather|heat (wave|stress)|could this weather)\b/.test(
         lower,
       ) || /\bwhy am i suddenly seeing more\b/.test(lower),
+    recentFertilizer:
+      /\b(fertilizer|fertiliser|npk|urea|foliar feed).{0,24}(yesterday|today|last\s+(week|few days)|ago|this morning)\b/.test(
+        lower,
+      ) || /\b(applied|put|gave).{0,20}\b(fertilizer|fertiliser|npk|urea)\b/.test(lower),
+    recentPesticide:
+      /\b(pesticide|insecticide|fungicide|herbicide|spray).{0,24}(yesterday|today|last\s+(week|few days)|ago|this morning)\b/.test(
+        lower,
+      ),
     rawText,
   };
 }
@@ -288,6 +314,13 @@ export function questionAsksForKnownFact(
   }
 
   if (facts.country && LOCATION_QUESTION.test(question)) {
+    if (
+      /just to confirm/i.test(question) &&
+      facts.locationConfidence !== "explicit" &&
+      facts.locationConfidence !== "profile_confirmed"
+    ) {
+      return false;
+    }
     return true;
   }
 
@@ -444,7 +477,7 @@ export function applyCommercialSafetyGuards(
     nextQuestion = "";
   }
 
-  // Re-ask country only when it is unknown and local facts would change the advice.
+  // Re-ask or confirm country only when local facts would change the advice.
   if (nextQuestion && LOCATION_QUESTION.test(nextQuestion)) {
     const needsCountry = shouldAskCountry({
       country: options.knownFacts.country,
@@ -453,8 +486,16 @@ export function applyCommercialSafetyGuards(
       asksAboutWeather: options.knownFacts.asksAboutWeather,
       researchNeed: options.researchNeed,
     });
-    if (!needsCountry) {
+    const needsConfirm = shouldConfirmCountry({
+      country: options.knownFacts.country,
+      confidence: options.knownFacts.locationConfidence,
+      asksForProducts: options.knownFacts.asksForProducts,
+      researchNeed: options.researchNeed,
+    });
+    if (!needsCountry && !needsConfirm) {
       nextQuestion = "";
+    } else if (needsConfirm && options.knownFacts.country) {
+      nextQuestion = `Just to confirm, are you farming in ${options.knownFacts.country}?`;
     } else if (!options.knownFacts.country && nextQuestion !== ASK_COUNTRY_QUESTION) {
       nextQuestion = ASK_COUNTRY_QUESTION;
     }

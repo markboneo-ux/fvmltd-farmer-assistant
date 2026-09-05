@@ -1,6 +1,7 @@
 import {
   symptomClusterFrom,
   trendClusterKey,
+  sameTrendCountry,
   type CaseTrendRecord,
   type TrendClusterInput,
   type TrendStatus,
@@ -85,9 +86,7 @@ export function trendsMatchFarmerQuery(
     return false;
   }
   if (
-    query.country &&
-    trend.country &&
-    query.country.toLowerCase() !== trend.country.toLowerCase()
+    !sameTrendCountry(query.country, trend.country)
   ) {
     return false;
   }

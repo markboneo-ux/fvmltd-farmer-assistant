@@ -50,7 +50,7 @@ describe("country-specific pesticide verification", () => {
       activeIngredient: "imidacloprid",
     });
     expect(guyana.verified).toBe(false);
-    expect(guyana.farmerMessage).toBe(unverifiedRegistrationMessage("Guyana"));
+    expect(guyana.farmerMessage).toBe(unverifiedRegistrationMessage("Guyana", "tomato"));
 
     const trinidad = verifyPesticideForCountry({
       country: "Trinidad and Tobago",
@@ -72,7 +72,7 @@ describe("country-specific pesticide verification", () => {
       "Imidacloprid is registered in Barbados so you can spray it today.",
       verification,
     );
-    expect(text).toMatch(/cannot confirm that this product is registered in Barbados/i);
+    expect(text).toMatch(/haven't verified registration/i);
     expect(text.toLowerCase()).not.toMatch(/is registered in barbados so you can spray/);
   });
 });

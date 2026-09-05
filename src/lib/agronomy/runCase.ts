@@ -19,6 +19,7 @@ import {
   mergeFarmerContext,
   responseTokenBudget,
   shouldAskCountry,
+  countryReliableForLocalFacts,
 } from "@/lib/assistant/farmer-context";
 import {
   isCalculationIntent,
@@ -26,6 +27,7 @@ import {
   type IntentCategory,
 } from "@/lib/assistant/intents";
 import { applyDiagnosticPlaybook } from "@/lib/agronomy/diagnosis";
+import { needsDiagnosisRewrite, THIN_REWRITE_INSTRUCTION } from "@/lib/agronomy/response-quality";
 import { getWeatherDiseaseRisk } from "@/lib/agronomy/get-weather-disease-risk";
 import {
   formatForecastTimingBrief,
@@ -276,6 +278,7 @@ function mapOpenAIFailure(
 export type CaseProfileContext = {
   country?: string | null;
   district?: string | null;
+  countrySource?: "client" | "continuing" | "registered" | null;
 };
 
 export type CaseActiveContext = {
@@ -418,9 +421,14 @@ function knownFactsSummary(facts: KnownFarmerFacts): string {
   if (facts.problemCategory) lines.push(`- problem category: ${facts.problemCategory}`);
   if (facts.userType) lines.push(`- user type: ${facts.userType}`);
   if (facts.farmerLevel) lines.push(`- farmer_level: ${facts.farmerLevel}`);
-  if (facts.country) lines.push(`- country/island: ${facts.country}`);
-  else lines.push("- country: unknown — do not assume Trinidad and Tobago");
+  if (facts.country) {
+    lines.push(`- country/island: ${facts.country} (${facts.locationConfidence})`);
+  } else {
+    lines.push("- country: unknown — do not assume Trinidad and Tobago");
+  }
   if (facts.district) lines.push(`- district/region: ${facts.district}`);
+  if (facts.recentFertilizer) lines.push("- recent fertilizer: mentioned");
+  if (facts.recentPesticide) lines.push("- recent pesticide: mentioned");
   if (facts.irrigationType) lines.push(`- irrigation: ${facts.irrigationType}`);
   if (facts.productionSystem) {
     lines.push(`- production system: ${facts.productionSystem}`);
@@ -580,7 +588,9 @@ async function enrichWithRegionalTools(
     }
   }
 
-  const webSources = enrichCitations(research?.citations ?? payload.webSources ?? []);
+  const webSources = research?.usedWeb
+    ? enrichCitations(research?.citations ?? payload.webSources ?? [])
+    : [];
   if (research?.pesticide && !research.pesticide.verified) {
     payload = {
       ...payload,
@@ -1020,32 +1030,58 @@ export async function runAgronomicCase(options: {
 
     let parsed: AgronomicCasePayload;
     try {
-      parsed = applyCommercialSafetyGuards(
-        parseCasePayload(extractJsonObject(rawText)),
-        {
+      const shapePayload = (text: string) => {
+        let next = applyCommercialSafetyGuards(parseCasePayload(extractJsonObject(text)), {
           mode: effectiveMode,
           questionsAskedBeforeThisTurn,
           knownFacts,
           intent: classified.intent,
           askForCrop: turn.askForCrop,
           researchNeed,
-        },
-      );
-      parsed = attachIntent(parsed, turn);
-      parsed = applyDiagnosticPlaybook(parsed, {
-        facts: knownFacts,
-        farmerLevel: knownFacts.farmerLevel,
-        intent: classified.intent,
-        askForCrop: turn.askForCrop,
-        researchNeed,
-      });
-      parsed.farmerLevel = knownFacts.farmerLevel;
+        });
+        next = attachIntent(next, turn);
+        next = applyDiagnosticPlaybook(next, {
+          facts: knownFacts,
+          farmerLevel: knownFacts.farmerLevel,
+          intent: classified.intent,
+          askForCrop: turn.askForCrop,
+          researchNeed,
+        });
+        next.farmerLevel = knownFacts.farmerLevel;
+        return next;
+      };
+
+      parsed = shapePayload(rawText);
+      if (needsDiagnosisRewrite(parsed, { intent: classified.intent, facts: knownFacts })) {
+        try {
+          const rewriteResponse = await createResponse({
+            ...baseParams,
+            previous_response_id: undefined,
+            instructions: `${String(baseParams.instructions ?? "")}\n\n${THIN_REWRITE_INSTRUCTION}`,
+            input: [
+              ...(Array.isArray(baseParams.input)
+                ? (baseParams.input as Array<Record<string, unknown>>)
+                : []),
+              { role: "assistant", content: rawText },
+              { role: "user", content: THIN_REWRITE_INSTRUCTION },
+            ],
+          });
+          const rewriteText = rewriteResponse.output_text?.trim();
+          if (rewriteText) {
+            parsed = shapePayload(rewriteText);
+            response = rewriteResponse;
+          }
+        } catch {
+          // Keep the first shaped answer if the improvement pass fails.
+        }
+      }
 
       const allowWeather =
         Boolean(knownFacts.country) &&
         shouldInvokeWeatherTool(knownFacts, classified.intent);
       const allowProducts =
         Boolean(knownFacts.country) &&
+        countryReliableForLocalFacts(knownFacts.locationConfidence) &&
         Boolean(knownFacts.crop) &&
         shouldInvokeProductTool(knownFacts);
       const allowTools =
@@ -1059,7 +1095,7 @@ export async function runAgronomicCase(options: {
           research,
         );
       } else {
-        const webSources = enrichCitations(research?.citations ?? []);
+        const webSources = research?.usedWeb ? enrichCitations(research.citations) : [];
         parsed = {
           ...parsed,
           regionalContext: emptyRegionalContext({

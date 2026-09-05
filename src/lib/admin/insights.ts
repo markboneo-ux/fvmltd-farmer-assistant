@@ -11,6 +11,7 @@ import type { CropCaseRecord, TrendClass } from "@/lib/cases/types";
 import { researchUsageStats } from "@/lib/research/log";
 import { canExposeTrend } from "@/lib/trends/engine";
 import { listCaseTrends } from "@/lib/trends/store";
+import { trendCountryKey } from "@/lib/trends/types";
 
 export type InsightsFilters = {
   from?: string | null;
@@ -40,6 +41,14 @@ function inRange(iso: string, filters: InsightsFilters): boolean {
   }
   if (filters.to && iso.slice(0, 10) > filters.to) return false;
   return true;
+}
+
+function matchesCountry(
+  value: string | null | undefined,
+  needle: string | null | undefined,
+): boolean {
+  if (!needle) return true;
+  return trendCountryKey(value) === trendCountryKey(needle);
 }
 
 function matches(value: string | null | undefined, needle: string | null | undefined): boolean {
@@ -91,7 +100,7 @@ function isGuestCase(item: CropCaseRecord): boolean {
 
 function matchesFilters(item: CropCaseRecord, filters: InsightsFilters): boolean {
   if (!inRange(item.createdAt, filters)) return false;
-  if (!matches(item.country, filters.country)) return false;
+  if (!matchesCountry(item.country, filters.country)) return false;
   if (!matches(item.district, filters.district ?? filters.region)) return false;
   if (!matches(item.crop, filters.crop)) return false;
   if (!matches(item.variety, filters.variety)) return false;
@@ -193,7 +202,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
 
   for (const item of allCases) {
     increment(byCrop, item.crop);
-    increment(byCountry, item.country);
+    increment(byCountry, trendCountryKey(item.country) === "unknown" ? "unknown" : item.country);
     increment(byDistrict, item.district);
     increment(byVariety, item.variety);
     increment(byProblem, item.problemCategory);
@@ -370,7 +379,9 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       casesByType: topEntries(byCaseType),
       casesByFarmerLevel: topEntries(byFarmerLevel),
       emergingTrends: trends.map((item) => ({
-        label: [item.crop, item.region, item.symptomCluster].filter(Boolean).join(" · "),
+        label: [item.crop, item.country || "unknown", item.region, item.symptomCluster]
+          .filter(Boolean)
+          .join(" · "),
         count: item.uniqueSessionCount,
         status: item.trendStatus,
         firstSeen: item.firstSeenAt,
