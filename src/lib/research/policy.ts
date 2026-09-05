@@ -11,10 +11,10 @@ const MARKET =
   /\b(market price|wholesale price|farmgate|retail price|namdevco|namis|jamis|current price|today'?s price|what (is|are) .{0,40}(selling|going) for|price of (tomatoes?|peppers?|cucumber|celery|produce))\b/i;
 
 const PESTICIDE =
-  /\b(registered|registration|approved (for|in)|pesticide register|list of pesticides?|pesticides? (available|in|for)|what can i spray|what chemical|trade name|brand (to use|name)|label rate|pre-?harvest interval|re-?entry|PHI|REI|is .{0,30} legal (to (use|spray)|in))\b/i;
+  /\b(registered|registration|approved (for|in)|pesticide register|list of pesticides?|pesticides?( are| is)? (available|registered|approved|in|for)|what pesticides?|what can i spray|what chemical|trade name|brand (to use|name)|label rate|pre-?harvest interval|re-?entry|PHI|REI|is .{0,30} legal (to (use|spray)|in))\b/i;
 
 const PRODUCT_ASK =
-  /\b(what (can|should) i (spray|use|buy)|what fungicide|what insecticide|what herbicide|what pesticide|list of pesticides?|pesticides? available|product (for|to use)|available locally|local (product|chemical|spray))\b/i;
+  /\b(what (can|should) i (spray|use|buy)|what fungicides?|what insecticides?|what herbicides?|what pesticides?|list of pesticides?|pesticides?( are| is)? available|available pesticides?|product (for|to use)|available locally|local (product|chemical|spray))\b/i;
 
 const PROGRAM =
   /\b(incentive|grant|subsidy|government (programme|program|scheme|help)|youth agro|farmer registration|ministry (grant|incentive))\b/i;

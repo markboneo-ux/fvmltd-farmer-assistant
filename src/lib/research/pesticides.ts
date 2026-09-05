@@ -69,8 +69,7 @@ export function pesticideCheckFromEvidence(options: {
   const query = classifyPesticideQuery(options.farmerText);
   const ingredient =
     query.activeIngredient ||
-    extractPossibleIngredient(options.farmerText) ||
-    extractPossibleIngredient(options.hits.map((hit) => `${hit.title} ${hit.snippet}`).join(" "));
+    extractPossibleIngredient(options.farmerText);
 
   const verifiedHit = country
     ? options.hits.find((hit) => hitSupportsRegistration(hit, country, ingredient))

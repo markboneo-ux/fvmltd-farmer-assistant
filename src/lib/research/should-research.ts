@@ -6,7 +6,7 @@ const MARKET =
   /\b(current price|today'?s price|wholesale price|retail price|market price|what is (the )?(price|celery|pumpkin|tomato).{0,20}(selling|price)|how much (is|are|should i sell|can i sell)|is .{0,20} selling well|selling well|farmgate|namdevco|namis)\b/i;
 
 const PESTICIDE =
-  /\b(registered|registration|approved (spray|chemical|pesticide|fungicide|insecticide)|what (can|should) i (spray|use)|what chemical|what fungicide|what insecticide|pesticides?|label (rate|information)|is .{0,40} (legal|allowed|registered) (in|for)|list of pesticides?)\b/i;
+  /\b(registered|registration|approved (spray|chemical|pesticide|fungicide|insecticide)|what (can|should) i (spray|use)|what chemical|what fungicides?|what insecticides?|what pesticides?|pesticides?( are| is)? (available|registered|approved|in|for)|label (rate|information)|is .{0,40} (legal|allowed|registered) (in|for)|list of pesticides?)\b/i;
 
 const LABEL = /\b(product label|label (info|information|rate)|pre-?harvest interval|re-?entry)\b/i;
 

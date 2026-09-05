@@ -9,6 +9,7 @@ import { isStale, staleWarning, topicRequiresFreshSource } from "./freshness";
 import { formatPesticideBlock, pesticideCheckFromEvidence } from "./pesticides";
 import { classifyPesticideQuery } from "./pesticide-query";
 import { buildPesticideFarmerAnswer } from "./pesticide-answer";
+import { parsePesticideListingText } from "./cfdd-listing";
 import { classifyRegulatoryEvidence, isHomepageOnlyEvidence } from "./evidence";
 import { registerEndpointsForCountry } from "./registers";
 import { countryIsRequired, LOCAL_VERIFICATION_UNAVAILABLE } from "./policy";
@@ -91,40 +92,49 @@ export async function runCountryResearch(options: {
   const browseTopics = topics.filter((topic) => topic !== "weather");
   if (browseTopics.length === 0) return empty;
 
+  const pesticideTopics = browseTopics.some(
+    (topic) =>
+      topic === "pesticide_registration" ||
+      topic === "chemical_approval" ||
+      topic === "product_label",
+  );
+
   try {
     const query = buildQuery({
       message: options.message,
       country,
       crop: options.crop,
-      topics: browseTopics,
+      topics: pesticideTopics
+        ? (["pesticide_registration", ...browseTopics] as ResearchTopic[])
+        : browseTopics,
     });
     const provider = resolveSearchProvider();
     let hits: SearchHit[] = [];
+    let searchFailure: ResearchResult["failure"] = null;
     try {
       hits = await provider.search(query, {
         country,
-        allowedDomains: trustedHomepageHits(country, browseTopics[0]).map((item) => item.domain),
+        allowedDomains: trustedHomepageHits(
+          country,
+          pesticideTopics ? "pesticide_registration" : browseTopics[0],
+        ).map((item) => item.domain),
       });
     } catch (error) {
-      return {
-        ...empty,
-        used: true,
-        failure: {
-          stage: "search",
-          errorType: error instanceof Error ? error.name : "search_error",
-          message: error instanceof Error ? error.message : "search failed",
-        },
-        farmerFallback: WEB_LOOKUP_FAILED_FARMER,
-        generalNotes: [LOCAL_VERIFICATION_UNAVAILABLE],
+      searchFailure = {
+        stage: "search",
+        errorType: error instanceof Error ? error.name : "search_error",
+        message: error instanceof Error ? error.message : "search failed",
       };
+      if (!pesticideTopics) {
+        return {
+          ...empty,
+          used: true,
+          failure: searchFailure,
+          farmerFallback: WEB_LOOKUP_FAILED_FARMER,
+          generalNotes: [LOCAL_VERIFICATION_UNAVAILABLE],
+        };
+      }
     }
-
-    const pesticideTopics = browseTopics.some(
-      (topic) =>
-        topic === "pesticide_registration" ||
-        topic === "chemical_approval" ||
-        topic === "product_label",
-    );
     const homepage = pesticideTopics ? [] : trustedHomepageHits(country, browseTopics[0]);
     const registerHits = pesticideTopics ? registerSearchHits(country) : [];
     hits = filterHitsToTrustedCountry([...hits, ...registerHits, ...homepage], country);
@@ -221,6 +231,14 @@ export async function runCountryResearch(options: {
           });
         })
       : [];
+    const parsedProducts = pesticideTopics
+      ? hits
+          .map((hit) => parsePesticideListingText(`${hit.title} ${hit.snippet}`, hit.url))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      : [];
+    const regulatorEndpoint = registerEndpointsForCountry(country).find(
+      (item) => item.priority === "regulator" && item.country === country,
+    );
     const ministryEndpoint = registerEndpointsForCountry(country).find(
       (item) => item.priority === "ministry" && item.country === country,
     );
@@ -229,13 +247,14 @@ export async function runCountryResearch(options: {
         ? buildPesticideFarmerAnswer({
             country,
             query: pesticideQuery,
-            evidence: pesticideEvidence.map((item) =>
-              markKnownRegisterEndpoints(item, country),
-            ),
+            evidence: pesticideEvidence,
             check: pesticideChecks[0] ?? null,
-            authorityContact: ministryEndpoint
-              ? { organization: ministryEndpoint.organization, url: ministryEndpoint.url }
-              : null,
+            parsedProducts,
+            authorityContact: regulatorEndpoint
+              ? { organization: regulatorEndpoint.organization, url: regulatorEndpoint.url }
+              : ministryEndpoint
+                ? { organization: ministryEndpoint.organization, url: ministryEndpoint.url }
+                : null,
           })
         : null;
 
@@ -301,8 +320,12 @@ export async function runCountryResearch(options: {
             ]
           : pesticideChecks.filter((item) => !item.verified).map((item) => item.farmerNote),
       staleWarnings,
-      failure: null,
-      farmerFallback: null,
+      failure: pesticideAnswer?.registerFound ? null : searchFailure,
+      farmerFallback: pesticideAnswer?.registerFound
+        ? null
+        : searchFailure
+          ? WEB_LOOKUP_FAILED_FARMER
+          : null,
       pesticideAnswer,
     };
   } catch (error) {
@@ -354,8 +377,13 @@ function extractPriceSnippet(text: string): string | null {
 function registerSearchHits(country: string | null): SearchHit[] {
   const retrievedAt = new Date().toISOString();
   return registerEndpointsForCountry(country)
-    .filter((item) => item.priority !== "international_agronomy")
-    .slice(0, 5)
+    .filter(
+      (item) =>
+        item.priority !== "international_agronomy" &&
+        item.priority !== "ministry" &&
+        item.priority !== "regional",
+    )
+    .slice(0, 6)
     .map((item) => ({
       url: item.url,
       title: item.title,
@@ -364,32 +392,6 @@ function registerSearchHits(country: string | null): SearchHit[] {
       retrievedAt,
       publishedAt: null,
     }));
-}
-
-function markKnownRegisterEndpoints(
-  evidence: ReturnType<typeof classifyRegulatoryEvidence>,
-  country: string | null,
-): ReturnType<typeof classifyRegulatoryEvidence> {
-  const match = registerEndpointsForCountry(country).find((item) => {
-    const left = item.url.replace(/\/+$/, "").toLowerCase();
-    const right = evidence.sourceUrl.replace(/\/+$/, "").toLowerCase();
-    return (
-      item.isRegisterDocument &&
-      item.country === country &&
-      (right === left || right.startsWith(`${left}/`) || right.includes(item.domain))
-    );
-  });
-  if (!match) return evidence;
-  return {
-    ...evidence,
-    sufficientForRegisterLocation: true,
-    evidenceType:
-      evidence.evidenceType === "regulator_homepage" || evidence.evidenceType === "ministry_homepage"
-        ? "regulator_portal"
-        : evidence.evidenceType,
-    regulatoryConfidence:
-      evidence.regulatoryConfidence === "insufficient" ? "supporting_official" : evidence.regulatoryConfidence,
-  };
 }
 
 async function enrichPesticideHitsWithPages(hits: SearchHit[]): Promise<SearchHit[]> {
@@ -401,7 +403,7 @@ async function enrichPesticideHitsWithPages(hits: SearchHit[]): Promise<SearchHi
     seen.add(key);
     unique.push(hit);
   }
-  const toFetch = unique.slice(0, 4);
+  const toFetch = unique.slice(0, 6);
   const fetched = await Promise.all(
     toFetch.map(async (hit) => {
       const page = await defaultPageFetcher(hit.url);
@@ -409,13 +411,15 @@ async function enrichPesticideHitsWithPages(hits: SearchHit[]): Promise<SearchHi
       return {
         ...hit,
         title: page.title || hit.title,
-        snippet: `${hit.snippet} ${page.text}`.slice(0, 8000),
+        snippet: page.text
+          ? `${hit.snippet} ${page.text}`.slice(0, 8000)
+          : hit.snippet,
         retrievedAt: page.retrievedAt || hit.retrievedAt,
         publishedAt: page.publishedAt ?? hit.publishedAt,
       } satisfies SearchHit;
     }),
   );
-  const remaining = unique.slice(4);
+  const remaining = unique.slice(6);
   return [...fetched, ...remaining];
 }
 

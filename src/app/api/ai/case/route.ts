@@ -30,6 +30,7 @@ import {
   logCasePersistenceError,
   logCasePersistenceStart,
   getCropCase,
+  persistenceDebugInfo,
 } from "@/lib/cases/store";
 import {
   FARMER_GENERIC_ERROR,
@@ -441,6 +442,7 @@ export async function POST(request: Request) {
     logCasePersistenceStart();
     let persistedCaseId: string | null = null;
     let persistenceFailed = false;
+    let persistenceDebug: ReturnType<typeof persistenceDebugInfo> | null = null;
     try {
       const persisted = await persistConversationTurn({
         identity,
@@ -459,6 +461,10 @@ export async function POST(request: Request) {
       persistedCaseId = null;
       const table =
         persistError instanceof CasePersistenceError ? persistError.table : "crop_cases";
+      persistenceDebug = persistenceDebugInfo(persistError, table);
+      console.error(
+        `CASE_PERSISTENCE_DEBUG host=${persistenceDebug.supabaseHost} mode=${persistenceDebug.persistenceMode} missing=${persistenceDebug.missingSupabaseEnv.join(",") || "none"}`,
+      );
       logCasePersistenceError(persistError, table);
       logOps("database_failure", {
         error: persistError instanceof Error ? persistError.message : String(persistError),
@@ -518,7 +524,12 @@ export async function POST(request: Request) {
       usage: imageGate.used,
       persistenceFailed,
       ...(includeDiagnostics
-        ? { model: result.model, diagnosticCode: result.diagnosticCode, correlationId }
+        ? {
+            model: result.model,
+            diagnosticCode: result.diagnosticCode,
+            correlationId,
+            ...(persistenceDebug ?? persistenceDebugInfo()),
+          }
         : {}),
     });
   } catch (error) {

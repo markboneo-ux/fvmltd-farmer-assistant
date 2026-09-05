@@ -79,7 +79,7 @@ export function hasPesticideRegisterData(options: {
 }): boolean {
   const blob = `${options.title} ${options.text}`.toLowerCase();
   const url = options.url.toLowerCase();
-  if (/\/cfdd\/pesticides\/search\/\d+/.test(url)) return true;
+  if (/\/cfdd\/pesticides\/search\/\d+/.test(url) && PRODUCT_DATA.test(blob)) return true;
   if (/\.pdf(\?|$)/i.test(url) && REGISTER_SIGNAL.test(blob) && PRODUCT_DATA.test(blob)) {
     return true;
   }
@@ -111,7 +111,10 @@ export function classifyEvidenceType(options: {
     return "official_register";
   }
 
-  if (/\/cfdd\/pesticides\/search\/\d+/.test(url) || (hasPesticideRegisterData(options) && /pesticide - /i.test(options.title))) {
+  if (
+    hasPesticideRegisterData(options) &&
+    (/\/cfdd\/pesticides\/search\/\d+/.test(url) || /pesticide - /i.test(options.title))
+  ) {
     return "product_listing";
   }
   if (/\.pdf(\?|$)/i.test(url) && REGISTER_SIGNAL.test(blob)) {
@@ -175,10 +178,7 @@ export function evidenceSupportsRegisterLocation(evidenceType: EvidenceType): bo
     evidenceType === "official_register" ||
     evidenceType === "official_register_pdf" ||
     evidenceType === "approved_product_list" ||
-    evidenceType === "product_listing" ||
-    evidenceType === "regulator_portal" ||
-    evidenceType === "official_publication_index" ||
-    evidenceType === "regulatory_notice"
+    evidenceType === "product_listing"
   );
 }
 

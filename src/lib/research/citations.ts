@@ -106,10 +106,34 @@ export function stripCitedSourceNames(
     );
     for (const name of names) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      next = next.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "").replace(/\s{2,}/g, " ");
+      const candidate = next
+        .replace(new RegExp(`\\b${escaped}\\b`, "gi"), "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/\s+([.,;:])/g, "$1")
+        .trim();
+      if (hasEmptyOrganizationSentence(candidate) && !hasEmptyOrganizationSentence(next)) {
+        continue;
+      }
+      next = candidate;
     }
   }
-  return next.replace(/\s+([.,;:])/g, "$1").trim();
+  return repairEmptyOrganizationSentences(next);
+}
+
+const EMPTY_ORG_VERB =
+  /\bthe\s+(maintains|provides|lists|publishes|issues|regulates|keeps)\b/gi;
+
+export function repairEmptyOrganizationSentences(text: string): string {
+  return text
+    .replace(EMPTY_ORG_VERB, "the official regulator $1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export function hasEmptyOrganizationSentence(text: string): boolean {
+  return /\bthe\s+(maintains|provides|lists|publishes|issues|regulates|keeps)\b/i.test(
+    text,
+  );
 }
 
 const SUPPORT_LABEL: Record<SourceCategory, string> = {

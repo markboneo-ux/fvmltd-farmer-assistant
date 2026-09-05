@@ -594,7 +594,8 @@ async function enrichWithRegionalTools(
   if (
     research?.pesticideAnswer &&
     (classifyPesticideQuery(facts.rawText).isBroadList ||
-      classifyPesticideQuery(facts.rawText).wantsFullList)
+      classifyPesticideQuery(facts.rawText).wantsFullList ||
+      isGenericRegulatoryRefusal(payload.preliminaryAssessment))
   ) {
     payload = {
       ...payload,

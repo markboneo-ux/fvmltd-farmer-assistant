@@ -39,3 +39,20 @@ https://fvmltd-farmer-assistant-nxmi-git-cursor-pesticide-*-fvmltd.vercel.app
 3. Confirm the git SHA equals the PR head commit (not the latest `main` SHA).
 
 Do **not** treat a `git-main` chat result as evidence that the pull-request code is working.
+
+## Preview persistence
+
+Preview and Production use the same Supabase project (`qzycpoivwwecooscnnju`). The red save warning is **not** a missing-env-var issue when these are set for Preview **and** Production:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+A core save writes `crop_cases` then `case_messages`. If those tables are missing, PostgREST returns:
+
+```
+PGRST205 Could not find the table 'public.crop_cases' in the schema cache
+```
+
+The GitHub “Supabase Preview” check is skipped, so branch databases are not created. Apply the additive `20260903*` / `20260904*` / `20260905*` migrations to that project before expecting Preview persistence to succeed.
+

@@ -6,6 +6,10 @@
 import type { PesticideQuery } from "./pesticide-query";
 import type { RegulatoryEvidence } from "./evidence";
 import type { PesticideCheck, PesticideFarmerAnswer, WebSourceCitation } from "./types";
+import {
+  formatListingSample,
+  type ParsedPesticideListing,
+} from "./cfdd-listing";
 
 export const PESTICIDE_FILTER_OPTIONS = [
   "By crop",
@@ -27,34 +31,55 @@ export function isGenericRegulatoryRefusal(text: string): boolean {
       text.trim(),
     );
   if (contactOnly) return true;
-  const short = text.trim().length < 280;
   const pointsAway =
-    /\b(contact|refer to) (the |your )?(ministry|extension( office| officer)?|authorities)\b/i.test(
+    /\b(contact|refer to|visit) (the |your )?(ministry|extension( office| officer)?|authorities|regulator|official website)\b/i.test(
       text,
     );
   const noHelp =
-    !/\b(crop|pest|active ingredient|trade name|register|i can (search|check|still))\b/i.test(
+    !/\b(crop|pest|active ingredient|trade name|i can (search|check|filter|still))\b/i.test(
       text,
     );
-  return short && pointsAway && noHelp;
+  if (pointsAway && noHelp) return true;
+  const short = text.trim().length < 280;
+  return short && pointsAway;
 }
 
 export function missingPublicRegisterMessage(country: string): string {
   return [
-    `I could not find a current public pesticide register for ${country} that I can verify online.`,
-    `I can still check a specific crop, pest, active ingredient, or product against available ${country} and regional sources.`,
+    `I could not complete a verified online lookup of a current public pesticide register for ${country}.`,
+    `I can still help if you name a crop, pest, active ingredient, or product, using available ${country} and regional sources.`,
   ].join(" ");
 }
 
-export function broadRegisterFilterMessage(country: string): string {
+function ttCfddDisplayName(country: string, organization?: string | null): string | null {
+  if (country === "Trinidad and Tobago") {
+    return "Chemistry, Food and Drugs Division (CFDD)";
+  }
+  return organization?.trim() || null;
+}
+
+export function lookupCouldNotBeCompletedMessage(country: string): string {
   return [
-    `${country} has a large register of approved pesticide products. I can search it for you. It is more useful to narrow it by crop, pest, active ingredient, or trade name.`,
-    "You can ask me:",
-    "- By crop",
-    "- By pest/disease",
-    "- By active ingredient",
-    "- By trade name",
-    "- Full official register",
+    `I could not complete the ${country} pesticide lookup from official listing pages.`,
+    "I will not guess a register from a ministry homepage. Name a crop, pest, active ingredient, or product and I will try again.",
+  ].join(" ");
+}
+
+export function broadRegisterFilterMessage(country: string, organization?: string | null): string {
+  const sourceName = ttCfddDisplayName(country, organization);
+  const opener = sourceName
+    ? `${country}'s ${sourceName} maintains the pesticide registration records available through its public listings.`
+    : `${country} has a large registered pesticide list maintained by the official regulator.`;
+  return [
+    opener,
+    `Rather than dump hundreds of products, I can filter it for you by crop, pest, active ingredient or trade name.`,
+    "For example, tell me:",
+    "• celery",
+    "• Cercospora",
+    "• azoxystrobin",
+    "• a product name",
+    `and I'll check the ${country} registration data.`,
+    "You can also ask for the full official listing link instead of a dump.",
   ].join("\n");
 }
 
@@ -63,7 +88,7 @@ export function buildPesticideFarmerAnswer(options: {
   query: PesticideQuery;
   evidence: RegulatoryEvidence[];
   check: PesticideCheck | null;
-  parsedProducts?: Array<{ tradeName: string | null; activeIngredient: string | null; status: string | null }>;
+  parsedProducts?: ParsedPesticideListing[];
   authorityContact?: { organization: string; url: string | null } | null;
 }): PesticideFarmerAnswer {
   const registerEvidence = options.evidence.filter((item) => item.sufficientForRegisterLocation);
@@ -73,17 +98,34 @@ export function buildPesticideFarmerAnswer(options: {
       item.country &&
       item.country.toLowerCase() === options.country.toLowerCase(),
   );
-  const registerFound = registerEvidence.length > 0;
-  const sources = toSources(localEvidence.length > 0 ? localEvidence : options.evidence);
+  const samples = (options.parsedProducts ?? []).filter(
+    (item) => item.registrationNumber || /registered/i.test(item.status || ""),
+  );
+  const registerFound = registerEvidence.length > 0 && (productEvidence.length > 0 || samples.length > 0);
+  const listingSources = toSources(
+    (localEvidence.length > 0 ? localEvidence : options.evidence).filter(
+      (item) => item.sufficientForRegisterLocation || item.sufficientForProductClaim,
+    ),
+  );
+  const sources = listingSources.length > 0 ? listingSources : [];
+  const organization =
+    productEvidence[0]?.organization ||
+    registerEvidence[0]?.organization ||
+    options.authorityContact?.organization ||
+    null;
   const verificationLine = registerFound
     ? `Checked against ${options.country} official sources.`
     : null;
 
   if (!registerFound) {
-    const lines = [missingPublicRegisterMessage(options.country)];
+    const lines = [
+      options.evidence.length > 0
+        ? lookupCouldNotBeCompletedMessage(options.country)
+        : missingPublicRegisterMessage(options.country),
+    ];
     if (options.authorityContact) {
       lines.push(
-        `The relevant official authority is ${options.authorityContact.organization}. That is secondary information — I can still look up a specific crop, pest, active ingredient, or product name.`,
+        `If you need to escalate after an online check fails, the official authority is ${options.authorityContact.organization}. That is secondary — I can still look up a specific crop, pest, active ingredient, or product name.`,
       );
     }
     return {
@@ -97,20 +139,21 @@ export function buildPesticideFarmerAnswer(options: {
   }
 
   if (options.query.isBroadList || options.query.kind === "broad_list" || options.query.kind === "full_register") {
-    const lines = [broadRegisterFilterMessage(options.country)];
-    const best = registerEvidence[0];
-    if (options.query.wantsFullList && best) {
+    const lines = [broadRegisterFilterMessage(options.country, organization)];
+    if (samples.length > 0) {
       lines.push(
-        `The verified official source is the ${best.organization} listing. I am not dumping hundreds of products here. Open the official register, or ask me to search by crop, pest, active ingredient, or trade name.`,
+        "Verified sample from the public listings (not the full register):",
+        ...samples.slice(0, 3).map((item) => `• ${formatListingSample(item)}`),
       );
-    } else {
+    }
+    if (options.query.wantsFullList) {
       lines.push(
-        `I checked the official ${options.country} pesticide listing. I have not claimed that any specific product is registered for a crop unless a country listing for that product was retrieved.`,
+        "I am not dumping hundreds of products here. Ask me to search by crop, pest, active ingredient, or trade name, or ask for the official listing link.",
       );
     }
     return {
       country: options.country,
-      farmerText: lines.join("\n\n"),
+      farmerText: lines.join("\n"),
       registerFound: true,
       offeredFilters: true,
       sources,

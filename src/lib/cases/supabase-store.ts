@@ -123,7 +123,11 @@ async function insertRow<T>(
     .select("*")
     .single<Record<string, unknown>>();
   if (error || !data) {
-    persistFail(table, error?.message ?? "insert failed");
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: string }).code || "")
+        : "";
+    persistFail(table, [code, error?.message ?? "insert failed"].filter(Boolean).join(" "));
   }
   return map(data);
 }

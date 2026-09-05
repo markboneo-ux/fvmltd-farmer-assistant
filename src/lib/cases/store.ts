@@ -34,6 +34,7 @@ export {
   logCasePersistenceError,
   logCasePersistenceStart,
   logCasePersistenceSupabase,
+  persistenceDebugInfo,
   resolveCasePersistenceMode,
   setCasePersistenceModeForTests,
 } from "./persistence";

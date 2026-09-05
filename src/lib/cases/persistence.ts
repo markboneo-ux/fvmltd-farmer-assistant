@@ -6,7 +6,7 @@
  * development / test fallback only.
  */
 
-import { readProcessEnv } from "@/lib/supabase/env";
+import { getMissingSupabaseEnv, readProcessEnv } from "@/lib/supabase/env";
 import { redactSecrets } from "@/lib/security/ops-log";
 
 export type CasePersistenceMode = "supabase" | "memory";
@@ -120,6 +120,26 @@ export function logCaseMessageSaved(caseId: string, role: string) {
 export function logCasePersistenceError(error: unknown, table?: string | null) {
   const tablePart = table ? ` table=${table}` : "";
   console.error(`CASE_PERSISTENCE_ERROR ${safePersistenceError(error)}${tablePart}`);
+}
+
+export function supabaseHostForLogs(): string {
+  const raw = readProcessEnv("NEXT_PUBLIC_SUPABASE_URL");
+  if (!raw) return "missing";
+  try {
+    return new URL(raw).host;
+  } catch {
+    return "invalid";
+  }
+}
+
+export function persistenceDebugInfo(error?: unknown, table?: string | null) {
+  return {
+    persistenceError: error ? safePersistenceError(error) : null,
+    persistenceMode: resolveCasePersistenceMode(),
+    persistenceTable: table ?? null,
+    supabaseHost: supabaseHostForLogs(),
+    missingSupabaseEnv: getMissingSupabaseEnv({ requireServiceRole: true }),
+  };
 }
 
 /**

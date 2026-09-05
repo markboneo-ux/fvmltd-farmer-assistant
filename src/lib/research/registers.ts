@@ -48,7 +48,31 @@ export const PESTICIDE_REGISTER_ENDPOINTS: RegisterEndpoint[] = [
     priority: "regulator",
     isRegisterDocument: false,
     notes:
-      "Official Ministry of Health CFDD portal for Trinidad and Tobago pesticide registration status. Individual registered products are listed under /cfdd/pesticides/search/{id}. The portal landing page is not the full product dump.",
+      "Official Ministry of Health CFDD portal for Trinidad and Tobago pesticide registration status. Individual registered products are listed under /cfdd/pesticides/search/{id}. The portal landing page is not product-listing evidence.",
+  },
+  {
+    country: "Trinidad and Tobago",
+    organization: TT_CFDD,
+    title: "CFDD pesticide listing: Malathion 57 EC",
+    url: "https://health.gov.tt/cfdd/pesticides/search/7514",
+    domain: "health.gov.tt",
+    sourceType: "regulator",
+    priority: "published_register",
+    isRegisterDocument: true,
+    notes:
+      "Public CFDD product page. Fetch this page and read the product fields before citing it.",
+  },
+  {
+    country: "Trinidad and Tobago",
+    organization: TT_CFDD,
+    title: "CFDD pesticide listing: Advance 10 EC",
+    url: "https://health.gov.tt/cfdd/pesticides/search/7462",
+    domain: "health.gov.tt",
+    sourceType: "regulator",
+    priority: "published_register",
+    isRegisterDocument: true,
+    notes:
+      "Public CFDD product page. Fetch this page and read the product fields before citing it.",
   },
   {
     country: "Trinidad and Tobago",
@@ -70,7 +94,7 @@ export const PESTICIDE_REGISTER_ENDPOINTS: RegisterEndpoint[] = [
     domain: "health.gov.tt",
     sourceType: "regulator",
     priority: "published_register",
-    isRegisterDocument: true,
+    isRegisterDocument: false,
     notes:
       "Official public notice of pesticide registration. Use as a regulatory notice, not as a complete current catalogue of every approved product.",
   },
