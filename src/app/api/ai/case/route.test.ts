@@ -3,6 +3,7 @@ import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import { emptyRegionalContext } from "@/lib/agronomy/case-schema";
 import { runAgronomicCase } from "@/lib/agronomy/runCase";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
+import { loadRegisteredFarmerContext } from "@/lib/beta/farmer-profile-context";
 import type { AppIdentity } from "@/lib/beta/identity";
 import { resetUsageStore } from "@/lib/beta/usage-store";
 import { createFakeCaseSupabase } from "@/lib/cases/fake-supabase";
@@ -33,6 +34,10 @@ vi.mock("@/lib/agronomy/runCase", async () => {
 
 vi.mock("@/lib/beta/auth-server", () => ({
   resolveIdentityFromRequest: vi.fn(),
+}));
+
+vi.mock("@/lib/beta/farmer-profile-context", () => ({
+  loadRegisteredFarmerContext: vi.fn(async () => null),
 }));
 
 const GUEST_ID = "11111111-1111-4111-8111-111111111111";
@@ -87,6 +92,7 @@ describe("POST /api/ai/case persistence", () => {
     setCaseStoreAdminClientForTests(fake);
     setCasePersistenceModeForTests("supabase");
     vi.mocked(resolveIdentityFromRequest).mockResolvedValue(guestIdentity());
+    vi.mocked(loadRegisteredFarmerContext).mockResolvedValue(null);
     vi.mocked(runAgronomicCase).mockResolvedValue({
       ok: true,
       case: casePayload(),
@@ -146,5 +152,43 @@ describe("POST /api/ai/case persistence", () => {
     expect(logs).toContain(`CASE_CREATED id=${body.caseId}`);
     expect(logs).toContain(`CASE_MESSAGE_SAVED case=${body.caseId} role=user`);
     expect(logs).toContain(`CASE_MESSAGE_SAVED case=${body.caseId} role=assistant`);
+  });
+
+  it("uses the registered farmer country on a new session without assuming Trinidad", async () => {
+    vi.mocked(resolveIdentityFromRequest).mockResolvedValue({
+      kind: "registered",
+      guestSessionId: GUEST_ID,
+      authUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      farmerProfileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      email: "farmer@example.com",
+      access: "free_registered",
+    });
+    vi.mocked(loadRegisteredFarmerContext).mockResolvedValue({
+      country: "Guyana",
+      district: "Berbice",
+      primaryCrops: ["celery"],
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "My celery is burning up.",
+          profile: { country: "", district: "" },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(loadRegisteredFarmerContext)).toHaveBeenCalledWith(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+    const call = vi.mocked(runAgronomicCase).mock.calls.at(-1)?.[0] as {
+      profile?: { country?: string | null; district?: string | null };
+    };
+    expect(call.profile?.country).toBe("Guyana");
+    expect(call.profile?.district).toBe("Berbice");
   });
 });

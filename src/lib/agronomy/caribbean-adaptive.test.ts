@@ -159,6 +159,23 @@ describe("adaptive Caribbean assistant", () => {
     ).not.toMatch(/country/);
   });
 
+  it("lets the farmer change country in the same case", () => {
+    const follow = resolveTurnContext({
+      message: "I moved the crop to Guyana.",
+      history: [
+        { role: "user", content: "My celery is burning up in Trinidad and Tobago." },
+      ],
+      profile: { country: "Trinidad and Tobago" },
+      activeCase: {
+        crop: "celery",
+        conversationIntent: "crop_problem",
+        country: "Trinidad and Tobago",
+      },
+    });
+    expect(follow.knownFacts.country).toBe("Guyana");
+    expect(follow.knownFacts.crop).toBe("celery");
+  });
+
   it("does not assume Trinidad for a guest with no country", async () => {
     const result = await runAgronomicCase({
       message: "My celery is burning up.",

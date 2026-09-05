@@ -110,6 +110,7 @@ export function extractSymptoms(text: string): string[] {
     [/\bsticky/, "honeydew"],
     [/\bsooty/, "sooty mould"],
     [/\bcurl/, "leaf curl"],
+    [/\b(burn|burning|burnt|scorch|tip\s*burn)/, "leaf burn"],
   ];
   for (const [pattern, label] of checks) {
     if (pattern.test(lower)) found.push(label);
@@ -128,7 +129,7 @@ export function extractStructuredFacts(
   const located = extractRegionAndCountry(text);
   const district =
     located.region || extractDistrict(text) || profile?.district?.trim() || null;
-  let country = profile?.country?.trim() || located.country || null;
+  const country = located.country || profile?.country?.trim() || null;
 
   const areaMatch = lower.match(/\b(\d+(?:\.\d+)?)\s*(acres?|hectares?|ha)\b/);
   const ageMatch =

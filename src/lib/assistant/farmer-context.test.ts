@@ -5,6 +5,7 @@ import {
   extractRegionAndCountry,
   farmerContextFromText,
   inferFarmerLevel,
+  mergeCaseProfileContext,
   shouldAskCountry,
   userLevelToFarmerLevel,
 } from "./farmer-context";
@@ -36,6 +37,37 @@ describe("farmer country and region", () => {
       region: "St George",
       country: "Grenada",
     });
+  });
+
+  it("uses the latest country mentioned, not the first", () => {
+    expect(
+      extractCountryName(
+        "I used to farm in Trinidad and Tobago. Now I am in Guyana.",
+      ),
+    ).toBe("Guyana");
+    expect(
+      extractRegionAndCountry("Central Trinidad last year, now Berbice, Guyana"),
+    ).toMatchObject({
+      region: "Berbice",
+      country: "Guyana",
+    });
+  });
+
+  it("fills gaps from a stored profile without letting it override speech", () => {
+    expect(
+      mergeCaseProfileContext({
+        client: { country: "", district: "" },
+        continuing: null,
+        registered: { country: "Guyana", district: "Berbice" },
+      }),
+    ).toEqual({ country: "Guyana", district: "Berbice" });
+    expect(
+      mergeCaseProfileContext({
+        client: { country: "Jamaica", district: "" },
+        continuing: { country: "Trinidad and Tobago", district: "Couva" },
+        registered: { country: "Guyana", district: "Berbice" },
+      }),
+    ).toEqual({ country: "Jamaica", district: "Couva" });
   });
 
   it("asks country only when local facts matter and country is unknown", () => {

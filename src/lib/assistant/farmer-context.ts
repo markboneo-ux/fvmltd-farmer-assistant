@@ -128,6 +128,51 @@ function valued<T>(value: T | null, confidence: ContextConfidence | null): Farme
   return { value, confidence: value ? confidence : null };
 }
 
+function allMatches(text: string, pattern: RegExp): Array<{ index: number; text: string }> {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const re = new RegExp(pattern.source, flags);
+  const matches: Array<{ index: number; text: string }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    matches.push({ index: match.index, text: match[0] });
+    if (match[0].length === 0) {
+      re.lastIndex += 1;
+    }
+  }
+  return matches;
+}
+
+export type CaseProfileFields = {
+  country?: string | null;
+  district?: string | null;
+};
+
+/**
+ * Client/session values win over the stored farmer profile.
+ * A spoken location in the message is applied later by extractors.
+ */
+export function mergeCaseProfileContext(parts: {
+  client?: CaseProfileFields | null;
+  continuing?: CaseProfileFields | null;
+  registered?: CaseProfileFields | null;
+}): { country: string | null; district: string | null } {
+  const pick = (...values: Array<string | null | undefined>) => {
+    for (const value of values) {
+      const trimmed = value?.trim();
+      if (trimmed) return trimmed;
+    }
+    return null;
+  };
+  return {
+    country: pick(parts.client?.country, parts.continuing?.country, parts.registered?.country),
+    district: pick(
+      parts.client?.district,
+      parts.continuing?.district,
+      parts.registered?.district,
+    ),
+  };
+}
+
 export function emptyFarmerContext(): FarmerContext {
   return {
     country: { value: null, confidence: null },
@@ -148,18 +193,7 @@ export function titleCaseRegion(value: string): string {
 }
 
 export function extractCountryName(text: string): string | null {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  for (const alias of COUNTRY_ALIASES) {
-    if (alias.pattern.test(trimmed)) return alias.name;
-  }
-  for (const option of COUNTRY_OPTIONS) {
-    if (option.startsWith("Other")) continue;
-    if (new RegExp(`\\b${option.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(trimmed)) {
-      return option;
-    }
-  }
-  return null;
+  return extractRegionAndCountry(text).country;
 }
 
 export function extractRegionAndCountry(text: string): {
@@ -167,21 +201,81 @@ export function extractRegionAndCountry(text: string): {
   country: string | null;
   countryFromRegion: boolean;
 } {
-  const country = extractCountryName(text);
-  for (const row of REGION_TO_COUNTRY) {
-    const match = text.match(row.pattern);
-    if (!match) continue;
-    let region = row.region;
-    if (/central|north|south|east|west/i.test(match[0]) && /trinidad/i.test(match[0])) {
-      region = titleCaseRegion(match[0]);
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { region: null, country: null, countryFromRegion: false };
+  }
+
+  type Hit = {
+    index: number;
+    country: string;
+    region: string | null;
+    fromRegion: boolean;
+  };
+  const hits: Hit[] = [];
+
+  for (const alias of COUNTRY_ALIASES) {
+    for (const match of allMatches(trimmed, alias.pattern)) {
+      hits.push({
+        index: match.index,
+        country: alias.name,
+        region: null,
+        fromRegion: false,
+      });
     }
+  }
+  for (const option of COUNTRY_OPTIONS) {
+    if (option.startsWith("Other")) continue;
+    const pattern = new RegExp(
+      `\\b${option.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+      "i",
+    );
+    for (const match of allMatches(trimmed, pattern)) {
+      hits.push({
+        index: match.index,
+        country: option,
+        region: null,
+        fromRegion: false,
+      });
+    }
+  }
+  for (const row of REGION_TO_COUNTRY) {
+    for (const match of allMatches(trimmed, row.pattern)) {
+      let region = row.region;
+      if (/central|north|south|east|west/i.test(match.text) && /trinidad/i.test(match.text)) {
+        region = titleCaseRegion(match.text);
+      }
+      hits.push({
+        index: match.index,
+        country: row.country,
+        region,
+        fromRegion: true,
+      });
+    }
+  }
+
+  if (hits.length === 0) {
+    return { region: null, country: null, countryFromRegion: false };
+  }
+
+  hits.sort((a, b) => a.index - b.index);
+  const last = hits[hits.length - 1];
+  if (!last.region) {
+    const regionForCountry = [...hits]
+      .reverse()
+      .find((hit) => hit.region && hit.country === last.country);
     return {
-      region,
-      country: country ?? row.country,
-      countryFromRegion: !country,
+      region: regionForCountry?.region ?? null,
+      country: last.country,
+      countryFromRegion: false,
     };
   }
-  return { region: null, country, countryFromRegion: false };
+
+  return {
+    region: last.region,
+    country: last.country,
+    countryFromRegion: last.fromRegion,
+  };
 }
 
 export function inferFarmerLevel(text: string): {

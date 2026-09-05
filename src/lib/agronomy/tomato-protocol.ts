@@ -192,11 +192,9 @@ export function extractKnownFacts(
             ? "leaf_spot"
             : null;
 
-  let country: string | null = profile?.country?.trim() || null;
-  let district: string | null = profile?.district?.trim() || null;
   const located = extractRegionAndCountry(rawText);
-  if (!country && located.country) country = located.country;
-  if (!district && located.region) district = located.region;
+  let country: string | null = located.country || profile?.country?.trim() || null;
+  let district: string | null = located.region || profile?.district?.trim() || null;
 
   let distributionHint: string | null = null;
   if (/\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower)) {

@@ -6,6 +6,8 @@ import {
   type CaseImageInput,
 } from "@/lib/agronomy/runCase";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
+import { loadRegisteredFarmerContext } from "@/lib/beta/farmer-profile-context";
+import { mergeCaseProfileContext } from "@/lib/assistant/farmer-context";
 import {
   CasePersistenceError,
   evaluateConversationGate,
@@ -268,12 +270,14 @@ export async function POST(request: Request) {
     });
 
     const continuingCase = incomingCaseId ? await getCropCase(incomingCaseId) : null;
-    if (continuingCase) {
-      profile = {
-        country: profile.country || continuingCase.country,
-        district: profile.district || continuingCase.district,
-      };
-    }
+    const registeredProfile = await loadRegisteredFarmerContext(identity.farmerProfileId);
+    profile = mergeCaseProfileContext({
+      client: profile,
+      continuing: continuingCase
+        ? { country: continuingCase.country, district: continuingCase.district }
+        : null,
+      registered: registeredProfile,
+    });
     let topicReset = false;
     if (
       continuingCase &&
