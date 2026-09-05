@@ -49,6 +49,7 @@ import {
   RATE_LIMITS,
 } from "@/lib/security/rate-limit";
 import { logOps } from "@/lib/security/ops-log";
+import { logStageFailure, newCorrelationId } from "@/lib/errors/correlation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -395,23 +396,74 @@ export async function POST(request: Request) {
     }
 
     const assistantText = farmerHistoryContent(result.case);
+    const correlationId = newCorrelationId();
     logCasePersistenceStart();
-    const persisted = await persistConversationTurn({
-      identity,
-      caseId: incomingCaseId,
-      userMessage: message,
-      assistantText,
-      payload: result.case,
-      imageCount: images.length,
-      profile,
-    });
-    await persistActiveCaseId(persisted.caseId);
-    if (images.length > 0) {
-      await persistPrivateCaseImages({
-        caseId: persisted.caseId,
+    let persistedCaseId: string | null = null;
+    let persistenceFailed = false;
+    try {
+      const persisted = await persistConversationTurn({
         identity,
-        images,
+        caseId: incomingCaseId,
+        userMessage: message,
+        assistantText,
+        payload: result.case,
+        imageCount: images.length,
+        profile,
+        correlationId,
       });
+      persistedCaseId = persisted.caseId;
+    } catch (persistError) {
+      // AI already succeeded. Never drop the answer for a save failure.
+      persistenceFailed = true;
+      persistedCaseId = null;
+      const table =
+        persistError instanceof CasePersistenceError ? persistError.table : "crop_cases";
+      logCasePersistenceError(persistError, table);
+      logOps("database_failure", {
+        error: persistError instanceof Error ? persistError.message : String(persistError),
+        table,
+        route: "ai/case",
+        stage: "persistence",
+        correlationId,
+      });
+      logStageFailure({
+        correlationId,
+        route: "ai/case",
+        stage: "persistence",
+        externalService: "supabase",
+        errorType: persistError instanceof Error ? persistError.name : "Error",
+        message: persistError instanceof Error ? persistError.message : String(persistError),
+        table,
+      });
+    }
+
+    if (persistedCaseId) {
+      await persistActiveCaseId(persistedCaseId);
+      if (images.length > 0) {
+        try {
+          await persistPrivateCaseImages({
+            caseId: persistedCaseId,
+            identity,
+            images,
+          });
+        } catch (photoError) {
+          logCasePersistenceError(photoError, "case_photos");
+          logStageFailure({
+            correlationId,
+            route: "ai/case",
+            stage: "photo_persist",
+            externalService: "supabase",
+            errorType: photoError instanceof Error ? photoError.name : "Error",
+            message: photoError instanceof Error ? photoError.message : String(photoError),
+            table: "case_photos",
+          });
+        }
+      }
+    }
+
+    let hint: string | null = null;
+    if (persistedCaseId) {
+      hint = await similarCaseHint(persistedCaseId);
     }
 
     return NextResponse.json({
@@ -419,12 +471,13 @@ export async function POST(request: Request) {
       responseId: result.responseId,
       requestCompleted: result.requestCompleted,
       questionsAsked: result.questionsAsked,
-      caseId: persisted.caseId,
-      similarCaseHint: await similarCaseHint(persisted.caseId),
+      caseId: persistedCaseId,
+      similarCaseHint: hint,
       access: identity.access,
       usage: imageGate.used,
+      persistenceFailed,
       ...(includeDiagnostics
-        ? { model: result.model, diagnosticCode: result.diagnosticCode }
+        ? { model: result.model, diagnosticCode: result.diagnosticCode, correlationId }
         : {}),
     });
   } catch (error) {

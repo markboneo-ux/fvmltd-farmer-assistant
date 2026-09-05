@@ -24,6 +24,7 @@ import {
   REGISTERED_LIMIT_HEADING,
   UPGRADE_COMING_SOON,
 } from "@/lib/beta/limits";
+import { farmerPersistenceBanner } from "@/lib/chat/persistence-warning";
 import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
 import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
 
@@ -62,6 +63,7 @@ type CaseApiPayload = {
   usage?: { messages?: number; cases?: number; imageAnalyses?: number };
   limitReached?: boolean;
   reason?: string;
+  persistenceFailed?: boolean;
 };
 
 type FarmerCaseChatProps = {
@@ -358,6 +360,11 @@ export function FarmerCaseChat({
             local: true,
           },
         ]);
+      }
+
+      const persistBanner = farmerPersistenceBanner(payload);
+      if (persistBanner) {
+        setError(persistBanner);
       }
     } catch (err) {
       clearQuickReplies();

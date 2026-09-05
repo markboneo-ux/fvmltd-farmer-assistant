@@ -164,3 +164,7 @@ export const UPGRADE_COMING_SOON = "Paid plans are coming soon.";
 
 export const FARMER_GENERIC_ERROR =
   "I'm having trouble with that right now. Please try again.";
+
+/** Shown only when the agronomic answer was produced but crop_cases / case_messages did not save. */
+export const FARMER_PERSISTENCE_DEGRADED =
+  "I have an answer for you. Saving this chat for later failed — you can copy it if you need it.";
