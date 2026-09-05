@@ -17,12 +17,14 @@ import {
   findActiveCropCaseForOwner,
   getCropCase,
   hasActiveCase,
+  casesForOwner,
   listCaseMessages,
   logCasePersistenceBackend,
   logCasePersistenceStart,
   updateCaseFromConversation,
 } from "@/lib/cases/store";
 import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
+import { persistCaseWebCitations } from "@/lib/research/persist";
 import { ingestCaseForTrends, relevantTrendHint } from "@/lib/trends/ingest";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
@@ -76,6 +78,23 @@ export async function loadPersistedConversationHistory(
     return history.slice(0, -1);
   }
   return history;
+}
+
+export async function lastKnownLocationForOwner(owner: {
+  userId?: string | null;
+  anonymousSessionId?: string | null;
+}): Promise<{ country: string | null; district: string | null }> {
+  const owned = await casesForOwner(owner);
+  const latest = [...owned].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const withCountry = latest.find((item) => item.country);
+  if (!withCountry) {
+    const withDistrict = latest.find((item) => item.district);
+    return { country: null, district: withDistrict?.district ?? null };
+  }
+  return {
+    country: withCountry.country,
+    district: withCountry.district,
+  };
 }
 
 export async function resolveContinuingCropCase(options: {
@@ -134,13 +153,22 @@ export async function persistConversationTurn(options: {
         activeIntent: options.payload?.intent ?? null,
       });
 
+  const knownLocation = await lastKnownLocationForOwner({
+    userId: identity.authUserId,
+    anonymousSessionId: identity.guestSessionId,
+  });
+  const profile = {
+    country: options.profile?.country || knownLocation.country,
+    district: options.profile?.district || knownLocation.district,
+  };
+
   if (!record) {
     record = await createCropCase({
       userId: identity.authUserId,
       anonymousSessionId: identity.guestSessionId,
       accessState: identity.access,
       message: options.userMessage,
-      profile: options.profile,
+      profile,
     });
     createdNewCase = true;
     recordUsageEvent({
@@ -149,28 +177,34 @@ export async function persistConversationTurn(options: {
       kind: "case",
       caseId: record.id,
     });
-  } else {
-    await updateCaseFromConversation(record.id, options.userMessage, {
-      productsRequested:
-        record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
-      verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
-        (item) => item.activeIngredientOrNutrient,
-      ),
-      humanEscalation: Boolean(options.payload?.escalationRecommended),
-      severity: options.payload?.severity ?? record.severity,
-      possibleCauses: options.payload?.checksToday ?? record.possibleCauses,
-      recommendedActions: options.payload?.safeActionsNow ?? record.recommendedActions,
-      caseStatus: options.payload?.escalationRecommended
-        ? "human_review"
-        : options.payload?.stage === "resolved"
-          ? "resolved"
-          : "in_progress",
-      conversationIntent: classified.intent,
-      questionCategory: classified.questionCategory,
-      calculationType: classified.calculationType,
-      caseType: classified.caseType,
-    });
   }
+
+  await updateCaseFromConversation(record.id, options.userMessage, {
+    country:
+      options.payload?.regionalContext?.country || profile.country || undefined,
+    district:
+      options.payload?.regionalContext?.district || profile.district || undefined,
+    productsRequested:
+      record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
+    verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
+      (item) => item.activeIngredientOrNutrient,
+    ),
+    humanEscalation: Boolean(options.payload?.escalationRecommended),
+    severity: options.payload?.severity ?? record.severity,
+    possibleCauses: options.payload?.checksToday ?? record.possibleCauses,
+    recommendedActions: options.payload?.safeActionsNow ?? record.recommendedActions,
+    caseStatus: options.payload?.escalationRecommended
+      ? "human_review"
+      : options.payload?.stage === "resolved"
+        ? "resolved"
+        : createdNewCase
+          ? "open"
+          : "in_progress",
+    conversationIntent: classified.intent,
+    questionCategory: classified.questionCategory,
+    calculationType: classified.calculationType,
+    caseType: classified.caseType,
+  });
 
   await appendCaseMessage({
     caseId: record.id,
@@ -230,6 +264,9 @@ export async function persistConversationTurn(options: {
   }
   if (latest) {
     await ingestCaseForTrends(latest);
+    if (options.payload?.webCitations?.length) {
+      await persistCaseWebCitations(latest.id, options.payload.webCitations);
+    }
   }
 
   return { caseId: record.id, createdNewCase };
@@ -238,6 +275,18 @@ export async function persistConversationTurn(options: {
 export async function similarCaseHint(caseId: string): Promise<string | null> {
   const record = await getCropCase(caseId);
   if (!record) return null;
+  if (record.caseType === "farm_business" || record.caseType === "calculation") {
+    return null;
+  }
+  if (
+    record.conversationIntent === "cashflow" ||
+    record.conversationIntent === "simple_math" ||
+    record.conversationIntent === "unit_conversion" ||
+    record.conversationIntent === "market" ||
+    record.conversationIntent === "pricing"
+  ) {
+    return null;
+  }
   const matches = (
     await getSimilarCases(
       {

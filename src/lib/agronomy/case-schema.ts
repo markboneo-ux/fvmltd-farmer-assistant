@@ -3,11 +3,9 @@
  * Used by OpenAI Structured Outputs and the farmer UI.
  */
 
-import type { WebSourceCitation } from "@/lib/research/types";
-import {
-  isQuestionType,
-  type QuestionType,
-} from "./question-types";
+import type { RankedCause } from "./causes";
+import type { PesticideCheck, WebCitation, WebSourceCitation } from "@/lib/research/types";
+import { isQuestionType, type QuestionType } from "./question-types";
 
 export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
 export type CaseMode = (typeof CASE_MODES)[number];
@@ -105,6 +103,12 @@ export type AgronomicCasePayload = {
   intent?: string;
   questionCategory?: string;
   calculationType?: string | null;
+  webCitations?: WebCitation[];
+  rankedCauses?: RankedCause[];
+  pesticideChecks?: PesticideCheck[];
+  researchUsed?: boolean;
+  researchFailed?: boolean;
+  askCountry?: boolean;
   weatherRelevance?: WeatherRelevanceLevel;
   weatherBrief?: string | null;
   webSources?: WebSourceCitation[];
@@ -294,6 +298,12 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     intent: asTrimmedString(data.intent) || undefined,
     questionCategory: asTrimmedString(data.questionCategory) || undefined,
     calculationType: asTrimmedString(data.calculationType) || null,
+    webCitations: [],
+    rankedCauses: [],
+    pesticideChecks: [],
+    researchUsed: false,
+    researchFailed: false,
+    askCountry: false,
     weatherRelevance: "omit",
     weatherBrief: null,
     webSources: [],

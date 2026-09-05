@@ -59,10 +59,12 @@ export function farmerHistoryContent(payload: AgronomicCasePayload): string {
         .join("; ")}`,
     );
   }
-  if ((payload.webSources ?? []).length > 0) {
-    lines.push(
-      `Sources: ${(payload.webSources ?? []).map((item) => item.name).join("; ")}`,
-    );
+  if ((payload.webSources ?? []).length > 0 || (payload.webCitations ?? []).length > 0) {
+    const names = [
+      ...(payload.webSources ?? []).map((item) => item.name),
+      ...(payload.webCitations ?? []).map((item) => item.sourceName),
+    ].filter(Boolean);
+    lines.push(`Sources: ${[...new Set(names)].join("; ")}`);
   }
 
   return lines.filter(Boolean).join("\n");

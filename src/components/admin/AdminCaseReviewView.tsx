@@ -21,6 +21,7 @@ type CaseDetail = {
     needsReview: boolean;
     usefulForTrend: boolean;
     excludeFromLearning: boolean;
+    includeInTrendLearning?: boolean;
     reviewNotes: string | null;
     agronomistReviewed: boolean;
     outcome: string | null;
@@ -57,8 +58,23 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
   }
 
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    async function loadCase() {
+      const response = await fetch(`/api/admin/cases/${caseId}`);
+      const payload = (await response.json()) as CaseDetail;
+      if (cancelled) return;
+      if (!response.ok) {
+        setError(payload.error || "Could not load case.");
+        return;
+      }
+      setError(null);
+      setData(payload);
+      setNotes(payload.case?.reviewNotes ?? "");
+    }
+    void loadCase();
+    return () => {
+      cancelled = true;
+    };
   }, [caseId]);
 
   async function mark(body: Record<string, unknown>) {
@@ -190,7 +206,15 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 type="button"
                 disabled={saving}
                 className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
-                onClick={() => void mark({ excludeFromLearning: true })}
+                onClick={() => void mark({ includeInTrendLearning: true, excludeFromLearning: false })}
+              >
+                Include in trend learning
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
+                onClick={() => void mark({ excludeFromLearning: true, includeInTrendLearning: false })}
               >
                 Exclude from learning
               </button>
@@ -199,7 +223,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
               Confirmed: {record.diagnosisConfirmed ? "yes" : "no"} · Incorrect:{" "}
               {record.diagnosisIncorrect ? "yes" : "no"} · Useful:{" "}
               {record.usefulForTrend ? "yes" : "no"} · Excluded:{" "}
-              {record.excludeFromLearning ? "yes" : "no"}
+              {record.excludeFromLearning || record.includeInTrendLearning === false ? "yes" : "no"}
             </p>
           </section>
         </>

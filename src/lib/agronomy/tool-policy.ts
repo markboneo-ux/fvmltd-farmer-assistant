@@ -25,6 +25,10 @@ export function shouldInvokeWeatherTool(
   facts: KnownFarmerFacts,
   intent?: IntentCategory | null,
 ): boolean {
+  const text = facts.rawText.toLowerCase();
+  if (/\bno spots?\b/.test(text) && /\byellow/.test(text) && !facts.asksAboutWeather) {
+    return false;
+  }
   return weatherToolFromRelevance({
     message: facts.rawText,
     facts,

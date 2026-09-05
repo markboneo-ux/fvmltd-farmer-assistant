@@ -4,6 +4,7 @@
 
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
+import { extractCountryFromText } from "@/lib/research/countries";
 import {
   isBusinessIntent,
   isCalculationIntent,
@@ -103,6 +104,9 @@ export type KnownFarmerFacts = {
   stuntedWholeField: boolean;
   asksForProducts: boolean;
   asksAboutWeather: boolean;
+  asksForMarket: boolean;
+  asksForPesticideRegistration: boolean;
+  asksForRegulation: boolean;
   rawText: string;
 };
 
@@ -179,11 +183,7 @@ export function extractKnownFacts(
 
   let country: string | null = profile?.country?.trim() || null;
   if (!country) {
-    if (/\btrinidad\b/.test(lower) || /\btobago\b/.test(lower)) {
-      country = "Trinidad and Tobago";
-    } else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
-    else if (/\bbarbados\b/.test(lower)) country = "Barbados";
-    else if (/\bguyana\b/.test(lower)) country = "Guyana";
+    country = extractCountryFromText(rawText);
   }
 
   let district: string | null = profile?.district?.trim() || null;
@@ -275,6 +275,18 @@ export function extractKnownFacts(
       /\b(weather|forecast|will it rain|is it (going to|gonna) rain|before i spray|spray tomorrow|humidity|humid weather|heat (wave|stress)|could this weather)\b/.test(
         lower,
       ) || /\bwhy am i suddenly seeing more\b/.test(lower),
+    asksForMarket:
+      /\b(market price|wholesale price|farmgate|namdevco|current price|what .{0,30}selling for)\b/.test(
+        lower,
+      ),
+    asksForPesticideRegistration:
+      /\b(registered|registration|approved (for|in)|pesticide register|is .{0,40} legal to (use|spray))\b/.test(
+        lower,
+      ),
+    asksForRegulation:
+      /\b(regulation|banned (pesticide|chemical)|restricted pesticide|import (permit|licence|license))\b/.test(
+        lower,
+      ),
     rawText,
   };
 }
@@ -339,6 +351,20 @@ export function countPriorAssistantQuestions(
   }).length;
 }
 
+const SPECIFIC_PHOTO_VIEW =
+  /\b(underside|root|stem base|whole plant|neighbouring|neighboring)\b/i;
+const GENERIC_PHOTO_ASK =
+  /\b(upload|send|take|attach)\b.{0,40}\b(photo|picture|image)\b/i;
+
+export function historyAlreadyRequestedPhoto(
+  history: Array<{ role: string; content: string }>,
+): boolean {
+  return history.some(
+    (item) =>
+      item.role === "assistant" && /\b(photo|picture)\b/i.test(item.content),
+  );
+}
+
 /**
  * Server-side rapid-triage + commercial safety net.
  */
@@ -350,6 +376,9 @@ export function applyCommercialSafetyGuards(
     knownFacts: KnownFarmerFacts;
     intent?: IntentCategory | null;
     askForCrop?: boolean;
+    askForCountry?: boolean;
+    photoAlreadyRequested?: boolean;
+    hasImages?: boolean;
   },
 ): AgronomicCasePayload {
   const mode = options.mode;
@@ -369,7 +398,8 @@ export function applyCommercialSafetyGuards(
 
   const skipDiagnosisWorkflow =
     isCalculationIntent((options.intent ?? "crop_problem") as IntentCategory) ||
-    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory);
+    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory) ||
+    options.intent === "market";
 
   if (skipDiagnosisWorkflow) {
     return {
@@ -463,13 +493,21 @@ export function applyCommercialSafetyGuards(
     nextQuestion = "";
   }
 
-  // Do not automatically ask country when already known, or first in Quick Help.
+  // Do not re-ask country when already known. Do ask when local facts require it.
   if (
     nextQuestion &&
     LOCATION_QUESTION.test(nextQuestion) &&
-    (options.knownFacts.country || mode === "quick_help")
+    options.knownFacts.country
   ) {
     nextQuestion = "";
+  }
+  if (
+    options.askForCountry &&
+    !options.knownFacts.country &&
+    !LOCATION_QUESTION.test(nextQuestion)
+  ) {
+    nextQuestion = "What country are you farming in?";
+    stage = isGuidanceStage(stage) ? stage : "assessment";
   }
 
   const questionsIncludingThis =
@@ -542,6 +580,27 @@ export function applyCommercialSafetyGuards(
     }
   }
 
+  const specificExtraView = SPECIFIC_PHOTO_VIEW.test(nextQuestion);
+  if (options.photoAlreadyRequested && !options.hasImages && !specificExtraView) {
+    photoRecommended = false;
+    if (GENERIC_PHOTO_ASK.test(nextQuestion)) {
+      nextQuestion = "";
+    }
+  }
+
+  if (mode === "quick_help" && isInterviewStage(stage) && !nextQuestion) {
+    const usefulAfterPhotoGuard =
+      hasUsefulGuidance({
+        ...payload,
+        preliminaryAssessment,
+        checksToday,
+        safeActionsNow,
+      }) || preliminaryAssessment.length > 80;
+    if (usefulAfterPhotoGuard) {
+      stage = options.knownFacts.suddenWilt ? "human_review" : "assessment";
+    }
+  }
+
   let questionType: QuestionType | "" = "";
   let questionId = "";
 
@@ -607,9 +666,6 @@ export function applyCommercialSafetyGuards(
     weatherRisks: payload.weatherRisks ?? [],
     verifiedInputOptions: payload.verifiedInputOptions ?? [],
     internalMissingInformation,
-    weatherRelevance: payload.weatherRelevance ?? "omit",
-    weatherBrief: payload.weatherBrief ?? null,
-    webSources: payload.webSources ?? [],
   };
 }
 

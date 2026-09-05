@@ -14,6 +14,7 @@ type ChatAssistantMessageProps = {
   onUploadPhoto?: () => void;
   quickRepliesDisabled?: boolean;
   showQuickReplies?: boolean;
+  similarCaseNote?: string;
 };
 
 function BulletList({ items }: { items: string[] }) {
@@ -36,6 +37,7 @@ export function ChatAssistantMessage({
   onUploadPhoto,
   quickRepliesDisabled = false,
   showQuickReplies = false,
+  similarCaseNote,
 }: ChatAssistantMessageProps) {
   if (!payload) {
     return <p className="whitespace-pre-wrap">{text}</p>;
@@ -54,7 +56,13 @@ export function ChatAssistantMessage({
           : null)
       : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
-  const sources = (payload.webSources ?? []).filter((item) => item.name.trim());
+  const sources = [
+    ...(payload.webSources ?? []).map((item) => ({ name: item.name, url: item.url })),
+    ...(payload.webCitations ?? []).map((item) => ({ name: item.sourceName, url: item.url })),
+  ].filter((item) => item.name.trim());
+  const uniqueSources = sources.filter(
+    (item, index) => sources.findIndex((other) => other.name === item.name && other.url === item.url) === index,
+  );
   const urgent = payload.escalationRecommended || payload.severity === "high";
 
   const replies = payload.quickReplies.filter(
@@ -79,14 +87,28 @@ export function ChatAssistantMessage({
         <div className="space-y-3">
           <section>
             <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-              What I think
+              Likely issue
             </h3>
             <p className="mt-1 whitespace-pre-wrap">{assessment}</p>
           </section>
+          {payload.rankedCauses && payload.rankedCauses.length > 0 ? (
+            <section>
+              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                Possible causes, ranked
+              </h3>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">
+                {payload.rankedCauses.slice(0, 5).map((cause) => (
+                  <li key={cause.category}>
+                    {cause.label}. More likely if {cause.increasesIf.toLowerCase()}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
           {payload.checksToday.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to check
+                What to check now
               </h3>
               <BulletList items={payload.checksToday} />
             </section>
@@ -94,7 +116,7 @@ export function ChatAssistantMessage({
           {payload.safeActionsNow.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to do next
+                What I would do next
               </h3>
               <BulletList items={payload.safeActionsNow} />
             </section>
@@ -120,20 +142,20 @@ export function ChatAssistantMessage({
             Weather
           </p>
           {payload.weatherBrief ? (
-            <p className="mt-1.5 text-sm text-ink">{payload.weatherBrief}</p>
-          ) : (
-            payload.weatherRisks.slice(0, 2).map((risk) => (
-              <div key={`${risk.diseaseOrPest}-${risk.generatedAt}`} className="mt-1.5">
-                <p className="text-sm font-medium text-ink">
-                  Conditions may favour {risk.diseaseOrPest.toLowerCase()} over the{" "}
-                  {risk.riskWindow}.
-                </p>
-                {risk.weatherDrivers[0] ? (
-                  <p className="mt-1 text-sm text-muted">{risk.weatherDrivers[0]}</p>
-                ) : null}
-              </div>
-            ))
-          )}
+            <p className="mt-1.5 text-sm">{payload.weatherBrief}</p>
+          ) : null}
+          {payload.weatherRisks.slice(0, 2).map((risk) => (
+            <div key={`${risk.diseaseOrPest}-${risk.generatedAt}`} className="mt-1.5">
+              <p className="text-sm font-medium text-ink">
+                Conditions may favour {risk.diseaseOrPest.toLowerCase()} over the{" "}
+                {risk.riskWindow}.
+              </p>
+              {risk.weatherDrivers[0] ? (
+                <p className="mt-1 text-sm text-muted">{risk.weatherDrivers[0]}</p>
+              ) : null}
+              <p className="mt-1 text-xs text-muted">{risk.disclaimer}</p>
+            </div>
+          ))}
         </div>
       ) : supportingNote ? (
         <p className="text-sm text-muted">{supportingNote}</p>
@@ -178,28 +200,36 @@ export function ChatAssistantMessage({
         </div>
       ) : null}
 
-      {sources.length > 0 ? (
+      {uniqueSources.length > 0 ? (
         <div className="text-sm">
-          <p className="font-medium text-ink">Sources</p>
-          <ul className="mt-1 space-y-0.5">
-            {sources.slice(0, 4).map((source) => (
-              <li key={`${source.name}-${source.url ?? ""}`}>
-                {source.url ? (
+          <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
+            Sources
+          </p>
+          <ul className="mt-1 space-y-1">
+            {uniqueSources.slice(0, 6).map((item) => (
+              <li key={`${item.name}-${item.url ?? ""}`}>
+                {item.url ? (
                   <a
-                    href={source.url}
+                    href={item.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-leaf underline-offset-2 hover:underline"
+                    className="text-canopy underline underline-offset-2"
                   >
-                    • {source.name}
+                    {item.name}
                   </a>
                 ) : (
-                  <span>• {source.name}</span>
+                  <span>{item.name}</span>
                 )}
               </li>
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {similarCaseNote ? (
+        <p className="text-xs text-muted">
+          Supporting note only — not the diagnosis: {similarCaseNote}
+        </p>
       ) : null}
 
       {showReplies ? (

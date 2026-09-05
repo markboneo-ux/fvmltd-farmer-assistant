@@ -75,6 +75,7 @@ export function cropCaseToRow(record: CropCaseRecord): Record<string, unknown> {
     diagnosis_confirmed: record.diagnosisConfirmed,
     diagnosis_incorrect: record.diagnosisIncorrect,
     needs_review: record.needsReview,
+    include_in_trend_learning: record.includeInTrendLearning,
     useful_for_trend: record.usefulForTrend,
     exclude_from_learning: record.excludeFromLearning,
     review_notes: record.reviewNotes,
@@ -131,6 +132,10 @@ export function rowToCropCase(row: Record<string, unknown>): CropCaseRecord {
     diagnosisConfirmed: asBoolean(row.diagnosis_confirmed),
     diagnosisIncorrect: asBoolean(row.diagnosis_incorrect),
     needsReview: asBoolean(row.needs_review),
+    includeInTrendLearning:
+      row.include_in_trend_learning == null
+        ? !asBoolean(row.exclude_from_learning)
+        : asBoolean(row.include_in_trend_learning, true),
     usefulForTrend: asBoolean(row.useful_for_trend),
     excludeFromLearning: asBoolean(row.exclude_from_learning),
     reviewNotes: asNullableString(row.review_notes),

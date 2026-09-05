@@ -59,6 +59,7 @@ export async function GET(
       needsReview: record.needsReview,
       usefulForTrend: record.usefulForTrend,
       excludeFromLearning: record.excludeFromLearning,
+      includeInTrendLearning: record.includeInTrendLearning,
       reviewNotes: record.reviewNotes,
       agronomistReviewed: record.agronomistReviewed,
       outcome: outcomes.at(-1)?.outcome ?? followups.at(-1)?.outcome ?? null,

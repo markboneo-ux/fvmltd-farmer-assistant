@@ -15,8 +15,12 @@ import {
 } from "@/lib/assistant/context";
 import {
   isCalculationIntent,
+  isDiagnosticIntent,
   type IntentCategory,
 } from "@/lib/assistant/intents";
+import { answerShapeForIntent } from "./answer-structure";
+import { rankDiagnosticCauses, rankedCausesForPrompt } from "./causes";
+import { rankTurnContext, relevanceInstructions } from "./relevance";
 import { getWeatherDiseaseRisk } from "@/lib/agronomy/get-weather-disease-risk";
 import {
   formatForecastTimingBrief,
@@ -28,10 +32,14 @@ import { getOpenAIEnvDiagnostics, getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
 import { getVerifiedRegionalInputs } from "@/lib/regional-inputs/get-verified-regional-inputs";
 import { NO_VERIFIED_PRODUCT_MESSAGE } from "@/lib/regional-inputs/types";
-import { shouldUseWebResearch } from "@/lib/research/should-research";
-import { formatResearchBriefForModel, runWebResearch } from "@/lib/research/run";
+import { recordWebResearchEvent } from "@/lib/research/events";
+import { persistWebResearchEvent } from "@/lib/research/persist";
+import { detectResearchTopics, countryPromptIfNeeded, shouldRunWebResearch } from "@/lib/research/policy";
+import { researchNotesForPrompt, runCountryResearch } from "@/lib/research/run";
 import { sanitizeUnverifiedPesticideClaims } from "@/lib/research/pesticides";
-import type { WebResearchResult } from "@/lib/research/types";
+import type { ResearchResult } from "@/lib/research/types";
+import { newCorrelationId, logStageFailure } from "@/lib/errors/correlation";
+import { logOps } from "@/lib/security/ops-log";
 import { getForecast } from "@/lib/weather/get-forecast";
 import {
   CASE_RESPONSE_JSON_SCHEMA,
@@ -54,6 +62,7 @@ import {
 import {
   applyCommercialSafetyGuards,
   countPriorAssistantQuestions,
+  historyAlreadyRequestedPhoto,
   type KnownFarmerFacts,
 } from "./tomato-protocol";
 
@@ -268,6 +277,8 @@ export type CaseActiveContext = {
   crop?: string | null;
   conversationIntent?: string | null;
   farmerProblemText?: string | null;
+  country?: string | null;
+  district?: string | null;
 };
 
 export function parseCaseRequestBody(body: unknown): {
@@ -384,6 +395,8 @@ function summarizeKnownFacts(
           crop: activeCase.crop ?? null,
           conversationIntent: activeCase.conversationIntent ?? null,
           farmerProblemText: activeCase.farmerProblemText ?? null,
+          country: activeCase.country ?? profile?.country ?? null,
+          district: activeCase.district ?? profile?.district ?? null,
         }
       : null,
   });
@@ -415,7 +428,11 @@ function knownFactsSummary(facts: KnownFarmerFacts): string {
     lines.push(`- distribution hint: ${facts.distributionHint}`);
   }
   if (facts.suddenWilt) lines.push("- sudden wilt reported: yes");
-  if (facts.stuntedWholeField) lines.push("- stunted across whole field: yes");
+  if (facts.asksForMarket) lines.push("- farmer asked about market prices");
+  if (facts.asksForPesticideRegistration) {
+    lines.push("- farmer asked about pesticide registration");
+  }
+  if (facts.asksForProducts) lines.push("- farmer asked about products");
   return lines.join("\n");
 }
 
@@ -442,16 +459,17 @@ function buildUserContent(
 async function enrichWithRegionalTools(
   payload: AgronomicCasePayload,
   facts: KnownFarmerFacts,
-  intent?: string | null,
-  research?: WebResearchResult | null,
+  research: ResearchResult | null,
+  intent?: IntentCategory | null,
 ): Promise<AgronomicCasePayload> {
-  const country = facts.country || "Trinidad and Tobago";
+  const country = facts.country || null;
   const crop = facts.crop;
   const issue = facts.suspectedIssue || "general crop problem";
-  const relevance = weatherRelevanceFor(facts, intent as IntentCategory | null);
+  const relevance = weatherRelevanceFor(facts, intent);
 
-  const shouldFetchWeather = shouldInvokeWeatherTool(facts, intent as IntentCategory | null);
-  const shouldFetchInputs = Boolean(crop) && shouldInvokeProductTool(facts);
+  const shouldFetchWeather = shouldInvokeWeatherTool(facts, intent);
+  const shouldFetchInputs =
+    Boolean(crop) && Boolean(country) && shouldInvokeProductTool(facts);
 
   let weatherRisks: WeatherRiskOption[] = [];
   let weatherDataAsOf: string | null = null;
@@ -460,10 +478,10 @@ async function enrichWithRegionalTools(
   let weatherBrief: string | null = payload.weatherBrief ?? null;
   const weatherRelevance: WeatherRelevanceLevel = relevance;
 
-  if (shouldFetchWeather) {
+  if (shouldFetchWeather && country) {
     try {
       const forecast = await getForecast({
-        country,
+        country: country || "Trinidad and Tobago",
         district: facts.district,
       });
       weatherDataAsOf = forecast.retrievedAt;
@@ -476,7 +494,7 @@ async function enrichWithRegionalTools(
           rainLikely: (forecast.daily[0]?.rainfallMm ?? 0) >= 2,
         });
       }
-      if (crop) {
+      if (crop && country) {
         const weather = await getWeatherDiseaseRisk({
           country,
           district: facts.district,
@@ -504,7 +522,7 @@ async function enrichWithRegionalTools(
     }
   }
 
-  if (shouldFetchInputs && crop) {
+  if (shouldFetchInputs && crop && country) {
     const inputs = getVerifiedRegionalInputs({
       country,
       crop,
@@ -545,7 +563,66 @@ async function enrichWithRegionalTools(
     }
   }
 
-  // Supporting weather must not take over "what to check".
+  if (research?.pesticideChecks.some((item) => !item.verified && item.farmerNote)) {
+    const note = research.pesticideChecks[0]?.farmerNote;
+    if (note && !payload.preliminaryAssessment.includes(note)) {
+      payload = {
+        ...payload,
+        preliminaryAssessment: `${payload.preliminaryAssessment}\n\n${note}`,
+      };
+    }
+  } else if (research?.pesticideChecks[0] && !research.pesticideChecks[0].verified) {
+    payload = {
+      ...payload,
+      preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
+        payload.preliminaryAssessment,
+        {
+          country: research.pesticideChecks[0].country || country || "your country",
+          activeIngredient: research.pesticideChecks[0].activeIngredient,
+          tradeName: research.pesticideChecks[0].tradeName,
+          verified: false,
+          status: "unverified",
+          localTradeNames: [],
+          sourceName: research.pesticideChecks[0].sourceName,
+          sourceUrl: research.pesticideChecks[0].sourceUrl,
+          lastVerifiedAt: null,
+          farmerMessage: research.pesticideChecks[0].farmerNote,
+        },
+      ),
+    };
+  }
+
+  const market = research?.marketNotes[0];
+  if (market?.priceText) {
+    const marketLine = `${market.sourceName} reports a ${market.priceType} figure of ${market.priceText}. This is not assumed to be a farmgate price.`;
+    if (!payload.preliminaryAssessment.includes(market.priceText)) {
+      payload = {
+        ...payload,
+        preliminaryAssessment: `${payload.preliminaryAssessment}\n\n${marketLine}`,
+      };
+    }
+  }
+
+  if (research?.farmerFallback && !payload.preliminaryAssessment.includes(research.farmerFallback)) {
+    payload = {
+      ...payload,
+      preliminaryAssessment: `${payload.preliminaryAssessment}\n\n${research.farmerFallback}`,
+    };
+  }
+
+  const citations = research?.citations ?? [];
+  if (citations.length > 0) {
+    const names = citations
+      .map((item) => `- ${item.sourceName} — ${item.title || item.sourceType}`)
+      .join("\n");
+    if (!/Sources:/i.test(payload.preliminaryAssessment)) {
+      payload = {
+        ...payload,
+        preliminaryAssessment: `${payload.preliminaryAssessment}\n\nSources:\n${names}`,
+      };
+    }
+  }
+
   if (relevance === "central" && weatherRisks.length > 0) {
     const top = weatherRisks[0];
     for (const check of top.recommendedChecks.slice(0, 2)) {
@@ -555,16 +632,13 @@ async function enrichWithRegionalTools(
     }
   }
 
-  const webSources = research?.citations ?? payload.webSources ?? [];
-  if (research?.pesticide && !research.pesticide.verified) {
-    payload = {
-      ...payload,
-      preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
-        payload.preliminaryAssessment,
-        research.pesticide,
-      ),
-    };
-  }
+  const webSources =
+    citations.length > 0
+      ? citations.map((item) => ({
+          name: item.sourceName,
+          url: item.url,
+        }))
+      : payload.webSources ?? [];
 
   return {
     ...payload,
@@ -576,6 +650,10 @@ async function enrichWithRegionalTools(
     }),
     weatherRisks: relevance === "omit" ? [] : weatherRisks,
     verifiedInputOptions,
+    webCitations: citations,
+    pesticideChecks: research?.pesticideChecks ?? [],
+    researchUsed: Boolean(research?.used),
+    researchFailed: Boolean(research?.failure),
     weatherRelevance,
     weatherBrief,
     webSources,
@@ -588,6 +666,8 @@ function assistantPayloadFromText(options: {
   questionCategory?: string;
   calculationType?: string | null;
   nextQuestion?: string;
+  country?: string | null;
+  district?: string | null;
 }): AgronomicCasePayload {
   return {
     mode: "quick_help",
@@ -603,13 +683,22 @@ function assistantPayloadFromText(options: {
     actionsToAvoid: [],
     photoRecommended: false,
     escalationRecommended: false,
-    regionalContext: emptyRegionalContext(),
+    regionalContext: emptyRegionalContext({
+      country: options.country ?? null,
+      district: options.district ?? null,
+    }),
     weatherRisks: [],
     verifiedInputOptions: [],
     internalMissingInformation: [],
     intent: options.intent,
     questionCategory: options.questionCategory ?? options.intent,
     calculationType: options.calculationType ?? null,
+    webCitations: [],
+    rankedCauses: [],
+    pesticideChecks: [],
+    researchUsed: false,
+    researchFailed: false,
+    askCountry: false,
     weatherRelevance: "omit",
     weatherBrief: null,
     webSources: [],
@@ -667,8 +756,6 @@ export async function runAgronomicCase(options: {
   ) => Promise<CaseModelResponse>;
   /** Skip live tool calls in unit tests when tools are asserted separately. */
   skipRegionalTools?: boolean;
-  /** Injected web research for tests. */
-  researchFn?: typeof runWebResearch;
 }): Promise<AgronomicCaseResult> {
   const model = getOpenAIModel();
   const message = options.message.trim();
@@ -722,6 +809,8 @@ export async function runAgronomicCase(options: {
           intent: classified.intent,
           questionCategory: classified.questionCategory,
           calculationType: calc.handled ? calc.calculationType : classified.calculationType,
+          country: knownFacts.country,
+          district: knownFacts.district,
         }),
         turn,
       );
@@ -748,6 +837,8 @@ export async function runAgronomicCase(options: {
         intent: "cashflow",
         questionCategory: "cashflow",
         nextQuestion: "",
+        country: knownFacts.country,
+        district: knownFacts.district,
       }),
       turn,
     );
@@ -761,6 +852,65 @@ export async function runAgronomicCase(options: {
       questionsAsked: cash.missingField ? 1 : 0,
     };
   }
+
+  const photoAlreadyRequested = historyAlreadyRequestedPhoto(history);
+
+  const researchTopics = detectResearchTopics({
+    message: effectiveMessage,
+    intent: classified.intent,
+    asksForProducts: knownFacts.asksForProducts,
+    asksAboutWeather: knownFacts.asksAboutWeather,
+  });
+  const askForCountry = Boolean(
+    countryPromptIfNeeded({
+      country: knownFacts.country,
+      topics: researchTopics,
+    }),
+  );
+  const rankedCauses = isDiagnosticIntent(classified.intent)
+    ? rankDiagnosticCauses(effectiveMessage)
+    : [];
+
+  let research: ResearchResult | null = null;
+  if (!options.skipRegionalTools && shouldRunWebResearch(researchTopics)) {
+    const correlationId = newCorrelationId();
+    research = await runCountryResearch({
+      message: effectiveMessage,
+      country: knownFacts.country,
+      crop: knownFacts.crop,
+      pestOrDisease: knownFacts.suspectedIssue,
+      topics: researchTopics,
+    });
+    const event = recordWebResearchEvent({
+      country: knownFacts.country,
+      topics: researchTopics,
+      used: research.used,
+      failed: Boolean(research.failure),
+      staleWarnings: research.staleWarnings.length,
+      sourceNames: research.citations.map((item) => item.sourceName),
+      correlationId,
+    });
+    void persistWebResearchEvent(event);
+    if (research.failure) {
+      logOps("web_research_failure", {
+        route: "agronomy/runCase",
+        stage: research.failure.stage,
+        externalService: "web_search",
+        errorType: research.failure.errorType,
+        correlationId,
+      });
+      logStageFailure({
+        correlationId,
+        route: "agronomy/runCase",
+        stage: research.failure.stage,
+        externalService: "web_search",
+        errorType: research.failure.errorType,
+        message: research.failure.message,
+      });
+    }
+  }
+
+  const weatherRelevance = weatherRelevanceFor(knownFacts, classified.intent);
 
   const createResponse: (
     params: Record<string, unknown>,
@@ -808,22 +958,22 @@ export async function runAgronomicCase(options: {
       askForCrop: turn.askForCrop,
     }),
     askForCrop: turn.askForCrop,
-  });
-
-  const weatherRelevance = weatherRelevanceFor(knownFacts, classified.intent);
-  let research: WebResearchResult | null = null;
-  if (!options.skipRegionalTools || options.researchFn) {
-    if (shouldUseWebResearch({ message: effectiveMessage, intent: classified.intent })) {
-      const run = options.researchFn ?? runWebResearch;
-      research = await run({
-        message: effectiveMessage,
-        country: knownFacts.country,
-        crop: knownFacts.crop,
-        issue: knownFacts.suspectedIssue,
+    answerShape: answerShapeForIntent(classified.intent),
+    relevance: relevanceInstructions(
+      rankTurnContext({
         intent: classified.intent,
-      });
-    }
-  }
+        message: effectiveMessage,
+        hasPhotos: images.length > 0,
+        country: knownFacts.country,
+        weatherAttached: weatherRelevance !== "omit",
+        webResearchUsed: Boolean(research?.used),
+      }),
+    ),
+    rankedCauses: rankedCausesForPrompt(rankedCauses),
+    researchNotes: research ? researchNotesForPrompt(research) : "",
+    askForCountry,
+    photoAlreadyRequested,
+  });
 
   const textFormat = {
     format: {
@@ -850,13 +1000,17 @@ export async function runAgronomicCase(options: {
       allowedCrops: turn.allowedCrops,
       askForCrop: turn.askForCrop,
     }),
+    rankedCausesForPrompt(rankedCauses),
+    research ? researchNotesForPrompt(research) : "",
+    askForCountry
+      ? 'Country is required for this local question. Ask: "What country are you farming in?" Give general agronomy only until the country is known. Do not use Trinidad information for another country.'
+      : "",
     weatherRelevance === "omit"
       ? "WEATHER GATE: Weather is not central to this question. Do not make weather or disease-pressure the main answer."
       : weatherRelevance === "supporting"
         ? "WEATHER GATE: Weather is supporting context only. Answer the farmer's crop question first. You may add one short weather sentence at the end."
         : "WEATHER GATE: Weather or spray/plant timing is central. Prioritise the forecast in your answer.",
-    research ? formatResearchBriefForModel(research) : "No web research was attached for this turn. Do not invent current prices, registrations, or programmes.",
-    "Never invent weather conditions or product availability. The server attaches verified weather or product results only when those tools are relevant to this turn.",
+    "Never invent weather, registrations, prices, or product availability. Weather, if attached later, is supporting context only — never the lead of the answer.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -867,7 +1021,7 @@ export async function runAgronomicCase(options: {
     model,
     instructions,
     temperature: 0.3,
-    max_output_tokens: 1800,
+    max_output_tokens: 2800,
     store: true,
     text: textFormat,
   };
@@ -937,21 +1091,39 @@ export async function runAgronomicCase(options: {
           knownFacts,
           intent: classified.intent,
           askForCrop: turn.askForCrop,
+          askForCountry,
+          photoAlreadyRequested,
+          hasImages: images.length > 0,
         },
       );
       parsed = attachIntent(parsed, turn);
+      parsed = {
+        ...parsed,
+        rankedCauses,
+        askCountry: askForCountry,
+        weatherRelevance,
+      };
 
-      const allowWeather = shouldInvokeWeatherTool(knownFacts, classified.intent);
-      const allowProducts = Boolean(knownFacts.crop) && shouldInvokeProductTool(knownFacts);
       const allowTools =
-        !options.skipRegionalTools && (allowWeather || allowProducts || Boolean(research));
+        !options.skipRegionalTools &&
+        (Boolean(knownFacts.crop) ||
+          Boolean(research?.used) ||
+          weatherRelevance !== "omit" ||
+          knownFacts.asksAboutWeather) &&
+        (isDiagnosticIntent(classified.intent) ||
+          classified.intent === "market" ||
+          knownFacts.asksForProducts ||
+          knownFacts.asksForPesticideRegistration ||
+          knownFacts.asksForMarket ||
+          knownFacts.asksAboutWeather ||
+          weatherRelevance !== "omit");
 
-      if (allowTools) {
+      if (allowTools || research?.used) {
         parsed = await enrichWithRegionalTools(
           parsed,
           knownFacts,
-          classified.intent,
           research,
+          classified.intent,
         );
       } else {
         parsed = {
@@ -961,18 +1133,8 @@ export async function runAgronomicCase(options: {
             district: knownFacts.district,
           }),
           weatherRelevance,
-          weatherBrief: null,
-          webSources: research?.citations ?? [],
+          weatherBrief: parsed.weatherBrief ?? null,
         };
-        if (research?.pesticide && !research.pesticide.verified) {
-          parsed = {
-            ...parsed,
-            preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
-              parsed.preliminaryAssessment,
-              research.pesticide,
-            ),
-          };
-        }
       }
     } catch (parseError) {
       logReason("OPENAI_REQUEST_FAILED", {

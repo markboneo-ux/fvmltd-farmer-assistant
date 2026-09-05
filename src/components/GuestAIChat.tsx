@@ -13,7 +13,7 @@ export function GuestAIChat() {
       showModeToggle={false}
       showDiagnostics={false}
       showTestPrompts={false}
-      defaultCountry="Trinidad and Tobago"
+      defaultCountry=""
       title={PRODUCT_NAME}
       subtitle={PRODUCT_SUBTITLE}
     />

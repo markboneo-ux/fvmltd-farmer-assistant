@@ -1,4 +1,4 @@
-import type { ResearchDocument, TrustedSource } from "./types";
+import type { CatalogTrustedSource, ResearchDocument } from "./types";
 import { domainFromUrl, isTrustedDomain } from "./trusted-sources";
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -23,7 +23,7 @@ function titleFromHtml(html: string): string {
 }
 
 export async function fetchTrustedDocument(
-  source: TrustedSource,
+  source: CatalogTrustedSource,
   options?: { fetchFn?: FetchFn; timeoutMs?: number },
 ): Promise<ResearchDocument> {
   const fetchFn = options?.fetchFn ?? fetch;
@@ -120,7 +120,7 @@ export async function optionalWebSearch(options: {
   }
 }
 
-export function searchHitToDocument(hit: SearchHit, source: TrustedSource): ResearchDocument {
+export function searchHitToDocument(hit: SearchHit, source: CatalogTrustedSource): ResearchDocument {
   return {
     source,
     url: hit.url,
