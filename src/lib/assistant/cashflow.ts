@@ -18,9 +18,11 @@ export type CashflowDraft = {
   chemicalCost: number | null;
   irrigationCost: number | null;
   transportCost: number | null;
+  utilitiesCost: number | null;
   otherCost: number | null;
   loanRepayment: number | null;
   otherIncome: number | null;
+  monthlyIncome: number | null;
 };
 
 export type CashflowTurn = {
@@ -43,9 +45,11 @@ const EMPTY_DRAFT: CashflowDraft = {
   chemicalCost: null,
   irrigationCost: null,
   transportCost: null,
+  utilitiesCost: null,
   otherCost: null,
   loanRepayment: null,
   otherIncome: null,
+  monthlyIncome: null,
 };
 
 function parseNumber(raw: string | undefined): number | null {
@@ -147,8 +151,10 @@ export function extractCashflowDraft(
   labelledCost(/chemical|pesticide|spray/, "chemicalCost");
   labelledCost(/irrigation|water/, "irrigationCost");
   labelledCost(/transport|trucking|delivery/, "transportCost");
+  labelledCost(/utilit(y|ies)|electricity|fuel/, "utilitiesCost");
   labelledCost(/loan (?:repayment|payment)/, "loanRepayment");
   labelledCost(/other income/, "otherIncome");
+  labelledCost(/monthly income|cash in/, "monthlyIncome");
 
   if (/\bother (cost|expense)/i.test(lower)) {
     const match = combined.match(
@@ -254,6 +260,7 @@ export function directCost(draft: CashflowDraft): number {
     (draft.chemicalCost ?? 0) +
     (draft.irrigationCost ?? 0) +
     (draft.transportCost ?? 0) +
+    (draft.utilitiesCost ?? 0) +
     (draft.otherCost ?? 0)
   );
 }
@@ -345,6 +352,9 @@ export function buildCashflowTurn(options: {
       parts.push(`We are working on ${draft.crop}.`);
     }
   } else {
+    parts.push(
+      "Bank-friendly summary (figures you supplied only; labelled assumptions are noted below).",
+    );
     const cropBit = draft.crop ? ` for ${draft.crop}` : "";
     const areaBit = draft.acres != null ? ` on ${formatQty(draft.acres)} acres` : "";
     const yieldBit =
@@ -366,8 +376,10 @@ export function buildCashflowTurn(options: {
           ? costs / draft.sellingPrice
           : null;
       parts.push(
-        `Direct costs so far: ${formatMoney(costs)}. Gross margin: ${formatMoney(margin)}.`,
+        `Direct costs so far (labour, inputs, transport, utilities where given): ${formatMoney(costs)}. Gross margin: ${formatMoney(margin)}.`,
       );
+      const net = margin - (draft.loanRepayment ?? 0);
+      parts.push(`Net cash after loan repayment (if given): ${formatMoney(net)}.`);
       if (breakEven != null) {
         parts.push(
           `Break-even is about ${formatQty(Math.ceil(breakEven))}${draft.yieldUnit ? ` ${draft.yieldUnit}` : ""} at the price you gave.`,

@@ -1,13 +1,17 @@
-import { FARMER_GENERIC_ERROR } from "./limits";
+import { FARMER_GENERIC_ERROR, FARMER_WEB_LOOKUP_FAILED } from "./limits";
 
 const TECHNICAL =
-  /openai|api[_ ]?key|supabase|service.?role|diagnostic|model|endpoint|quota|billing|json|stack|sql|database|rls/i;
+  /openai|api[_ ]?key|supabase|service.?role|diagnostic|model|endpoint|quota|billing|json|stack|sql|database|rls|correlation/i;
 
-export function farmerFacingError(error: string | null | undefined): string {
+export function farmerFacingError(
+  error: string | null | undefined,
+  options?: { webLookupFailed?: boolean },
+): string {
+  if (options?.webLookupFailed) return FARMER_WEB_LOOKUP_FAILED;
   const text = (error ?? "").trim();
   if (!text) return FARMER_GENERIC_ERROR;
   if (TECHNICAL.test(text)) return FARMER_GENERIC_ERROR;
-  if (text.length > 180) return FARMER_GENERIC_ERROR;
+  if (text.length > 220) return FARMER_GENERIC_ERROR;
   return text;
 }
 

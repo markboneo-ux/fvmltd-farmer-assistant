@@ -9,6 +9,7 @@ import {
 } from "@/lib/cases/store";
 import type { CropCaseRecord, TrendClass } from "@/lib/cases/types";
 import { researchUsageStats } from "@/lib/research/log";
+import { loadWebResearchDashboardStats } from "@/lib/research/persist";
 import { canExposeTrend } from "@/lib/trends/engine";
 import { listCaseTrends } from "@/lib/trends/store";
 import { trendCountryKey } from "@/lib/trends/types";
@@ -275,6 +276,31 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     (item) => item.caseType && item.caseType !== "crop_problem",
   );
   const web = researchUsageStats();
+  const persistedWeb = await loadWebResearchDashboardStats();
+  const startOfToday = `${today}T00:00:00.000Z`;
+  const usageMessageEvents = usage.filter((event) => event.kind === "message");
+  const messagesToday = usageMessageEvents.filter(
+    (event) => event.createdAt >= startOfToday,
+  ).length;
+  const messagesWeek = usageMessageEvents.filter(
+    (event) => event.createdAt >= weekAgo,
+  ).length;
+  const daysByUser = new Map<string, Set<string>>();
+  for (const event of usage) {
+    const key = event.authUserId || event.guestSessionId;
+    if (!key) continue;
+    const day = event.createdAt.slice(0, 10);
+    const set = daysByUser.get(key) ?? new Set<string>();
+    set.add(day);
+    daysByUser.set(key, set);
+  }
+  let returningUsers = 0;
+  for (const days of daysByUser.values()) {
+    if (days.size > 1) returningUsers += 1;
+  }
+  const resolved = allCases.filter(
+    (item) => item.caseStatus === "resolved" || item.caseStatus === "closed",
+  ).length;
 
   return {
     users: {
@@ -284,12 +310,18 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       active: uniqueUsers,
       activeToday: activeToday.size,
       activeWeek: activeWeek.size,
+      returningUsers,
+      uniqueGuestSessions: guests.size,
     },
     activity: {
       messages,
+      messagesToday,
+      messagesThisWeek: messagesWeek,
+      totalMessages: messages,
       imageAnalyses,
-      cases: allCases.length,
       photosUploaded: allPhotos.length,
+      cases: allCases.length,
+      totalCropCases: allCases.length,
       averageMessagesPerUser,
       guestCases,
       registeredCases,
@@ -304,6 +336,29 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       activeUsersToday: activeToday.size,
       activeUsersThisWeek: activeWeek.size,
       averageMessagesPerUser,
+      returningUsers,
+    },
+    overview: {
+      messagesToday,
+      messagesThisWeek: messagesWeek,
+      totalMessages: messages,
+      totalCropCases: allCases.length,
+      uniqueGuestSessions: guests.size,
+      registeredUsers: registered.size,
+      returningUsers,
+      photosUploaded: allPhotos.length,
+    },
+    web: {
+      answersThatUsedWebResearch: Math.max(
+        persistedWeb.answersThatUsedWebResearch,
+        web.answersUsingWeb,
+      ),
+      sourceFailures: Math.max(persistedWeb.sourceFailures, web.sourceFailures.reduce((sum, row) => sum + row.count, 0)),
+      staleSourceWarnings: Math.max(
+        persistedWeb.staleSourceWarnings,
+        web.outdatedSourceAlerts.reduce((sum, row) => sum + row.count, 0),
+      ),
+      topSources: persistedWeb.topSources.length > 0 ? persistedWeb.topSources : web.mostUsedSources,
     },
     questionTypes: topEntries(byQuestionType, 12),
     usage: {
@@ -378,6 +433,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       ),
       casesByType: topEntries(byCaseType),
       casesByFarmerLevel: topEntries(byFarmerLevel),
+      resolvedCount: resolved,
       emergingTrends: trends.map((item) => ({
         label: [item.crop, item.country || "Unknown", item.region, item.symptomCluster]
           .filter(Boolean)
@@ -391,6 +447,18 @@ export async function buildInsights(filters: InsightsFilters = {}) {
         confidence: item.confidenceScore,
         reviewed: item.staffReviewed,
         uniqueFarmers: item.uniqueSessionCount,
+      })),
+      trendRows: trends.map((item) => ({
+        emergingIssue: item.suspectedIssue || item.symptomCluster,
+        crop: item.crop,
+        country: item.country,
+        region: item.region,
+        uniqueUsers: item.uniqueSessionCount,
+        caseCount: item.caseCount,
+        firstSeen: item.firstSeenAt,
+        lastSeen: item.lastSeenAt,
+        confidence: item.confidenceScore,
+        reviewStatus: item.trendStatus,
       })),
       nonDiagnosticCaseCount: nonDiagnostic.length,
     },

@@ -7,6 +7,7 @@ import {
   inferProductionSystem,
   userLevelToFarmerLevel,
 } from "@/lib/assistant/farmer-context";
+import { extractCountryFromText } from "@/lib/research/countries";
 import type { UserLevel } from "@/lib/beta/identity";
 import type { HomeOrCommercial, StructuredCaseFacts } from "./types";
 
@@ -113,6 +114,7 @@ export function extractSymptoms(text: string): string[] {
     [/\b(burn|burning|burnt|scorch|tip\s*burn)/, "leaf burn"],
   ];
   for (const [pattern, label] of checks) {
+    if (label === "leaf spot" && /\bno spots?\b/.test(lower)) continue;
     if (pattern.test(lower)) found.push(label);
   }
   return found;
@@ -129,7 +131,11 @@ export function extractStructuredFacts(
   const located = extractRegionAndCountry(text);
   const district =
     located.region || extractDistrict(text) || profile?.district?.trim() || null;
-  const country = located.country || profile?.country?.trim() || null;
+  const country =
+    located.country ||
+    extractCountryFromText(text) ||
+    profile?.country?.trim() ||
+    null;
 
   const areaMatch = lower.match(/\b(\d+(?:\.\d+)?)\s*(acres?|hectares?|ha)\b/);
   const ageMatch =

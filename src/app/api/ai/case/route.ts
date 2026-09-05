@@ -12,13 +12,19 @@ import {
   CasePersistenceError,
   evaluateConversationGate,
   loadPersistedConversationHistory,
+  lastKnownLocationForOwner,
   persistConversationTurn,
   resolveContinuingCropCase,
   similarCaseHint,
 } from "@/lib/beta/conversation";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import { persistActiveCaseId, readActiveCaseId } from "@/lib/beta/session";
-import { shouldStartNewCase } from "@/lib/assistant/intents";
+import {
+  classifyFarmerIntent,
+  isBusinessIntent,
+  isCalculationIntent,
+  shouldStartNewCase,
+} from "@/lib/assistant/intents";
 import {
   logCasePersistenceBackend,
   logCasePersistenceError,
@@ -137,6 +143,7 @@ function jsonError(
 export async function POST(request: Request) {
   await connection();
   logCasePersistenceBackend();
+  const correlationId = newCorrelationId();
 
   const apiKey = process.env.OPENAI_API_KEY;
   const model = getOpenAIModel();
@@ -358,6 +365,34 @@ export async function POST(request: Request) {
       }
     }
 
+    if (!profile.country || !profile.district) {
+      const turnIntent = classifyFarmerIntent(message).intent;
+      const inheritLastKnownCountry =
+        !topicReset ||
+        isBusinessIntent(turnIntent) ||
+        isCalculationIntent(turnIntent);
+      // Same-guest empty profiles still inherit last-known country for
+      // continuation and business follow-ups. A crop/topic switch must not
+      // reuse the previous crop case's country.
+      if (inheritLastKnownCountry) {
+        const known = await lastKnownLocationForOwner({
+          userId: identity.authUserId,
+          anonymousSessionId: identity.guestSessionId,
+        });
+        const country = profile.country || known.country;
+        const district = profile.district || known.district;
+        profile = {
+          ...profile,
+          country,
+          district,
+          locationConfidence:
+            profile.country || !country
+              ? profile.locationConfidence
+              : "conversation_inferred",
+        };
+      }
+    }
+
     const result = await runAgronomicCase({
       message,
       history,
@@ -380,7 +415,14 @@ export async function POST(request: Request) {
     });
 
     if (!result.ok) {
-      logOps("openai_failure", { diagnosticCode: result.diagnosticCode });
+      logOps("openai_failure", {
+        diagnosticCode: result.diagnosticCode,
+        route: "ai/case",
+        stage: "openai",
+        externalService: "openai",
+        errorType: result.diagnosticCode,
+        correlationId,
+      });
       return NextResponse.json(
         {
           case: null,
@@ -396,7 +438,6 @@ export async function POST(request: Request) {
     }
 
     const assistantText = farmerHistoryContent(result.case);
-    const correlationId = newCorrelationId();
     logCasePersistenceStart();
     let persistedCaseId: string | null = null;
     let persistenceFailed = false;
@@ -502,6 +543,9 @@ export async function POST(request: Request) {
     }
     logOps("openai_failure", {
       error: error instanceof Error ? error.message : String(error),
+      route: "ai/case",
+      stage: "unhandled",
+      correlationId,
     });
     const messageText = error instanceof Error ? error.message : String(error);
     const farmerError =

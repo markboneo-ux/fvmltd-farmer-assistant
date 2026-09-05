@@ -90,6 +90,7 @@ export type CropCaseRecord = {
   diagnosisConfirmed: boolean;
   diagnosisIncorrect: boolean;
   needsReview: boolean;
+  includeInTrendLearning: boolean;
   usefulForTrend: boolean;
   excludeFromLearning: boolean;
   reviewNotes: string | null;

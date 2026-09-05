@@ -139,7 +139,10 @@ export function resolveTurnContext(options: {
       ? `${userHistoryText(history)}\n${options.message}`
       : options.message;
 
-  let knownFacts = extractKnownFacts(factSource, options.profile);
+  let knownFacts = extractKnownFacts(factSource, {
+    country: options.profile?.country || options.activeCase?.country || null,
+    district: options.profile?.district || options.activeCase?.district || null,
+  });
   knownFacts = {
     ...knownFacts,
     crop: crop?.toLowerCase() ?? null,
@@ -147,7 +150,15 @@ export function resolveTurnContext(options: {
   };
 
   if (currentCrop && historyCrop && currentCrop !== historyCrop) {
-    knownFacts = extractKnownFacts(options.message, options.profile);
+    knownFacts = extractKnownFacts(options.message, {
+      country: options.profile?.country || options.activeCase?.country || null,
+      district: options.profile?.district || options.activeCase?.district || null,
+    });
+    knownFacts = {
+      ...knownFacts,
+      crop: currentCrop,
+      rawText: options.message,
+    };
   }
 
   const stableFacts = extractKnownFacts(userHistoryText(history), options.profile);

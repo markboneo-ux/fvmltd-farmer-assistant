@@ -4,6 +4,7 @@ import { requireStaffApi } from "@/lib/staff/auth";
 import type { InsightsFilters } from "@/lib/admin/insights";
 import { CasePersistenceError } from "@/lib/cases/store";
 import { logOps } from "@/lib/security/ops-log";
+import { upsertTrustedSources } from "@/lib/research/persist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,7 @@ export async function GET(request: Request) {
   };
 
   try {
+    void upsertTrustedSources();
     return NextResponse.json({
       insights: await buildInsights(filters),
       trends: await detectTrends(filters),

@@ -20,6 +20,7 @@ import {
 import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 import { getMainWebsiteUrl, MAIN_WEBSITE_LABEL } from "@/lib/config/urls";
 import {
+  FARMER_GENERIC_ERROR,
   GUEST_LIMIT_MESSAGE,
   REGISTERED_LIMIT_HEADING,
   UPGRADE_COMING_SOON,
@@ -47,6 +48,7 @@ type ChatMessage = {
   diagnosticCode?: string;
   questionsAsked?: number;
   local?: boolean;
+  similarCaseNote?: string;
 };
 
 type CaseApiPayload = {
@@ -94,7 +96,7 @@ export function FarmerCaseChat({
   showModeToggle = false,
   showDiagnostics = false,
   showTestPrompts = false,
-  defaultCountry = null,
+  defaultCountry = "",
   defaultDistrict = null,
   title = PRODUCT_NAME,
   subtitle = PRODUCT_SUBTITLE,
@@ -118,6 +120,10 @@ export function FarmerCaseChat({
   const [questionsAsked, setQuestionsAsked] = useState<number | null>(null);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [caseId, setCaseId] = useState<string | null>(null);
+  const [sessionCountry, setSessionCountry] = useState(defaultCountry);
+  const [sessionDistrict, setSessionDistrict] = useState<string | null>(
+    defaultDistrict,
+  );
   const [access, setAccess] = useState<string>("guest");
   const [limitBanner, setLimitBanner] = useState<string | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -251,8 +257,8 @@ export function FarmerCaseChat({
       form.append(
         "profile",
         JSON.stringify({
-          country: defaultCountry || "",
-          district: defaultDistrict || "",
+          country: sessionCountry || defaultCountry || "",
+          district: sessionDistrict || defaultDistrict || "",
         }),
       );
       for (const file of preparedFiles) {
@@ -316,13 +322,13 @@ export function FarmerCaseChat({
           return;
         }
         if (/openai_api_key|openai is not configured/i.test(rawError)) {
-          setError("I’m having trouble with that right now. Please try again.");
+          setError(FARMER_GENERIC_ERROR);
         } else if (response.status === 413) {
           setError(rawError || FARMER_PHOTO_TOO_LARGE);
         } else if (imagesSnapshot.length > 0) {
           setError(rawError || FARMER_PHOTO_UPLOAD_FAILED);
         } else {
-          setError(rawError || "I’m having trouble with that right now. Please try again.");
+          setError(rawError || FARMER_GENERIC_ERROR);
         }
         return;
       }
@@ -347,19 +353,15 @@ export function FarmerCaseChat({
             typeof payload.questionsAsked === "number"
               ? payload.questionsAsked
               : undefined,
+          similarCaseNote: payload.similarCaseHint || undefined,
         },
       ]);
 
-      if (payload.similarCaseHint) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: messageId(),
-            role: "assistant",
-            text: payload.similarCaseHint || "",
-            local: true,
-          },
-        ]);
+      if (casePayload.regionalContext?.country) {
+        setSessionCountry(casePayload.regionalContext.country);
+      }
+      if (casePayload.regionalContext?.district) {
+        setSessionDistrict(casePayload.regionalContext.district);
       }
 
       const persistBanner = farmerPersistenceBanner(payload);
@@ -646,6 +648,7 @@ export function FarmerCaseChat({
                           message.casePayload?.questionId === activeQuestionId
                         }
                         quickRepliesDisabled={loading || !isLatestAssistant}
+                        similarCaseNote={message.similarCaseNote}
                         onUploadPhoto={() => attachRef.current?.openLibrary()}
                         onQuickReply={
                           isLatestAssistant

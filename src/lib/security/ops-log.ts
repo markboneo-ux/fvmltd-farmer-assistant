@@ -10,6 +10,7 @@ export type OpsEventKind =
   | "auth_failure"
   | "weather_provider_failure"
   | "product_catalogue_failure"
+  | "web_research_failure"
   | "followup_failure"
   | "rate_limit"
   | "promo_failure"

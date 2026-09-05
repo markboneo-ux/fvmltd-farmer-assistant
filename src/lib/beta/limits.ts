@@ -163,8 +163,9 @@ export const REGISTERED_LIMIT_HEADING = "Continue with FVM Crop Solution";
 export const UPGRADE_COMING_SOON = "Paid plans are coming soon.";
 
 export const FARMER_GENERIC_ERROR =
-  "I'm having trouble with that right now. Please try again.";
-
+  "I couldn’t finish that just now. Please send the question again.";
+export const FARMER_WEB_LOOKUP_FAILED =
+  "I couldn't complete the online lookup, but I can still help based on the information you've given me.";
 /** Shown only when the agronomic answer was produced but crop_cases / case_messages did not save. */
 export const FARMER_PERSISTENCE_DEGRADED =
   "I have an answer for you. Saving this chat for later failed — you can copy it if you need it.";

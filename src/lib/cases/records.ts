@@ -21,6 +21,7 @@ export type CaseUpdateExtras = Partial<StructuredCaseFacts> & {
   diagnosisConfirmed?: boolean;
   diagnosisIncorrect?: boolean;
   needsReview?: boolean;
+  includeInTrendLearning?: boolean;
   usefulForTrend?: boolean;
   excludeFromLearning?: boolean;
   reviewNotes?: string | null;
@@ -122,6 +123,7 @@ export function buildNewCropCase(input: {
     diagnosisConfirmed: false,
     diagnosisIncorrect: false,
     needsReview: false,
+    includeInTrendLearning: true,
     usefulForTrend: false,
     excludeFromLearning: false,
     reviewNotes: null,
@@ -175,8 +177,13 @@ export function mergeUpdatedCase(
     diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
     diagnosisIncorrect: extras?.diagnosisIncorrect ?? current.diagnosisIncorrect,
     needsReview: extras?.needsReview ?? current.needsReview,
+    includeInTrendLearning:
+      extras?.includeInTrendLearning ??
+      (extras?.excludeFromLearning === true ? false : current.includeInTrendLearning),
     usefulForTrend: extras?.usefulForTrend ?? current.usefulForTrend,
-    excludeFromLearning: extras?.excludeFromLearning ?? current.excludeFromLearning,
+    excludeFromLearning:
+      extras?.excludeFromLearning ??
+      (extras?.includeInTrendLearning === false ? true : current.excludeFromLearning),
     reviewNotes: extras?.reviewNotes ?? current.reviewNotes,
     reviewedAt: extras?.reviewedAt ?? current.reviewedAt,
     reviewedBy: extras?.reviewedBy ?? current.reviewedBy,
@@ -185,7 +192,9 @@ export function mergeUpdatedCase(
     calculationType: extras?.calculationType ?? current.calculationType,
     caseType: extras?.caseType ?? current.caseType,
     knowledgeState:
-      extras?.excludeFromLearning || extras?.diagnosisIncorrect
+      extras?.excludeFromLearning ||
+      extras?.includeInTrendLearning === false ||
+      extras?.diagnosisIncorrect
         ? "rejected"
         : extras?.knowledgeState ??
           knowledgeStateFromCase({
@@ -313,6 +322,7 @@ export function applyCaseReview(
     resolved?: boolean;
     usefulForTrend?: boolean;
     excludeFromLearning?: boolean;
+    includeInTrendLearning?: boolean;
     reviewNotes?: string | null;
     reviewedBy?: string | null;
   },
@@ -320,10 +330,14 @@ export function applyCaseReview(
   const diagnosisConfirmed = review.diagnosisConfirmed ?? current.diagnosisConfirmed;
   const diagnosisIncorrect = review.diagnosisIncorrect ?? current.diagnosisIncorrect;
   const excludeFromLearning = review.excludeFromLearning ?? current.excludeFromLearning;
+  const includeInTrendLearning =
+    review.includeInTrendLearning ??
+    (excludeFromLearning || diagnosisIncorrect ? false : current.includeInTrendLearning);
   const agronomistReviewed = true;
   let knowledgeState: CropCaseRecord["knowledgeState"] = current.knowledgeState;
-  if (excludeFromLearning || diagnosisIncorrect) knowledgeState = "rejected";
-  else if (diagnosisConfirmed) knowledgeState = "validated";
+  if (excludeFromLearning || diagnosisIncorrect || includeInTrendLearning === false) {
+    knowledgeState = "rejected";
+  } else if (diagnosisConfirmed) knowledgeState = "validated";
   else if (review.usefulForTrend) knowledgeState = "candidate";
 
   return {
@@ -332,8 +346,9 @@ export function applyCaseReview(
     diagnosisConfirmed,
     diagnosisIncorrect,
     needsReview: review.needsReview ?? current.needsReview,
+    includeInTrendLearning,
     usefulForTrend: review.usefulForTrend ?? current.usefulForTrend,
-    excludeFromLearning,
+    excludeFromLearning: excludeFromLearning || includeInTrendLearning === false,
     reviewNotes: review.reviewNotes ?? current.reviewNotes,
     reviewedAt: nowIso(),
     reviewedBy: review.reviewedBy ?? current.reviewedBy,

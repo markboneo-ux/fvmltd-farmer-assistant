@@ -4,6 +4,7 @@
 
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
+import { extractCountryFromText } from "@/lib/research/countries";
 import {
   ASK_COUNTRY_QUESTION,
   extractRegionAndCountry,
@@ -125,6 +126,9 @@ export type KnownFarmerFacts = {
   asksAboutWeather: boolean;
   recentFertilizer: boolean;
   recentPesticide: boolean;
+  asksForMarket: boolean;
+  asksForPesticideRegistration: boolean;
+  asksForRegulation: boolean;
   rawText: string;
 };
 
@@ -205,8 +209,15 @@ export function extractKnownFacts(
             : null;
 
   const located = extractRegionAndCountry(rawText);
-  let country: string | null = located.country || profile?.country?.trim() || null;
+  let country: string | null =
+    located.country || extractCountryFromText(rawText) || profile?.country?.trim() || null;
   let district: string | null = located.region || profile?.district?.trim() || null;
+  if (!district) {
+    const districtMatch = lower.match(
+      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
+    );
+    if (districtMatch) district = districtMatch[1];
+  }
   const locationConfidence = resolveLocationConfidence({
     spokenCountry: located.country,
     countryFromRegion: located.countryFromRegion,
@@ -287,6 +298,18 @@ export function extractKnownFacts(
       /\b(pesticide|insecticide|fungicide|herbicide|spray).{0,24}(yesterday|today|last\s+(week|few days)|ago|this morning)\b/.test(
         lower,
       ),
+    asksForMarket:
+      /\b(market price|wholesale price|farmgate|namdevco|current price|what .{0,30}selling for)\b/.test(
+        lower,
+      ),
+    asksForPesticideRegistration:
+      /\b(registered|registration|approved (for|in)|pesticide register|is .{0,40} legal to (use|spray))\b/.test(
+        lower,
+      ),
+    asksForRegulation:
+      /\b(regulation|banned (pesticide|chemical)|restricted pesticide|import (permit|licence|license))\b/.test(
+        lower,
+      ),
     rawText,
   };
 }
@@ -354,6 +377,20 @@ export function countPriorAssistantQuestions(
   }).length;
 }
 
+const SPECIFIC_PHOTO_VIEW =
+  /\b(underside|root|stem base|whole plant|neighbouring|neighboring)\b/i;
+const GENERIC_PHOTO_ASK =
+  /\b(upload|send|take|attach)\b.{0,40}\b(photo|picture|image)\b/i;
+
+export function historyAlreadyRequestedPhoto(
+  history: Array<{ role: string; content: string }>,
+): boolean {
+  return history.some(
+    (item) =>
+      item.role === "assistant" && /\b(photo|picture)\b/i.test(item.content),
+  );
+}
+
 /**
  * Server-side rapid-triage + commercial safety net.
  */
@@ -366,6 +403,9 @@ export function applyCommercialSafetyGuards(
     intent?: IntentCategory | null;
     askForCrop?: boolean;
     researchNeed?: string | null;
+    askForCountry?: boolean;
+    photoAlreadyRequested?: boolean;
+    hasImages?: boolean;
   },
 ): AgronomicCasePayload {
   const mode = options.mode;
@@ -385,7 +425,8 @@ export function applyCommercialSafetyGuards(
 
   const skipDiagnosisWorkflow =
     isCalculationIntent((options.intent ?? "crop_problem") as IntentCategory) ||
-    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory);
+    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory) ||
+    options.intent === "market";
 
   if (skipDiagnosisWorkflow) {
     return {
@@ -494,13 +535,21 @@ export function applyCommercialSafetyGuards(
       asksForProducts: options.knownFacts.asksForProducts,
       researchNeed: options.researchNeed,
     });
-    if (!needsCountry && !needsConfirm) {
+    if (options.knownFacts.country && !needsCountry && !needsConfirm) {
       nextQuestion = "";
     } else if (needsConfirm && options.knownFacts.country) {
       nextQuestion = `Just to confirm, are you farming in ${options.knownFacts.country}?`;
     } else if (!options.knownFacts.country && nextQuestion !== ASK_COUNTRY_QUESTION) {
       nextQuestion = ASK_COUNTRY_QUESTION;
     }
+  }
+  if (
+    options.askForCountry &&
+    !options.knownFacts.country &&
+    !LOCATION_QUESTION.test(nextQuestion)
+  ) {
+    nextQuestion = "What country are you farming in?";
+    stage = isGuidanceStage(stage) ? stage : "assessment";
   }
 
   const questionsIncludingThis =
@@ -577,6 +626,27 @@ export function applyCommercialSafetyGuards(
     }
   }
 
+  const specificExtraView = SPECIFIC_PHOTO_VIEW.test(nextQuestion);
+  if (options.photoAlreadyRequested && !options.hasImages && !specificExtraView) {
+    photoRecommended = false;
+    if (GENERIC_PHOTO_ASK.test(nextQuestion)) {
+      nextQuestion = "";
+    }
+  }
+
+  if (mode === "quick_help" && isInterviewStage(stage) && !nextQuestion) {
+    const usefulAfterPhotoGuard =
+      hasUsefulGuidance({
+        ...payload,
+        preliminaryAssessment,
+        checksToday,
+        safeActionsNow,
+      }) || preliminaryAssessment.length > 80;
+    if (usefulAfterPhotoGuard) {
+      stage = options.knownFacts.suddenWilt ? "human_review" : "assessment";
+    }
+  }
+
   let questionType: QuestionType | "" = "";
   let questionId = "";
 
@@ -623,6 +693,7 @@ export function applyCommercialSafetyGuards(
   quickReplies = quickReplies.filter((item) => !/\bask about products\b/i.test(item));
 
   return {
+    ...payload,
     mode,
     stage,
     questionId,
@@ -653,6 +724,8 @@ export function applyCommercialSafetyGuards(
     farmerLevel: payload.farmerLevel ?? userLevelToFarmerLevel(options.knownFacts.userType),
     sourceVerificationLine: payload.sourceVerificationLine ?? null,
     sourcesCollapsed: payload.sourcesCollapsed ?? true,
+    rankedCauses: payload.rankedCauses ?? [],
+    askCountry: payload.askCountry ?? Boolean(options.askForCountry),
   };
 }
 

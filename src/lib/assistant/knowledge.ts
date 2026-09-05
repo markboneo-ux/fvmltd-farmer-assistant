@@ -49,14 +49,15 @@ export function isTrustedKnowledge(record: {
 
 export function isRejectedKnowledge(record: {
   knowledgeState?: KnowledgeState | null;
-  excludeFromLearning?: boolean;
   diagnosisIncorrect?: boolean;
+  includeInTrendLearning?: boolean;
+  excludeFromLearning?: boolean;
 }): boolean {
-  return (
-    record.knowledgeState === "rejected" ||
-    Boolean(record.excludeFromLearning) ||
-    Boolean(record.diagnosisIncorrect)
-  );
+  if (record.knowledgeState === "rejected") return true;
+  if (record.diagnosisIncorrect) return true;
+  if (record.includeInTrendLearning === false) return true;
+  if (record.excludeFromLearning) return true;
+  return false;
 }
 
 export function trendIsFarmerSafe(status: TrendStatus): boolean {

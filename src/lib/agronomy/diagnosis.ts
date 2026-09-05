@@ -346,7 +346,9 @@ function isThinAssessment(payload: AgronomicCasePayload): boolean {
   ) {
     return true;
   }
-  return (payload.likelyCauses ?? []).length === 0 && payload.checksToday.length === 0;
+  // Empty ranked-cause slots are filled from the playbook. A long, specific
+  // assessment is not thin just because those arrays were left empty.
+  return false;
 }
 
 export function playbookFor(

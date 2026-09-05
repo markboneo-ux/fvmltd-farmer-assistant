@@ -1,4 +1,4 @@
-import { STALE_SOURCE_DAYS, type SourceCategory, type TrustedSource } from "./types";
+import { STALE_SOURCE_DAYS, type CatalogTrustedSource, type SourceCategory } from "./types";
 
 /** Seed last-checked date for bundled registry rows (updated when research runs). */
 const SEED_CHECKED = "2026-09-01T00:00:00.000Z";
@@ -7,7 +7,7 @@ const SEED_CHECKED = "2026-09-01T00:00:00.000Z";
  * Country-specific trusted source registry.
  * Random blogs are never listed here and must not rank equal to these sources.
  */
-export const TRUSTED_SOURCES: TrustedSource[] = [
+export const TRUSTED_SOURCES: CatalogTrustedSource[] = [
   {
     id: "tt-namis",
     name: "NAMDEVCO NAMIS market data",
@@ -173,7 +173,7 @@ export const TRUSTED_SOURCES: TrustedSource[] = [
   },
 ];
 
-const TRUST_RANK: Record<TrustedSource["trustLevel"], number> = {
+const TRUST_RANK: Record<CatalogTrustedSource["trustLevel"], number> = {
   official_government: 100,
   statutory_authority: 90,
   research_institution: 75,
@@ -190,7 +190,7 @@ export function domainFromUrl(url: string): string {
   }
 }
 
-export function sourcesForCountry(country: string | null | undefined): TrustedSource[] {
+export function sourcesForCountry(country: string | null | undefined): CatalogTrustedSource[] {
   const needle = (country ?? "").trim().toLowerCase();
   return TRUSTED_SOURCES.filter((source) => {
     if (source.country === "Caribbean" || source.country === "International") return true;
@@ -206,7 +206,7 @@ export function sourcesForCountry(country: string | null | undefined): TrustedSo
 export function localOfficialSources(
   country: string | null | undefined,
   category: SourceCategory,
-): TrustedSource[] {
+): CatalogTrustedSource[] {
   const needle = (country ?? "").trim().toLowerCase();
   return TRUSTED_SOURCES.filter((source) => {
     if (source.category !== category) return false;
@@ -224,7 +224,7 @@ export function researchTargetsForNeed(
   country: string | null | undefined,
   category: SourceCategory | null,
   need: string,
-): TrustedSource[] {
+): CatalogTrustedSource[] {
   const regionalResearch = TRUSTED_SOURCES.filter(
     (source) => source.country === "Caribbean" && source.category === "research",
   );
@@ -265,13 +265,13 @@ export function researchTargetsForNeed(
 export function sourcesByCategory(
   country: string | null | undefined,
   category: SourceCategory,
-): TrustedSource[] {
+): CatalogTrustedSource[] {
   return sourcesForCountry(country)
     .filter((source) => source.category === category)
     .sort((a, b) => TRUST_RANK[b.trustLevel] - TRUST_RANK[a.trustLevel]);
 }
 
-export function rankSources(sources: TrustedSource[]): TrustedSource[] {
+export function rankSources(sources: CatalogTrustedSource[]): CatalogTrustedSource[] {
   return [...sources].sort((a, b) => {
     const trust = TRUST_RANK[b.trustLevel] - TRUST_RANK[a.trustLevel];
     if (trust !== 0) return trust;
@@ -287,12 +287,12 @@ export function isTrustedDomain(url: string, country?: string | null): boolean {
   );
 }
 
-export function isSourceStale(source: Pick<TrustedSource, "lastCheckedAt">, now = Date.now()): boolean {
+export function isSourceStale(source: Pick<CatalogTrustedSource, "lastCheckedAt">, now = Date.now()): boolean {
   const checked = Date.parse(source.lastCheckedAt);
   if (!Number.isFinite(checked)) return true;
   return now - checked > STALE_SOURCE_DAYS * 24 * 60 * 60 * 1000;
 }
 
-export function trustRank(level: TrustedSource["trustLevel"]): number {
+export function trustRank(level: CatalogTrustedSource["trustLevel"]): number {
   return TRUST_RANK[level];
 }

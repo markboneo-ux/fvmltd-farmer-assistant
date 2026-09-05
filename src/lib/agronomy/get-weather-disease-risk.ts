@@ -40,7 +40,20 @@ export async function getWeatherDiseaseRisk(
   const country = args.country?.trim() || "";
   const crop = args.crop?.trim().toLowerCase() || "";
 
-  if (!country || !crop) {
+  if (!country) {
+    return {
+      country: "",
+      district: args.district ?? null,
+      crop,
+      weatherDataAsOf: null,
+      provider: null,
+      alerts: [],
+      verified: false,
+      error: "Country is required for a local weather risk forecast.",
+    };
+  }
+
+  if (!crop) {
     return {
       country,
       district: args.district ?? null,
@@ -49,7 +62,7 @@ export async function getWeatherDiseaseRisk(
       provider: null,
       alerts: [],
       verified: false,
-      error: !country ? "Country is required for a local forecast." : "Crop is required.",
+      error: "Crop is required.",
     };
   }
 
