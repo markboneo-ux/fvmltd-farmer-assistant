@@ -44,8 +44,17 @@ export function ChatAssistantMessage({
   const assessment = stripGuidancePrefix(payload.preliminaryAssessment);
   const question = payload.nextQuestion.trim();
   const useDiagnosis = shouldUseDiagnosisLayout(payload);
-  const showWeather = payload.weatherRisks.length > 0;
+  const relevance = payload.weatherRelevance ?? (payload.weatherRisks.length > 0 ? "supporting" : "omit");
+  const showWeatherCard = relevance === "central" && (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
+  const supportingNote =
+    relevance === "supporting"
+      ? payload.weatherBrief ||
+        (payload.weatherRisks.length > 0
+          ? "Also, the next few days are wet/humid, so leaf disease pressure may increase."
+          : null)
+      : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
+  const sources = (payload.webSources ?? []).filter((item) => item.name.trim());
   const urgent = payload.escalationRecommended || payload.severity === "high";
 
   const replies = payload.quickReplies.filter(
@@ -70,14 +79,14 @@ export function ChatAssistantMessage({
         <div className="space-y-3">
           <section>
             <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-              Likely issue
+              What I think
             </h3>
             <p className="mt-1 whitespace-pre-wrap">{assessment}</p>
           </section>
           {payload.checksToday.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to check now
+                What to check
               </h3>
               <BulletList items={payload.checksToday} />
             </section>
@@ -85,7 +94,7 @@ export function ChatAssistantMessage({
           {payload.safeActionsNow.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What I would do next
+                What to do next
               </h3>
               <BulletList items={payload.safeActionsNow} />
             </section>
@@ -105,24 +114,29 @@ export function ChatAssistantMessage({
         </p>
       )}
 
-      {showWeather ? (
+      {showWeatherCard ? (
         <div className="rounded-xl bg-sky px-3 py-2.5 ring-1 ring-line">
           <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
-            Weather risk
+            Weather
           </p>
-          {payload.weatherRisks.slice(0, 2).map((risk) => (
-            <div key={`${risk.diseaseOrPest}-${risk.generatedAt}`} className="mt-1.5">
-              <p className="text-sm font-medium text-ink">
-                Conditions may favour {risk.diseaseOrPest.toLowerCase()} over the{" "}
-                {risk.riskWindow}.
-              </p>
-              {risk.weatherDrivers[0] ? (
-                <p className="mt-1 text-sm text-muted">{risk.weatherDrivers[0]}</p>
-              ) : null}
-              <p className="mt-1 text-xs text-muted">{risk.disclaimer}</p>
-            </div>
-          ))}
+          {payload.weatherBrief ? (
+            <p className="mt-1.5 text-sm text-ink">{payload.weatherBrief}</p>
+          ) : (
+            payload.weatherRisks.slice(0, 2).map((risk) => (
+              <div key={`${risk.diseaseOrPest}-${risk.generatedAt}`} className="mt-1.5">
+                <p className="text-sm font-medium text-ink">
+                  Conditions may favour {risk.diseaseOrPest.toLowerCase()} over the{" "}
+                  {risk.riskWindow}.
+                </p>
+                {risk.weatherDrivers[0] ? (
+                  <p className="mt-1 text-sm text-muted">{risk.weatherDrivers[0]}</p>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
+      ) : supportingNote ? (
+        <p className="text-sm text-muted">{supportingNote}</p>
       ) : null}
 
       {showProducts ? (
@@ -161,6 +175,30 @@ export function ChatAssistantMessage({
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+
+      {sources.length > 0 ? (
+        <div className="text-sm">
+          <p className="font-medium text-ink">Sources</p>
+          <ul className="mt-1 space-y-0.5">
+            {sources.slice(0, 4).map((source) => (
+              <li key={`${source.name}-${source.url ?? ""}`}>
+                {source.url ? (
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-leaf underline-offset-2 hover:underline"
+                  >
+                    • {source.name}
+                  </a>
+                ) : (
+                  <span>• {source.name}</span>
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

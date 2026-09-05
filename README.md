@@ -28,6 +28,8 @@ This version includes an **AI-first guest chat** on the homepage (no registratio
 | `/staff/login` | FVMLTD staff authentication (Supabase Auth) |
 | `/staff` | Secure staff review queue (new / urgent / awaiting review) |
 | `/staff/cases/[id]` | Staff case review detail + actions |
+| `/admin/insights` | FVMLTD-only usage, crop, trend, and web-research analytics |
+| `/admin/insights/cases/[id]` | Staff review of a conversational crop case |
 | `/signin` | Short free-account signup (email / Google / Apple) |
 | `/privacy` | Privacy language |
 | `/terms` | Terms |
@@ -230,6 +232,7 @@ Run migrations in filename order:
 | `20260731180000_initial_schema.sql` | Idempotent canonical baseline (production table names + app extensions) |
 | `20260731190000` … `20260731230000` | No-ops kept for stable timestamps (folded into the baseline) |
 | `20260803140000_farmer_registration_rpc_and_country.sql` | `register_farmer` RPC → `farmer_profiles` + TT country default |
+| `20260904180000_research_admin_review.sql` | Staff review flags on `crop_cases`, trusted sources, chemical registry, web-research logs |
 
 #### Production migration history repair (required if history is empty)
 
@@ -298,6 +301,8 @@ In the Vercel project: **Settings → Environment Variables**, add:
 | `FVM_REGISTERED_FREE_MESSAGES` | Server only | No | Registered-free message allowance. Default `80`. |
 | `FVM_REGISTERED_FREE_CASES` | Server only | No | Registered-free case allowance. Default `10`. |
 | `FVM_REGISTERED_FREE_IMAGES` | Server only | No | Registered-free image allowance. Default `24`. |
+| `TAVILY_API_KEY` | Server only | **Yes** | Optional. Live web search for current prices/registrations. If unset, the app still fetches trusted pages (NAMDEVCO, ministries) directly. |
+| `WEB_SEARCH_API_KEY` | Server only | **Yes** | Optional alias for a Tavily-compatible search key. |
 
 No **new** Vercel variable name is required beyond `OPENAI_API_KEY` / optional `OPENAI_MODEL` already listed above — ensure they are set for Production and Preview.
 
@@ -379,7 +384,9 @@ values (
 );
 ```
 
-4. Sign in at `/staff/login`.
+4. Sign in at `/staff/login`. After login you can open `/admin/insights` (analytics) or `/staff` (crop-check queue).
+
+`/admin/insights` is staff-only (same Supabase Auth + `staff_profiles` gate as `/staff`). Farmers never see it. Trend cards stay aggregate — names and emails are not shown. Individual conversational cases can be opened at `/admin/insights/cases/[id]` for confirmation, rejection, or exclusion from learning.
 
 Middleware requires a Supabase Auth session for staff routes. Handlers then verify an **active** `staff_profiles` row linked to `auth.users.id` via `auth_user_id` (or legacy `id = auth.uid()`).
 

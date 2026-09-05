@@ -88,6 +88,13 @@ export type CropCaseRecord = {
   humanEscalation: boolean;
   agronomistReviewed: boolean;
   diagnosisConfirmed: boolean;
+  diagnosisIncorrect: boolean;
+  needsReview: boolean;
+  usefulForTrend: boolean;
+  excludeFromLearning: boolean;
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
   caseStatus: CaseStatus;
   conversationIntent: IntentCategory | null;
   questionCategory: IntentCategory | null;

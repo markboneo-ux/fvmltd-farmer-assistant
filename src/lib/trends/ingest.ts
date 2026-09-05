@@ -38,7 +38,9 @@ function toClusterInput(
     agronomistReviewed: record.agronomistReviewed,
     diagnosisConfirmed: record.diagnosisConfirmed,
     positiveOutcome: outcomePositive,
-    rejected: isRejectedKnowledge(record),
+    rejected: isRejectedKnowledge(record) || record.excludeFromLearning || record.diagnosisIncorrect,
+    excludeFromLearning: record.excludeFromLearning,
+    diagnosisIncorrect: record.diagnosisIncorrect,
   };
 }
 

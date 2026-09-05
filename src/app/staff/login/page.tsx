@@ -2,6 +2,7 @@ import Link from "next/link";
 import { StaffLoginForm } from "@/components/staff/StaffLoginForm";
 import { StaffShell } from "@/components/staff/StaffShell";
 import { getStaffSession } from "@/lib/staff/auth";
+import { safeStaffNextPath } from "@/lib/staff/next-path";
 import { redirect } from "next/navigation";
 
 type PageProps = {
@@ -12,9 +13,7 @@ export default async function StaffLoginPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const session = await getStaffSession();
   if (session.ok) {
-    redirect(
-      params.next?.startsWith("/staff") ? params.next : "/staff",
-    );
+    redirect(safeStaffNextPath(params.next));
   }
 
   return (

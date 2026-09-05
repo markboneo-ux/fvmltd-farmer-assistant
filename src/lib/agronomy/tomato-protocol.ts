@@ -272,7 +272,7 @@ export function extractKnownFacts(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
-      /\b(weather|forecast|humidity|humid|dew\b|leaf\s+disease|disease\s+pressure|heavy\s+rain|rainfall|rainy|could this weather)\b/.test(
+      /\b(weather|forecast|will it rain|is it (going to|gonna) rain|before i spray|spray tomorrow|humidity|humid weather|heat (wave|stress)|could this weather)\b/.test(
         lower,
       ) || /\bwhy am i suddenly seeing more\b/.test(lower),
     rawText,
@@ -607,6 +607,9 @@ export function applyCommercialSafetyGuards(
     weatherRisks: payload.weatherRisks ?? [],
     verifiedInputOptions: payload.verifiedInputOptions ?? [],
     internalMissingInformation,
+    weatherRelevance: payload.weatherRelevance ?? "omit",
+    weatherBrief: payload.weatherBrief ?? null,
+    webSources: payload.webSources ?? [],
   };
 }
 

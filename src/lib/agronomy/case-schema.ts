@@ -3,6 +3,7 @@
  * Used by OpenAI Structured Outputs and the farmer UI.
  */
 
+import type { WebSourceCitation } from "@/lib/research/types";
 import {
   isQuestionType,
   type QuestionType,
@@ -80,6 +81,8 @@ export type VerifiedInputDisplay = {
   agronomistConfirmationRequired: boolean;
 };
 
+export type WeatherRelevanceLevel = "omit" | "supporting" | "central";
+
 export type AgronomicCasePayload = {
   mode: CaseMode;
   stage: CaseStage;
@@ -102,6 +105,9 @@ export type AgronomicCasePayload = {
   intent?: string;
   questionCategory?: string;
   calculationType?: string | null;
+  weatherRelevance?: WeatherRelevanceLevel;
+  weatherBrief?: string | null;
+  webSources?: WebSourceCitation[];
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
@@ -288,6 +294,9 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     intent: asTrimmedString(data.intent) || undefined,
     questionCategory: asTrimmedString(data.questionCategory) || undefined,
     calculationType: asTrimmedString(data.calculationType) || null,
+    weatherRelevance: "omit",
+    weatherBrief: null,
+    webSources: [],
   };
 }
 
