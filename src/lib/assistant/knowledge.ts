@@ -51,10 +51,12 @@ export function isRejectedKnowledge(record: {
   knowledgeState?: KnowledgeState | null;
   diagnosisIncorrect?: boolean;
   includeInTrendLearning?: boolean;
+  excludeFromLearning?: boolean;
 }): boolean {
   if (record.knowledgeState === "rejected") return true;
   if (record.diagnosisIncorrect) return true;
   if (record.includeInTrendLearning === false) return true;
+  if (record.excludeFromLearning) return true;
   return false;
 }
 

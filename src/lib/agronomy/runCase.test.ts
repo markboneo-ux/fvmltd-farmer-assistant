@@ -626,3 +626,79 @@ describe("legacy acceptance transcripts", () => {
     expect(result.case.mode).toBe("full_crop_check");
   });
 });
+
+describe("weather relevance on case replies", () => {
+  it("does not attach weather to a celery yellowing question", async () => {
+    const result = await runAgronomicCase({
+      message: "My celery leaves are yellowing",
+      profile: { country: "Trinidad and Tobago" },
+      createResponse: async (params) => {
+        expect(JSON.stringify(params.input)).toMatch(/WEATHER GATE: Weather is not central/);
+        return {
+          id: "resp_celery_yellow",
+          output_text: JSON.stringify(
+            mockCase({
+              stage: "assessment",
+              preliminaryAssessment:
+                "Yellowing on celery can come from hungry plants, wet roots, disease, pests, or old leaves.",
+              nextQuestion: "Does the yellowing start on older leaves or new leaves?",
+              checksToday: ["Look where yellowing starts"],
+              safeActionsNow: ["Check whether the bed is waterlogged"],
+            }),
+          ),
+        };
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.weatherRisks).toEqual([]);
+    expect(result.case.weatherRelevance).toBe("omit");
+  });
+
+  it("does not attach weather to a celery selling-price question", async () => {
+    const result = await runAgronomicCase({
+      message: "How much should I sell celery for?",
+      profile: { country: "Trinidad and Tobago" },
+      skipRegionalTools: true,
+      createResponse: async (params) => {
+        expect(JSON.stringify(params.input)).not.toMatch(/disease pressure/i);
+        return {
+          id: "resp_celery_price",
+          output_text: JSON.stringify(
+            mockCase({
+              stage: "assessment",
+              preliminaryAssessment: "Your selling price is your decision. Use wholesale as a guide.",
+            }),
+          ),
+        };
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.weatherRisks).toEqual([]);
+  });
+
+  it("prioritises weather for rain-before-spray", async () => {
+    const result = await runAgronomicCase({
+      message: "Will it rain before I spray tomorrow?",
+      profile: { country: "Trinidad and Tobago", district: "Chaguanas" },
+      createResponse: async (params) => {
+        expect(JSON.stringify(params.input)).toMatch(/WEATHER GATE: Weather or spray\/plant timing is central/);
+        return {
+          id: "resp_spray_rain",
+          output_text: JSON.stringify(
+            mockCase({
+              stage: "assessment",
+              preliminaryAssessment: "Check the rain chance before you spray so the product does not wash off.",
+            }),
+          ),
+        };
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.weatherRelevance).toBe("central");
+    expect(result.case.weatherBrief).toMatch(/rain/i);
+  });
+});
+

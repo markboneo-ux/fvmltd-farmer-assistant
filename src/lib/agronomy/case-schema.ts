@@ -4,7 +4,7 @@
  */
 
 import type { RankedCause } from "./causes";
-import type { PesticideCheck, WebCitation } from "@/lib/research/types";
+import type { PesticideCheck, WebCitation, WebSourceCitation } from "@/lib/research/types";
 import { isQuestionType, type QuestionType } from "./question-types";
 
 export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
@@ -79,6 +79,8 @@ export type VerifiedInputDisplay = {
   agronomistConfirmationRequired: boolean;
 };
 
+export type WeatherRelevanceLevel = "omit" | "supporting" | "central";
+
 export type AgronomicCasePayload = {
   mode: CaseMode;
   stage: CaseStage;
@@ -107,6 +109,9 @@ export type AgronomicCasePayload = {
   researchUsed?: boolean;
   researchFailed?: boolean;
   askCountry?: boolean;
+  weatherRelevance?: WeatherRelevanceLevel;
+  weatherBrief?: string | null;
+  webSources?: WebSourceCitation[];
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
@@ -299,6 +304,9 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     researchUsed: false,
     researchFailed: false,
     askCountry: false,
+    weatherRelevance: "omit",
+    weatherBrief: null,
+    webSources: [],
   };
 }
 

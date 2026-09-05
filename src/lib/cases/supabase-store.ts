@@ -37,6 +37,7 @@ import {
   caseIsOwnedBy,
   mergeUpdatedCase,
   nowIso,
+  applyCaseReview,
   type CaseUpdateExtras,
 } from "./records";
 import type {
@@ -239,6 +240,30 @@ export async function supabaseListCaseMessages(caseId: string): Promise<CaseMess
     builder.eq("case_id", caseId).order("created_at", { ascending: true }),
   );
   return rows.map(rowToMessage);
+}
+
+export async function supabaseListAllCaseMessages(): Promise<CaseMessageRecord[]> {
+  const rows = await selectRows("case_messages", (builder) =>
+    builder.order("created_at", { ascending: true }),
+  );
+  return rows.map(rowToMessage);
+}
+
+export async function supabaseListAllCasePhotos(): Promise<CasePhotoRecord[]> {
+  const rows = await selectRows("case_photos", (builder) =>
+    builder.order("created_at", { ascending: true }),
+  );
+  return rows.map(rowToPhoto);
+}
+
+export async function supabaseUpdateCaseReview(
+  caseId: string,
+  review: Parameters<typeof applyCaseReview>[1],
+): Promise<CropCaseRecord | null> {
+  const current = await supabaseGetCropCase(caseId);
+  if (!current) return null;
+  const next = applyCaseReview(current, review);
+  return updateRow("crop_cases", caseId, cropCaseToRow(next), rowToCropCase);
 }
 
 export async function supabaseAddCaseObservation(input: {

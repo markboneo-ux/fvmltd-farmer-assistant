@@ -30,6 +30,25 @@ export async function GET(request: Request) {
     outcome: url.searchParams.get("outcome"),
     caseType: url.searchParams.get("caseType"),
     status: url.searchParams.get("status"),
+    region: url.searchParams.get("region"),
+    issue: url.searchParams.get("issue"),
+    userType: url.searchParams.get("userType"),
+    guestOrRegistered:
+      url.searchParams.get("userKind") === "guest" ||
+      url.searchParams.get("userKind") === "registered"
+        ? (url.searchParams.get("userKind") as "guest" | "registered")
+        : null,
+    confirmed:
+      url.searchParams.get("confirmed") === "confirmed" ||
+      url.searchParams.get("confirmed") === "unconfirmed"
+        ? (url.searchParams.get("confirmed") as "confirmed" | "unconfirmed")
+        : null,
+    resolved:
+      url.searchParams.get("resolved") === "resolved" ||
+      url.searchParams.get("resolved") === "unresolved"
+        ? (url.searchParams.get("resolved") as "resolved" | "unresolved")
+        : null,
+    questionCategory: url.searchParams.get("questionCategory"),
   };
 
   try {

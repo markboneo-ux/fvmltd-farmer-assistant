@@ -43,10 +43,17 @@ describe("trend engine", () => {
       member({ caseId: "c1", sessionKey: "guest-a" }),
       member({ caseId: "c2", sessionKey: "guest-b", createdAt: "2026-09-02T00:00:00.000Z" }),
     ]);
-    expect(twoFarmers).not.toBeNull();
-    expect(twoFarmers && canExposeTrend(twoFarmers)).toBe(true);
-    expect(twoFarmers?.trendStatus).toBe("emerging");
-    expect(oneCaseCannotEstablish(twoFarmers)).toBe(true);
+    expect(twoFarmers).toBeNull();
+
+    const threeFarmers = aggregateCluster([
+      member({ caseId: "c1", sessionKey: "guest-a" }),
+      member({ caseId: "c2", sessionKey: "guest-b", createdAt: "2026-09-02T00:00:00.000Z" }),
+      member({ caseId: "c3", sessionKey: "guest-c", createdAt: "2026-09-03T00:00:00.000Z" }),
+    ]);
+    expect(threeFarmers).not.toBeNull();
+    expect(threeFarmers && canExposeTrend(threeFarmers)).toBe(true);
+    expect(threeFarmers?.trendStatus).toBe("emerging");
+    expect(oneCaseCannotEstablish(threeFarmers)).toBe(true);
   });
 
   it("one case cannot create an established trend", () => {
@@ -74,6 +81,16 @@ describe("trend engine", () => {
     const trend = aggregateCluster([
       member({ caseId: "c1", sessionKey: "a", rejected: true }),
       member({ caseId: "c2", sessionKey: "b", rejected: true }),
+      member({ caseId: "c3", sessionKey: "c", rejected: true }),
+    ]);
+    expect(trend).toBeNull();
+  });
+
+  it("excluded or incorrect cases do not influence a trend", () => {
+    const trend = aggregateCluster([
+      member({ caseId: "c1", sessionKey: "a" }),
+      member({ caseId: "c2", sessionKey: "b", excludeFromLearning: true }),
+      member({ caseId: "c3", sessionKey: "c", diagnosisIncorrect: true }),
     ]);
     expect(trend).toBeNull();
   });

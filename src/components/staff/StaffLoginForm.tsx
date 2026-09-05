@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/Button";
+import { safeStaffNextPath } from "@/lib/staff/next-path";
 
 export function StaffLoginForm({ nextPath = "/staff" }: { nextPath?: string }) {
   const router = useRouter();
@@ -44,7 +45,7 @@ export function StaffLoginForm({ nextPath = "/staff" }: { nextPath?: string }) {
         return;
       }
 
-      router.replace(nextPath.startsWith("/staff") ? nextPath : "/staff");
+      router.replace(safeStaffNextPath(nextPath));
       router.refresh();
     } catch {
       setError(

@@ -20,9 +20,14 @@ export async function persistWebResearchEvent(event: WebResearchEvent): Promise<
     country: event.country,
     topics: event.topics,
     used: event.used,
+    used_web: event.used,
+    need: event.topics[0] ?? "other",
     failed: event.failed,
     stale_warnings: event.staleWarnings,
     source_names: event.sourceNames,
+    sources: event.sourceNames,
+    failures: [],
+    outdated_sources: [],
     correlation_id: event.correlationId,
     created_at: event.createdAt,
   });
@@ -67,13 +72,17 @@ export async function upsertTrustedSources(): Promise<void> {
   const rows = TRUSTED_SOURCES.map((item) => ({
     id: item.id,
     country: item.country,
+    name: item.sourceName,
     source_name: item.sourceName,
-    domain: item.domain,
+    url: item.homepageUrl,
     homepage_url: item.homepageUrl,
+    domain: item.domain,
+    category: item.sourceType,
     source_type: item.sourceType,
     trust_level: item.trustLevel,
     active: item.active,
     notes: item.notes,
+    last_checked_at: item.lastReviewedAt ?? new Date().toISOString(),
     last_reviewed_at: item.lastReviewedAt,
     preferred_for: item.preferredFor,
     updated_at: new Date().toISOString(),
@@ -93,7 +102,7 @@ export async function loadWebResearchDashboardStats() {
   if (!admin.ok) return memory;
   const { data, error } = await admin.client
     .from("web_research_events")
-    .select("used, failed, stale_warnings, source_names")
+    .select("used, used_web, failed, stale_warnings, source_names, sources")
     .limit(5000);
   if (error || !data) return memory;
 
@@ -103,14 +112,16 @@ export async function loadWebResearchDashboardStats() {
   let stale = 0;
   for (const row of data as Array<{
     used?: boolean;
+    used_web?: boolean;
     failed?: boolean;
     stale_warnings?: number;
     source_names?: string[];
+    sources?: string[];
   }>) {
-    if (row.used) used += 1;
+    if (row.used || row.used_web) used += 1;
     if (row.failed) failed += 1;
     stale += Number(row.stale_warnings ?? 0);
-    for (const name of row.source_names ?? []) {
+    for (const name of row.source_names ?? row.sources ?? []) {
       sourceCounts.set(name, (sourceCounts.get(name) ?? 0) + 1);
     }
   }

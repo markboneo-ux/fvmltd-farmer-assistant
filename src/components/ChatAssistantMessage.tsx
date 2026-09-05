@@ -46,8 +46,23 @@ export function ChatAssistantMessage({
   const assessment = stripGuidancePrefix(payload.preliminaryAssessment);
   const question = payload.nextQuestion.trim();
   const useDiagnosis = shouldUseDiagnosisLayout(payload);
-  const showWeather = payload.weatherRisks.length > 0;
+  const relevance = payload.weatherRelevance ?? (payload.weatherRisks.length > 0 ? "supporting" : "omit");
+  const showWeatherCard = relevance === "central" && (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
+  const supportingNote =
+    relevance === "supporting"
+      ? payload.weatherBrief ||
+        (payload.weatherRisks.length > 0
+          ? "Also, the next few days are wet/humid, so leaf disease pressure may increase."
+          : null)
+      : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
+  const sources = [
+    ...(payload.webSources ?? []).map((item) => ({ name: item.name, url: item.url })),
+    ...(payload.webCitations ?? []).map((item) => ({ name: item.sourceName, url: item.url })),
+  ].filter((item) => item.name.trim());
+  const uniqueSources = sources.filter(
+    (item, index) => sources.findIndex((other) => other.name === item.name && other.url === item.url) === index,
+  );
   const urgent = payload.escalationRecommended || payload.severity === "high";
 
   const replies = payload.quickReplies.filter(
@@ -121,11 +136,14 @@ export function ChatAssistantMessage({
         </p>
       )}
 
-      {showWeather ? (
+      {showWeatherCard ? (
         <div className="rounded-xl bg-sky px-3 py-2.5 ring-1 ring-line">
           <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
-            Weather risk
+            Weather
           </p>
+          {payload.weatherBrief ? (
+            <p className="mt-1.5 text-sm">{payload.weatherBrief}</p>
+          ) : null}
           {payload.weatherRisks.slice(0, 2).map((risk) => (
             <div key={`${risk.diseaseOrPest}-${risk.generatedAt}`} className="mt-1.5">
               <p className="text-sm font-medium text-ink">
@@ -139,6 +157,8 @@ export function ChatAssistantMessage({
             </div>
           ))}
         </div>
+      ) : supportingNote ? (
+        <p className="text-sm text-muted">{supportingNote}</p>
       ) : null}
 
       {showProducts ? (
@@ -180,25 +200,26 @@ export function ChatAssistantMessage({
         </div>
       ) : null}
 
-      {payload.webCitations && payload.webCitations.length > 0 ? (
+      {uniqueSources.length > 0 ? (
         <div className="text-sm">
           <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
             Sources
           </p>
           <ul className="mt-1 space-y-1">
-            {payload.webCitations.slice(0, 6).map((item) => (
-              <li key={item.url}>
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-canopy underline underline-offset-2"
-                >
-                  {item.sourceName}
-                </a>
-                {item.sourceType === "market_data" ? " — market information" : ""}
-                {item.sourceType === "government" ? " — crop guidance" : ""}
-                {item.sourceType === "regulator" ? " — official register" : ""}
+            {uniqueSources.slice(0, 6).map((item) => (
+              <li key={`${item.name}-${item.url ?? ""}`}>
+                {item.url ? (
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-canopy underline underline-offset-2"
+                  >
+                    {item.name}
+                  </a>
+                ) : (
+                  <span>{item.name}</span>
+                )}
               </li>
             ))}
           </ul>

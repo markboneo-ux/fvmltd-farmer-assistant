@@ -2,7 +2,7 @@
  * Farmer-facing source lines. Prefer source names over raw URLs.
  */
 
-import type { WebCitation } from "./types";
+import type { WebCitation, WebSourceCitation } from "./types";
 
 export function farmerFacingCitations(citations: WebCitation[]): string {
   if (citations.length === 0) return "";
@@ -27,4 +27,22 @@ export function citationForUi(item: WebCitation): { name: string; url: string; h
     url: item.url,
     hint: citationHint(item),
   };
+}
+
+export function formatFarmerSources(citations: WebSourceCitation[]): string {
+  if (citations.length === 0) return "";
+  const unique = dedupeCitations(citations).slice(0, 4);
+  return `Sources:\n${unique.map((item) => `• ${item.name}`).join("\n")}`;
+}
+
+export function dedupeCitations(citations: WebSourceCitation[]): WebSourceCitation[] {
+  const seen = new Set<string>();
+  const result: WebSourceCitation[] = [];
+  for (const item of citations) {
+    const key = (item.url || item.name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
 }

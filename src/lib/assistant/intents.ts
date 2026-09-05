@@ -164,7 +164,11 @@ export function classifyFarmerIntent(message: string): ClassifiedIntent {
     return pack("farm_business");
   }
 
-  if (/\b(pricing|what (should|can) i (charge|sell)|selling price)\b/i.test(lower)) {
+  if (
+    /\b(pricing|what (should|can) i (charge|sell)|selling price|current price|market price|wholesale price|how much (should|can) i sell|is .{0,30} selling well)\b/i.test(
+      lower,
+    )
+  ) {
     return pack("pricing");
   }
 

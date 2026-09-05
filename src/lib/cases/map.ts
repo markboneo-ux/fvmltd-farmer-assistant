@@ -76,6 +76,11 @@ export function cropCaseToRow(record: CropCaseRecord): Record<string, unknown> {
     diagnosis_incorrect: record.diagnosisIncorrect,
     needs_review: record.needsReview,
     include_in_trend_learning: record.includeInTrendLearning,
+    useful_for_trend: record.usefulForTrend,
+    exclude_from_learning: record.excludeFromLearning,
+    review_notes: record.reviewNotes,
+    reviewed_at: record.reviewedAt,
+    reviewed_by: record.reviewedBy,
     case_status: record.caseStatus,
     conversation_intent: record.conversationIntent,
     question_category: record.questionCategory,
@@ -129,8 +134,13 @@ export function rowToCropCase(row: Record<string, unknown>): CropCaseRecord {
     needsReview: asBoolean(row.needs_review),
     includeInTrendLearning:
       row.include_in_trend_learning == null
-        ? true
+        ? !asBoolean(row.exclude_from_learning)
         : asBoolean(row.include_in_trend_learning, true),
+    usefulForTrend: asBoolean(row.useful_for_trend),
+    excludeFromLearning: asBoolean(row.exclude_from_learning),
+    reviewNotes: asNullableString(row.review_notes),
+    reviewedAt: asNullableString(row.reviewed_at),
+    reviewedBy: asNullableString(row.reviewed_by),
     caseStatus: (asString(row.case_status) || "open") as CropCaseRecord["caseStatus"],
     conversationIntent:
       (asNullableString(row.conversation_intent) as CropCaseRecord["conversationIntent"]) ??

@@ -272,8 +272,9 @@ export function extractKnownFacts(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
-      /\b(weather|forecast|could this weather)\b/.test(lower) ||
-      /\bwhy am i suddenly seeing more\b/.test(lower),
+      /\b(weather|forecast|will it rain|is it (going to|gonna) rain|before i spray|spray tomorrow|humidity|humid weather|heat (wave|stress)|could this weather)\b/.test(
+        lower,
+      ) || /\bwhy am i suddenly seeing more\b/.test(lower),
     asksForMarket:
       /\b(market price|wholesale price|farmgate|namdevco|current price|what .{0,30}selling for)\b/.test(
         lower,

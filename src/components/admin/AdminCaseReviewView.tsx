@@ -1,88 +1,218 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import type { CaseMessageRecord, CropCaseRecord } from "@/lib/cases/types";
+import { useEffect, useState } from "react";
 
-export function AdminCaseReviewView({
-  cropCase,
-  messages,
-}: {
-  cropCase: CropCaseRecord;
-  messages: CaseMessageRecord[];
-}) {
-  const [busy, setBusy] = useState(false);
+type CaseDetail = {
+  case?: {
+    id: string;
+    crop: string | null;
+    country: string | null;
+    region: string | null;
+    variety: string | null;
+    farmerQuestion: string;
+    userId: string | null;
+    guest: boolean;
+    status: string;
+    confidence: string;
+    possibleCauses: string[];
+    recommendedActions: string[];
+    diagnosisConfirmed: boolean;
+    diagnosisIncorrect: boolean;
+    needsReview: boolean;
+    usefulForTrend: boolean;
+    excludeFromLearning: boolean;
+    includeInTrendLearning?: boolean;
+    reviewNotes: string | null;
+    agronomistReviewed: boolean;
+    outcome: string | null;
+    createdAt: string;
+  };
+  conversation?: Array<{
+    role: string;
+    content: string;
+    hasImages: boolean;
+    createdAt: string;
+  }>;
+  photos?: Array<{ id: string; mimeType: string; createdAt: string }>;
+  assessment?: Record<string, unknown> | null;
+  actions?: string[];
+  error?: string;
+};
+
+export function AdminCaseReviewView({ caseId }: { caseId: string }) {
+  const [data, setData] = useState<CaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [notes, setNotes] = useState("");
 
-  async function mark(body: Record<string, boolean>) {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const response = await fetch(`/api/admin/cases/${cropCase.id}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        setError(payload.error || "Could not save review.");
-        return;
-      }
-      setNotice("Review saved.");
-    } finally {
-      setBusy(false);
+  async function load() {
+    const response = await fetch(`/api/admin/cases/${caseId}`);
+    const payload = (await response.json()) as CaseDetail;
+    if (!response.ok) {
+      setError(payload.error || "Could not load case.");
+      return;
     }
+    setError(null);
+    setData(payload);
+    setNotes(payload.case?.reviewNotes ?? "");
   }
 
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseId]);
+
+  async function mark(body: Record<string, unknown>) {
+    setSaving(true);
+    const response = await fetch(`/api/admin/cases/${caseId}/review`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, reviewNotes: notes }),
+    });
+    setSaving(false);
+    if (!response.ok) {
+      setError("Could not save review.");
+      return;
+    }
+    await load();
+  }
+
+  const record = data?.case;
+  const assessment = data?.assessment as
+    | {
+        preliminaryAssessment?: string;
+        checksToday?: string[];
+        safeActionsNow?: string[];
+      }
+    | null
+    | undefined;
+
   return (
-    <main className="mx-auto min-h-dvh max-w-3xl px-4 py-8">
-      <p className="text-sm">
-        <Link className="text-canopy underline" href="/admin/cases">
-          Back to cases
-        </Link>
-      </p>
-      <h1 className="mt-2 text-2xl font-semibold">Case review</h1>
-      <p className="mt-1 text-sm text-muted">
-        {cropCase.crop || "Unknown crop"} · {cropCase.country || "country unknown"} ·{" "}
-        {cropCase.caseStatus}
-      </p>
-      <p className="mt-3 whitespace-pre-wrap text-sm">{cropCase.farmerProblemText}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ diagnosisConfirmed: true })}>
-          Diagnosis confirmed
-        </button>
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ diagnosisIncorrect: true, includeInTrendLearning: false })}>
-          Diagnosis incorrect
-        </button>
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ needsReview: true })}>
-          Needs review
-        </button>
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ resolved: true })}>
-          Resolved
-        </button>
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ unresolved: true })}>
-          Unresolved
-        </button>
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ includeInTrendLearning: true })}>
-          Include in trend learning
-        </button>
-        <button disabled={busy} className="rounded-lg bg-sky px-3 py-2 text-sm" onClick={() => void mark({ includeInTrendLearning: false })}>
-          Exclude from trend learning
-        </button>
-      </div>
-      {error ? <p className="mt-3 text-danger">{error}</p> : null}
-      {notice ? <p className="mt-3 text-sm">{notice}</p> : null}
-      <section className="mt-6 space-y-2">
-        <h2 className="font-semibold">Conversation</h2>
-        {messages.map((item) => (
-          <p key={item.id} className="rounded-xl bg-surface p-3 text-sm ring-1 ring-line">
-            <span className="font-medium">{item.role}: </span>
-            {item.content}
-          </p>
-        ))}
-      </section>
-    </main>
+    <div className="space-y-4">
+      {error ? <p className="text-danger">{error}</p> : null}
+      {record ? (
+        <>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Case</h2>
+            <ul className="mt-2 space-y-1 text-sm">
+              <li>Crop: {record.crop || "unknown"}</li>
+              <li>Variety: {record.variety || "unknown"}</li>
+              <li>
+                Country / region: {record.country || "unknown"}
+                {record.region ? ` / ${record.region}` : ""}
+              </li>
+              <li>Status: {record.status}</li>
+              <li>Confidence: {record.confidence}</li>
+              <li>Account: {record.guest ? "guest session" : `linked user ${record.userId}`}</li>
+              <li>Outcome: {record.outcome || "none yet"}</li>
+            </ul>
+            <p className="mt-3 text-sm">
+              <span className="font-medium">Farmer question: </span>
+              {record.farmerQuestion}
+            </p>
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Conversation</h2>
+            <ul className="mt-2 space-y-3 text-sm">
+              {(data?.conversation ?? []).map((item, index) => (
+                <li key={`${item.createdAt}-${index}`}>
+                  <p className="text-xs font-semibold uppercase text-muted">{item.role}</p>
+                  <p className="whitespace-pre-wrap">{item.content}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">AI diagnosis</h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm">
+              {assessment?.preliminaryAssessment || "No stored assessment."}
+            </p>
+            {record.possibleCauses.length > 0 ? (
+              <p className="mt-2 text-sm">Causes noted: {record.possibleCauses.join("; ")}</p>
+            ) : null}
+            <p className="mt-2 text-sm">
+              Actions recommended:{" "}
+              {(data?.actions ?? record.recommendedActions).join("; ") || "none"}
+            </p>
+            <p className="mt-2 text-sm">Photos: {data?.photos?.length ?? 0}</p>
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Staff review</h2>
+            <textarea
+              className="mt-2 min-h-24 w-full rounded-lg border border-line px-3 py-2 text-sm"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Internal review notes"
+            />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-canopy px-3 py-2 text-sm text-white"
+                onClick={() => void mark({ diagnosisConfirmed: true, resolved: true })}
+              >
+                Diagnosis confirmed
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-danger px-3 py-2 text-sm text-white"
+                onClick={() =>
+                  void mark({ diagnosisIncorrect: true, excludeFromLearning: true })
+                }
+              >
+                Diagnosis incorrect
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
+                onClick={() => void mark({ needsReview: true })}
+              >
+                Needs review
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
+                onClick={() => void mark({ resolved: true })}
+              >
+                Resolved
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
+                onClick={() => void mark({ usefulForTrend: true })}
+              >
+                Useful for trend learning
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
+                onClick={() => void mark({ includeInTrendLearning: true, excludeFromLearning: false })}
+              >
+                Include in trend learning
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
+                onClick={() => void mark({ excludeFromLearning: true, includeInTrendLearning: false })}
+              >
+                Exclude from learning
+              </button>
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              Confirmed: {record.diagnosisConfirmed ? "yes" : "no"} · Incorrect:{" "}
+              {record.diagnosisIncorrect ? "yes" : "no"} · Useful:{" "}
+              {record.usefulForTrend ? "yes" : "no"} · Excluded:{" "}
+              {record.excludeFromLearning || record.includeInTrendLearning === false ? "yes" : "no"}
+            </p>
+          </section>
+        </>
+      ) : null}
+    </div>
   );
 }
