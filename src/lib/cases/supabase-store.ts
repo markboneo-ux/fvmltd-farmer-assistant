@@ -100,7 +100,7 @@ function persistFail(table: string, message: string): never {
     error: message,
     backend: "supabase",
   });
-  throw new CasePersistenceError("case_persistence_failed", table);
+  throw new CasePersistenceError(message, table);
 }
 
 function adminClient(): CaseStoreAdminClient {

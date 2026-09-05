@@ -42,17 +42,29 @@ Do **not** treat a `git-main` chat result as evidence that the pull-request code
 
 ## Preview persistence
 
-Preview and Production use the same Supabase project (`qzycpoivwwecooscnnju`). The red save warning is **not** a missing-env-var issue when these are set for Preview **and** Production:
+Preview and Production **must not silently use different Supabase projects**.
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+Live debug from the nxmi Preview (`x-fvm-debug: 1`) returned:
 
-A core save writes `crop_cases` then `case_messages`. If those tables are missing, PostgREST returns:
+- `persistenceMode=supabase`
+- `missingSupabaseEnv=[]` (URL, anon key, and service role are all set)
+- `supabaseHost=gcojtfrdjczrvzieynzj.supabase.co`
+
+Production’s working project is `qzycpoivwwecooscnnju`. Preview is therefore **mis-scoped**, not missing variables.
+
+Set these three on Vercel for **Preview** to the **same** project as Production (or migrate `crop_cases` / `case_messages` on the Preview project):
+
+- `NEXT_PUBLIC_SUPABASE_URL` = `https://qzycpoivwwecooscnnju.supabase.co` (or the Preview branch DB that actually has `crop_cases`)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` matching that project
+- `SUPABASE_SERVICE_ROLE_KEY` matching that project
+
+A core save writes `crop_cases` then `case_messages`. On `qzycpoivwwecooscnnju` the previous error was:
 
 ```
 PGRST205 Could not find the table 'public.crop_cases' in the schema cache
 ```
 
-The GitHub “Supabase Preview” check is skipped, so branch databases are not created. Apply the additive `20260903*` / `20260904*` / `20260905*` migrations to that project before expecting Preview persistence to succeed.
+Those tables have now been created on `qzycpoivwwecooscnnju`. Preview will keep failing until its `NEXT_PUBLIC_SUPABASE_URL` points at a database that has them.
+
+GitHub **Supabase Preview** is skipped / `main` branching status is `MIGRATIONS_FAILED`, which is consistent with Preview using a stale or inaccessible branch project.
 
