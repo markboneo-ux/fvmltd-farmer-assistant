@@ -23,6 +23,7 @@ import { ingestCaseForTrends } from "@/lib/trends/ingest";
 import { listCaseTrends } from "@/lib/trends/store";
 import { resetUsageStore } from "@/lib/beta/usage-store";
 import {
+  getSchemaCompatDrops,
   isProductionRuntime,
   isSupabaseAdminConfigured,
   resolveCasePersistenceMode,
@@ -259,6 +260,7 @@ describe("Supabase case persistence layer", () => {
     expect(warns.some((line) => line.includes("CASE_PERSISTENCE_DROP_COLUMN") && line.includes("business_metadata"))).toBe(
       true,
     );
+    expect(getSchemaCompatDrops().some((item) => item.column === "reviewed_at")).toBe(true);
   });
 
   it("still fails loudly when a required crop_cases column is missing", async () => {

@@ -42,46 +42,62 @@ Do **not** treat a `git-main` chat result as evidence that the pull-request code
 
 ## Preview persistence
 
-Preview and Production **must not silently use different Supabase projects**.
+Vercel Preview (`nxmi`) currently uses a **different Supabase project** from Production. Do **not** retarget Preview at Production automatically. Align the Preview schema instead.
 
-Live debug from the nxmi Preview (`x-fvm-debug: 1`) returned:
+| | Host |
+| --- | --- |
+| **Preview** | `gcojtfrdjczrvzieynzj.supabase.co` |
+| **Production** | `qzycpoivwwecooscnnju.supabase.co` |
 
-- `persistenceMode=supabase`
-- `missingSupabaseEnv=[]` (URL, anon key, and service role are all set)
-- `supabaseHost=gcojtfrdjczrvzieynzj.supabase.co`
+Preview env vars are present (`missingSupabaseEnv=[]`). They are pointed at the older project (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` for Preview). Do not change them to Production as part of this alignment.
 
-Production’s working project is `qzycpoivwwecooscnnju`. Preview is therefore **mis-scoped**, not missing variables.
+### Missing Preview migrations
 
-Set these three on Vercel for **Preview** to the **same** project as Production (or migrate `crop_cases` / `case_messages` on the Preview project):
+Production `supabase_migrations.schema_migrations` previously recorded files only through `20260805180100_weather_disease_risk`. The September conversational migrations had been applied to Production via SQL but were not recorded. Those versions are now recorded on Production. Preview (`gcojtfrdjczrvzieynzj`) still has `crop_cases` / `case_messages` from the controlled-beta baseline and is missing the later additive columns.
 
-- `NEXT_PUBLIC_SUPABASE_URL` = `https://qzycpoivwwecooscnnju.supabase.co` (or the Preview branch DB that actually has `crop_cases`)
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` matching that project
-- `SUPABASE_SERVICE_ROLE_KEY` matching that project
-
-A core save writes `crop_cases` then `case_messages`. On `qzycpoivwwecooscnnju` the previous error was:
-
-```
-PGRST205 Could not find the table 'public.crop_cases' in the schema cache
-```
-
-Those tables, and later columns such as `business_metadata`, have now been created on `qzycpoivwwecooscnnju`.
-
-The live nxmi Preview still pointed at `gcojtfrdjczrvzieynzj`. That project **has** `crop_cases`, but it is missing later columns from `20260904120000_general_assistant_trends.sql`. Exact Preview insert errors, in order:
+Live Preview insert errors before alignment, in order:
 
 ```
 PGRST204 Could not find the 'business_metadata' column of 'crop_cases' in the schema cache
 PGRST204 Could not find the 'reviewed_at' column of 'crop_cases' in the schema cache
 ```
 
-`gcojtfrdjczrvzieynzj` is missing later additive columns from `20260904120000_general_assistant_trends.sql` and `20260904180000_research_admin_review.sql`. PostgREST reports one missing column at a time. The app now retries `crop_cases` inserts/updates by dropping unknown optional columns (up to 48) so that schema can still return a `caseId`. Required columns (`id`, `farmer_problem_text`, `case_id`, `role`, `content`) are never dropped.
+Apply these files, in order, on the **Preview** project. All are additive (`IF NOT EXISTS`). Do not drop tables.
 
-This is a compatibility shim, not a substitute for aligning Preview env:
+1. `20260903135000_staff_profiles_auth_user_id.sql`
+2. `20260903140000_controlled_beta.sql` (already present on Preview if `crop_cases` exists)
+3. `20260904120000_general_assistant_trends.sql` — adds `business_metadata` and related columns
+4. `20260904180000_research_admin_review.sql` — adds `reviewed_at` and review flags
+5. `20260905120000_country_research_staff_review.sql` — adds `include_in_trend_learning` and research tables
+6. `20260905180000_drop_farmer_country_trinidad_default.sql`
+7. `20260905190000_crop_cases_service_role_grants.sql`
+8. `20260905200000_align_preview_conversational_schema.sql` — **one-shot catch-up** covering the columns/tables above
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+If you only run one script on Preview, run **`supabase/migrations/20260905200000_align_preview_conversational_schema.sql`** in the SQL editor for `gcojtfrdjczrvzieynzj`, then `NOTIFY pgrst, 'reload schema';` (already at the end of that file).
 
-must be enabled for **Preview** and should match Production (`qzycpoivwwecooscnnju`) or a Preview database that has the conversational schema and later columns.
+Required `crop_cases` columns after alignment: `business_metadata`, `reviewed_at`, `reviewed_by`, `review_notes`, `conversation_intent`, `question_category`, `calculation_type`, `case_type`, `knowledge_state`, `diagnosis_incorrect`, `needs_review`, `useful_for_trend`, `exclude_from_learning`, `include_in_trend_learning`.
 
-GitHub **Supabase Preview** is skipped / `main` branching status is `MIGRATIONS_FAILED`, which is consistent with Preview using a stale or inaccessible branch project.
+Required `case_messages` extra columns: `conversation_intent`, `question_category`.
+
+This agent **cannot** apply SQL to `gcojtfrdjczrvzieynzj` (Management API 403; the access token only sees Production `qzycpoivwwecooscnnju`).
+
+### Compatibility shim
+
+The app still retries unknown optional columns if PostgREST returns `PGRST204`. That is defensive only. After Preview is aligned, `x-fvm-debug: 1` must return `schemaCompatUsed=false` and `schemaCompatDroppedColumns=[]`.
+
+### GitHub Supabase Preview (`skipped` / `MIGRATIONS_FAILED`)
+
+The GitHub check **Supabase Preview** is skipped with:
+
+> This git branch is not associated with any Supabase Branch. You can open a PR to create a new branch.
+
+That check is tied to Production `qzycpoivwwecooscnnju`, not `gcojtfrdjczrvzieynzj`. Creating a GitHub-linked Preview branch from this token returned:
+
+```
+402 Branching is supported only on the Pro plan or above
+```
+
+The leftover `git_branch=main` record has been `MIGRATIONS_FAILED` since 2026-07-31. September conversational SQL was also applied to Production outside `schema_migrations`; those versions have now been recorded on Production.
+
+GitHub **cannot** attach a PR database until the org is on a plan that includes branching. Until then, align `gcojtfrdjczrvzieynzj` with the SQL above rather than pointing Vercel Preview at Production.
 

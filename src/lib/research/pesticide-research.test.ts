@@ -537,7 +537,11 @@ describe("preview deployment documentation", () => {
     expect(doc).toMatch(/Do \*\*not\*\* treat a `git-main` chat result/);
     expect(doc).toMatch(/PGRST204 Could not find the 'business_metadata' column/);
     expect(doc).toMatch(/PGRST204 Could not find the 'reviewed_at' column/);
+    expect(doc).toMatch(/20260905200000_align_preview_conversational_schema/);
+    expect(doc).toMatch(/schemaCompatUsed=false/);
+    expect(doc).toMatch(/This git branch is not associated with any Supabase Branch/);
     expect(doc).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
     expect(doc).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
+    expect(doc).toMatch(/Branching is supported only on the Pro plan/);
   });
 });

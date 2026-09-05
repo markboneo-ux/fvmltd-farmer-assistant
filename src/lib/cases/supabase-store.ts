@@ -6,6 +6,7 @@ import type { AccessState } from "@/lib/beta/limits";
 import {
   CasePersistenceError,
   logCasePersistenceError,
+  noteSchemaCompatDrop,
 } from "./persistence";
 import {
   actionToRow,
@@ -146,6 +147,10 @@ function writeErrorText(error: QueryError, fallback: string): string {
 
 const MAX_OPTIONAL_COLUMN_DROPS = 48;
 
+// Defensive only: if Preview/Production schema is one additive migration
+// behind, drop the unknown optional column and retry. Required columns
+// still fail. Aligned schemas should never enter this loop.
+
 async function insertRow<T>(
   table: string,
   row: Record<string, unknown>,
@@ -165,7 +170,7 @@ async function insertRow<T>(
     if (!missing || REQUIRED_WRITE_COLUMNS.has(missing) || !(missing in payload)) {
       break;
     }
-    console.warn(`CASE_PERSISTENCE_DROP_COLUMN table=${table} column=${missing}`);
+    noteSchemaCompatDrop(table, missing);
     delete payload[missing];
   }
   persistFail(table, writeErrorText(lastError, "insert failed"));
@@ -192,7 +197,7 @@ async function updateRow<T>(
     if (!missing || REQUIRED_WRITE_COLUMNS.has(missing) || !(missing in payload)) {
       break;
     }
-    console.warn(`CASE_PERSISTENCE_DROP_COLUMN table=${table} column=${missing}`);
+    noteSchemaCompatDrop(table, missing);
     delete payload[missing];
   }
   persistFail(table, writeErrorText(lastError, "update failed"));

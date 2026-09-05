@@ -389,9 +389,18 @@ describe("POST /api/ai/case persistence", () => {
       caseId?: string | null;
       persistenceFailed?: boolean;
       persistenceError?: string | null;
+      schemaCompatUsed?: boolean;
+      schemaCompatDroppedColumns?: Array<{ table: string; column: string }>;
     };
     expect(body.caseId).toBeTruthy();
     expect(body.persistenceFailed).toBe(false);
+    expect(body.schemaCompatUsed).toBe(true);
+    expect(
+      (body.schemaCompatDroppedColumns ?? []).some((item) => item.column === "business_metadata"),
+    ).toBe(true);
+    expect(
+      (body.schemaCompatDroppedColumns ?? []).some((item) => item.column === "reviewed_at"),
+    ).toBe(true);
     expect(fake.db.crop_cases).toHaveLength(1);
     expect(fake.db.case_messages).toHaveLength(2);
     expect(fake.db.crop_cases[0]).not.toHaveProperty("business_metadata");

@@ -101,7 +101,25 @@ export function safePersistenceError(error: unknown): string {
   return redactSecrets(String(error));
 }
 
+type SchemaCompatDrop = { table: string; column: string };
+
+let schemaCompatDrops: SchemaCompatDrop[] = [];
+
+export function resetSchemaCompatDrops() {
+  schemaCompatDrops = [];
+}
+
+export function noteSchemaCompatDrop(table: string, column: string) {
+  schemaCompatDrops.push({ table, column });
+  console.warn(`CASE_PERSISTENCE_DROP_COLUMN table=${table} column=${column}`);
+}
+
+export function getSchemaCompatDrops(): SchemaCompatDrop[] {
+  return [...schemaCompatDrops];
+}
+
 export function logCasePersistenceStart() {
+  resetSchemaCompatDrops();
   console.info("CASE_PERSISTENCE_START");
 }
 
@@ -133,12 +151,15 @@ export function supabaseHostForLogs(): string {
 }
 
 export function persistenceDebugInfo(error?: unknown, table?: string | null) {
+  const schemaCompatDroppedColumns = getSchemaCompatDrops();
   return {
     persistenceError: error ? safePersistenceError(error) : null,
     persistenceMode: resolveCasePersistenceMode(),
     persistenceTable: table ?? null,
     supabaseHost: supabaseHostForLogs(),
     missingSupabaseEnv: getMissingSupabaseEnv({ requireServiceRole: true }),
+    schemaCompatDroppedColumns,
+    schemaCompatUsed: schemaCompatDroppedColumns.length > 0,
   };
 }
 
