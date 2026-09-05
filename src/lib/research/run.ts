@@ -7,6 +7,10 @@ import { farmerFacingCitations } from "./citations";
 import { canonicalizeCountry } from "./countries";
 import { isStale, staleWarning, topicRequiresFreshSource } from "./freshness";
 import { formatPesticideBlock, pesticideCheckFromEvidence } from "./pesticides";
+import { classifyPesticideQuery } from "./pesticide-query";
+import { buildPesticideFarmerAnswer } from "./pesticide-answer";
+import { classifyRegulatoryEvidence, isHomepageOnlyEvidence } from "./evidence";
+import { registerEndpointsForCountry } from "./registers";
 import { countryIsRequired, LOCAL_VERIFICATION_UNAVAILABLE } from "./policy";
 import {
   defaultPageFetcher,
@@ -69,6 +73,7 @@ export async function runCountryResearch(options: {
     staleWarnings: [],
     failure: null,
     farmerFallback: null,
+    pesticideAnswer: null,
   };
 
   if (topics.length === 0) return empty;
@@ -114,8 +119,15 @@ export async function runCountryResearch(options: {
       };
     }
 
-    const homepage = trustedHomepageHits(country, browseTopics[0]);
-    hits = filterHitsToTrustedCountry([...hits, ...homepage], country);
+    const pesticideTopics = browseTopics.some(
+      (topic) =>
+        topic === "pesticide_registration" ||
+        topic === "chemical_approval" ||
+        topic === "product_label",
+    );
+    const homepage = pesticideTopics ? [] : trustedHomepageHits(country, browseTopics[0]);
+    const registerHits = pesticideTopics ? registerSearchHits(country) : [];
+    hits = filterHitsToTrustedCountry([...hits, ...registerHits, ...homepage], country);
 
     if (country && country !== "Trinidad and Tobago") {
       hits = hits.filter((hit) => {
@@ -128,12 +140,30 @@ export async function runCountryResearch(options: {
       });
     }
 
+    if (pesticideTopics) {
+      hits = await enrichPesticideHitsWithPages(hits);
+    }
+
     const citations: WebCitation[] = [];
     const staleWarnings: string[] = [];
     for (const hit of hits.slice(0, 6)) {
       const source = sourceByDomain(hit.domain);
       if (!source) continue;
       const topic = browseTopics[0];
+      const evidence = classifyRegulatoryEvidence({
+        url: hit.url,
+        title: hit.title,
+        text: hit.snippet,
+        country,
+        organization: source.sourceName,
+        sourceType: source.sourceType,
+        sourceCountry: source.country,
+        retrievedAt: hit.retrievedAt,
+        publishedAt: hit.publishedAt,
+      });
+      if (pesticideTopics && isHomepageOnlyEvidence(evidence) && !evidence.sufficientForRegisterLocation) {
+        continue;
+      }
       const stale = topicRequiresFreshSource(topic)
         ? isStale({
             topic,
@@ -150,6 +180,8 @@ export async function runCountryResearch(options: {
         sourceType: source.sourceType,
         publishedAt: hit.publishedAt,
         stale,
+        evidenceType: evidence.evidenceType,
+        regulatoryConfidence: evidence.regulatoryConfidence,
       });
       if (stale) {
         const warning = staleWarning({
@@ -160,12 +192,6 @@ export async function runCountryResearch(options: {
       }
     }
 
-    const pesticideTopics = browseTopics.some(
-      (topic) =>
-        topic === "pesticide_registration" ||
-        topic === "chemical_approval" ||
-        topic === "product_label",
-    );
     const pesticideChecks = pesticideTopics
       ? [
           pesticideCheckFromEvidence({
@@ -177,6 +203,41 @@ export async function runCountryResearch(options: {
           }),
         ]
       : [];
+
+    const pesticideQuery = classifyPesticideQuery(options.message);
+    const pesticideEvidence = pesticideTopics
+      ? hits.slice(0, 8).map((hit) => {
+          const source = sourceByDomain(hit.domain);
+          return classifyRegulatoryEvidence({
+            url: hit.url,
+            title: hit.title,
+            text: hit.snippet,
+            country,
+            organization: source?.sourceName,
+            sourceType: source?.sourceType,
+            sourceCountry: source?.country,
+            retrievedAt: hit.retrievedAt,
+            publishedAt: hit.publishedAt,
+          });
+        })
+      : [];
+    const ministryEndpoint = registerEndpointsForCountry(country).find(
+      (item) => item.priority === "ministry" && item.country === country,
+    );
+    const pesticideAnswer =
+      pesticideTopics && country
+        ? buildPesticideFarmerAnswer({
+            country,
+            query: pesticideQuery,
+            evidence: pesticideEvidence.map((item) =>
+              markKnownRegisterEndpoints(item, country),
+            ),
+            check: pesticideChecks[0] ?? null,
+            authorityContact: ministryEndpoint
+              ? { organization: ministryEndpoint.organization, url: ministryEndpoint.url }
+              : null,
+          })
+        : null;
 
     const marketNotes: MarketPriceNote[] = [];
     if (browseTopics.includes("market_prices") && country) {
@@ -219,7 +280,8 @@ export async function runCountryResearch(options: {
     const localUnavailable =
       citations.length === 0 &&
       pesticideChecks.every((item) => !item.verified) &&
-      marketNotes.every((item) => !item.priceText);
+      marketNotes.every((item) => !item.priceText) &&
+      !pesticideAnswer?.registerFound;
 
     return {
       used: true,
@@ -230,15 +292,18 @@ export async function runCountryResearch(options: {
       citations,
       pesticideChecks,
       marketNotes,
-      generalNotes: localUnavailable
-        ? [
-            LOCAL_VERIFICATION_UNAVAILABLE,
-            "I can still give general agronomic guidance. Verify local rules, labels, and prices before you act.",
-          ]
-        : pesticideChecks.filter((item) => !item.verified).map((item) => item.farmerNote),
+      generalNotes: pesticideAnswer
+        ? []
+        : localUnavailable
+          ? [
+              LOCAL_VERIFICATION_UNAVAILABLE,
+              "I can still give general agronomic guidance. Verify local rules, labels, and prices before you act.",
+            ]
+          : pesticideChecks.filter((item) => !item.verified).map((item) => item.farmerNote),
       staleWarnings,
       failure: null,
       farmerFallback: null,
+      pesticideAnswer,
     };
   } catch (error) {
     return {
@@ -286,6 +351,74 @@ function extractPriceSnippet(text: string): string | null {
   return match ? match[0].trim() : null;
 }
 
+function registerSearchHits(country: string | null): SearchHit[] {
+  const retrievedAt = new Date().toISOString();
+  return registerEndpointsForCountry(country)
+    .filter((item) => item.priority !== "international_agronomy")
+    .slice(0, 5)
+    .map((item) => ({
+      url: item.url,
+      title: item.title,
+      snippet: item.notes,
+      domain: item.domain,
+      retrievedAt,
+      publishedAt: null,
+    }));
+}
+
+function markKnownRegisterEndpoints(
+  evidence: ReturnType<typeof classifyRegulatoryEvidence>,
+  country: string | null,
+): ReturnType<typeof classifyRegulatoryEvidence> {
+  const match = registerEndpointsForCountry(country).find((item) => {
+    const left = item.url.replace(/\/+$/, "").toLowerCase();
+    const right = evidence.sourceUrl.replace(/\/+$/, "").toLowerCase();
+    return (
+      item.isRegisterDocument &&
+      item.country === country &&
+      (right === left || right.startsWith(`${left}/`) || right.includes(item.domain))
+    );
+  });
+  if (!match) return evidence;
+  return {
+    ...evidence,
+    sufficientForRegisterLocation: true,
+    evidenceType:
+      evidence.evidenceType === "regulator_homepage" || evidence.evidenceType === "ministry_homepage"
+        ? "regulator_portal"
+        : evidence.evidenceType,
+    regulatoryConfidence:
+      evidence.regulatoryConfidence === "insufficient" ? "supporting_official" : evidence.regulatoryConfidence,
+  };
+}
+
+async function enrichPesticideHitsWithPages(hits: SearchHit[]): Promise<SearchHit[]> {
+  const unique: SearchHit[] = [];
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    const key = hit.url.replace(/\/+$/, "").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(hit);
+  }
+  const toFetch = unique.slice(0, 4);
+  const fetched = await Promise.all(
+    toFetch.map(async (hit) => {
+      const page = await defaultPageFetcher(hit.url);
+      if (!page?.text) return hit;
+      return {
+        ...hit,
+        title: page.title || hit.title,
+        snippet: `${hit.snippet} ${page.text}`.slice(0, 8000),
+        retrievedAt: page.retrievedAt || hit.retrievedAt,
+        publishedAt: page.publishedAt ?? hit.publishedAt,
+      } satisfies SearchHit;
+    }),
+  );
+  const remaining = unique.slice(4);
+  return [...fetched, ...remaining];
+}
+
 export function researchNotesForPrompt(result: ResearchResult): string {
   if (result.countryMissing) {
     return "Country is unknown and required for this local question. Ask: What country are you farming in? Give only general agronomy until the country is known. Do not use Trinidad information for another country.";
@@ -301,9 +434,18 @@ export function researchNotesForPrompt(result: ResearchResult): string {
     return lines.join("\n");
   }
   if (result.country) lines.push(`Country in scope: ${result.country}.`);
+  if (result.pesticideAnswer) {
+    lines.push("PESTICIDE LOOKUP RESULT (use this as the farmer-facing answer; do not replace it with 'contact the ministry' or 'contact extension'):");
+    lines.push(result.pesticideAnswer.farmerText);
+    lines.push(
+      "Do not dump an unmanageable product list. Do not use another country's registration as legal proof. Do not ask the farmer to clarify if the previous turn already named the source.",
+    );
+  }
   for (const note of result.generalNotes) lines.push(note);
-  for (const check of result.pesticideChecks) {
-    lines.push(formatPesticideBlock(check));
+  if (!result.pesticideAnswer) {
+    for (const check of result.pesticideChecks) {
+      lines.push(formatPesticideBlock(check));
+    }
   }
   for (const market of result.marketNotes) {
     if (!market.priceText) {

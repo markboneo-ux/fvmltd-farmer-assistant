@@ -4,6 +4,7 @@
  */
 
 import { extractLastCrop } from "./crops";
+import { isDeicticFollowUp } from "./reference-resolution";
 
 export const INTENT_CATEGORIES = [
   "crop_problem",
@@ -296,6 +297,7 @@ export function isLikelyFollowUp(
   const text = message.trim();
   if (!text) return false;
   if (FOLLOW_UP_HINT.test(text)) return true;
+  if (options?.hasHistory && isDeicticFollowUp(text)) return true;
 
   const namedCrop = extractLastCrop(text);
   if (namedCrop && options?.activeCrop && namedCrop !== options.activeCrop.toLowerCase()) {
@@ -356,6 +358,10 @@ export function resolveConversationIntent(options: {
   const classified = classifyFarmerIntent(options.message);
   const previous = asIntent(options.activeIntent) ?? asIntent(options.historyIntent);
   if (!previous) return classified;
+
+  if (isDeicticFollowUp(options.message)) {
+    return pack(previous);
+  }
 
   if (
     shouldStartNewCase({
