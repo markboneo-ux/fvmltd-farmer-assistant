@@ -268,6 +268,12 @@ export async function POST(request: Request) {
     });
 
     const continuingCase = incomingCaseId ? await getCropCase(incomingCaseId) : null;
+    if (continuingCase) {
+      profile = {
+        country: profile.country || continuingCase.country,
+        district: profile.district || continuingCase.district,
+      };
+    }
     let topicReset = false;
     if (
       continuingCase &&
@@ -350,6 +356,9 @@ export async function POST(request: Request) {
               crop: continuingCase.crop,
               conversationIntent: continuingCase.conversationIntent,
               farmerProblemText: continuingCase.farmerProblemText,
+              country: continuingCase.country,
+              district: continuingCase.district,
+              farmerLevel: continuingCase.userLevel,
             }
           : null,
     });

@@ -5,6 +5,17 @@
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
 import {
+  ASK_COUNTRY_QUESTION,
+  extractRegionAndCountry,
+  farmerLevelToUserLevel,
+  inferFarmerLevel,
+  inferIrrigation,
+  inferProductionSystem,
+  shouldAskCountry,
+  userLevelToFarmerLevel,
+  type FarmerLevel,
+} from "@/lib/assistant/farmer-context";
+import {
   isBusinessIntent,
   isCalculationIntent,
   type IntentCategory,
@@ -77,11 +88,13 @@ export const WHITEFLY_QUICK_SEQUENCE = [
   "What have you sprayed during the last seven days?",
 ] as const;
 
-export type FarmerScale = "commercial" | "home" | null;
+export type FarmerScale = "commercial" | "home" | "small" | null;
 export type FarmerUserType =
   | "home_gardener"
   | "farmer"
+  | "small_farmer"
   | "commercial_grower"
+  | "technical_user"
   | "agronomist"
   | "extension_officer"
   | null;
@@ -97,6 +110,8 @@ export type KnownFarmerFacts = {
   productionSystem: string | null;
   farmerScale: FarmerScale;
   userType: FarmerUserType;
+  farmerLevel: FarmerLevel | null;
+  irrigationType: string | null;
   areaPlanted: string | null;
   plantAge: string | null;
   suddenWilt: boolean;
@@ -178,21 +193,10 @@ export function extractKnownFacts(
             : null;
 
   let country: string | null = profile?.country?.trim() || null;
-  if (!country) {
-    if (/\btrinidad\b/.test(lower) || /\btobago\b/.test(lower)) {
-      country = "Trinidad and Tobago";
-    } else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
-    else if (/\bbarbados\b/.test(lower)) country = "Barbados";
-    else if (/\bguyana\b/.test(lower)) country = "Guyana";
-  }
-
   let district: string | null = profile?.district?.trim() || null;
-  if (!district) {
-    const districtMatch = lower.match(
-      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
-    );
-    if (districtMatch) district = districtMatch[1];
-  }
+  const located = extractRegionAndCountry(rawText);
+  if (!country && located.country) country = located.country;
+  if (!district && located.region) district = located.region;
 
   let distributionHint: string | null = null;
   if (/\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower)) {
@@ -203,37 +207,17 @@ export function extractKnownFacts(
     distributionHint = "few plants";
   }
 
-  let productionSystem: string | null = null;
-  if (/\bgreenhouse\b/.test(lower)) productionSystem = "greenhouse";
-  else if (/\bshade\s*house\b/.test(lower)) productionSystem = "shade_house";
-  else if (/\bhydroponic\b/.test(lower)) productionSystem = "hydroponic";
-  else if (/\bopen\s+field\b/.test(lower)) productionSystem = "open_field";
+  const productionSystem = inferProductionSystem(rawText);
 
+  const inferredLevel = inferFarmerLevel(rawText);
+  const farmerLevel = inferredLevel.level;
   let farmerScale: FarmerScale = null;
-  let userType: FarmerUserType = null;
-  if (/\b(agronomist|plant patholog|crop advisor)\b/.test(lower)) {
-    userType = "agronomist";
+  let userType: FarmerUserType = farmerLevelToUserLevel(farmerLevel);
+  if (farmerLevel === "HOME_GARDENER") farmerScale = "home";
+  else if (farmerLevel === "COMMERCIAL_FARMER" || farmerLevel === "AGRONOMIST" || farmerLevel === "TECHNICAL_USER") {
     farmerScale = "commercial";
-  } else if (/\b(extension officer|extension agent)\b/.test(lower)) {
-    userType = "extension_officer";
-    farmerScale = "commercial";
-  } else if (
-    /\bcommercial\s+(farmer|grower|farm|production|field)\b/.test(lower) ||
-    /\bi('m| am)\s+a\s+commercial\b/.test(lower) ||
-    /\b\d+(?:\.\d+)?\s*(acres?|hectares?|ha)\b/.test(lower)
-  ) {
-    farmerScale = "commercial";
-    userType = "commercial_grower";
-  } else if (
-    /\b(home|backyard|kitchen)\s+(garden|gardener|grower|tomato|pepper|crop|plants?)\b/.test(
-      lower,
-    ) ||
-    /\b(home\s+gardener|backyard)\b/.test(lower)
-  ) {
-    farmerScale = "home";
-    userType = "home_gardener";
-  } else if (/\b(farmer|farm)\b/.test(lower)) {
-    userType = "farmer";
+  } else if (farmerLevel === "SMALL_FARMER") {
+    farmerScale = "small";
   }
 
   const areaMatch = lower.match(
@@ -259,6 +243,8 @@ export function extractKnownFacts(
     productionSystem,
     farmerScale,
     userType,
+    farmerLevel,
+    irrigationType: inferIrrigation(rawText),
     areaPlanted,
     plantAge,
     suddenWilt:
@@ -303,11 +289,7 @@ export function questionAsksForKnownFact(
     return true;
   }
 
-  if (
-    facts.country &&
-    LOCATION_QUESTION.test(question) &&
-    !/\b(would|materially|change)\b/i.test(question)
-  ) {
+  if (facts.country && LOCATION_QUESTION.test(question)) {
     return true;
   }
 
@@ -350,6 +332,7 @@ export function applyCommercialSafetyGuards(
     knownFacts: KnownFarmerFacts;
     intent?: IntentCategory | null;
     askForCrop?: boolean;
+    researchNeed?: string | null;
   },
 ): AgronomicCasePayload {
   const mode = options.mode;
@@ -463,13 +446,20 @@ export function applyCommercialSafetyGuards(
     nextQuestion = "";
   }
 
-  // Do not automatically ask country when already known, or first in Quick Help.
-  if (
-    nextQuestion &&
-    LOCATION_QUESTION.test(nextQuestion) &&
-    (options.knownFacts.country || mode === "quick_help")
-  ) {
-    nextQuestion = "";
+  // Re-ask country only when it is unknown and local facts would change the advice.
+  if (nextQuestion && LOCATION_QUESTION.test(nextQuestion)) {
+    const needsCountry = shouldAskCountry({
+      country: options.knownFacts.country,
+      intent: options.intent,
+      asksForProducts: options.knownFacts.asksForProducts,
+      asksAboutWeather: options.knownFacts.asksAboutWeather,
+      researchNeed: options.researchNeed,
+    });
+    if (!needsCountry) {
+      nextQuestion = "";
+    } else if (!options.knownFacts.country && nextQuestion !== ASK_COUNTRY_QUESTION) {
+      nextQuestion = ASK_COUNTRY_QUESTION;
+    }
   }
 
   const questionsIncludingThis =
@@ -527,8 +517,12 @@ export function applyCommercialSafetyGuards(
   }
 
   if (isGuidanceStage(stage) && !skipDiagnosisWorkflow) {
-    if (!preliminaryAssessment.toLowerCase().includes("preliminary")) {
-      preliminaryAssessment = `Preliminary guidance: ${preliminaryAssessment}`;
+    if (
+      (options.knownFacts.suddenWilt || escalationRecommended) &&
+      !preliminaryAssessment.toLowerCase().includes("not a confirmed") &&
+      !preliminaryAssessment.toLowerCase().includes("preliminary")
+    ) {
+      preliminaryAssessment = `${preliminaryAssessment} This is not a confirmed laboratory diagnosis.`.trim();
     }
   }
 
@@ -570,7 +564,6 @@ export function applyCommercialSafetyGuards(
     if (typedReplies.length > 0) {
       quickReplies = typedReplies;
     } else {
-      // Unsupported / open question type — no unrelated buttons.
       quickReplies = [];
     }
   } else if (isGuidanceStage(stage)) {
@@ -585,6 +578,8 @@ export function applyCommercialSafetyGuards(
     questionId = "";
     quickReplies = [];
   }
+
+  quickReplies = quickReplies.filter((item) => !/\bask about products\b/i.test(item));
 
   return {
     mode,
@@ -610,6 +605,13 @@ export function applyCommercialSafetyGuards(
     weatherRelevance: payload.weatherRelevance ?? "omit",
     weatherBrief: payload.weatherBrief ?? null,
     webSources: payload.webSources ?? [],
+    likelyCauses: payload.likelyCauses ?? [],
+    diagnosisWhy: payload.diagnosisWhy ?? null,
+    whatWouldChangeDiagnosis: payload.whatWouldChangeDiagnosis ?? [],
+    monitorNext: payload.monitorNext ?? null,
+    farmerLevel: payload.farmerLevel ?? userLevelToFarmerLevel(options.knownFacts.userType),
+    sourceVerificationLine: payload.sourceVerificationLine ?? null,
+    sourcesCollapsed: payload.sourcesCollapsed ?? true,
   };
 }
 

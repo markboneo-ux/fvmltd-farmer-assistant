@@ -1,5 +1,6 @@
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import type { CaseChatMessage } from "@/lib/agronomy/runCase";
+import { farmerLevelToUserLevel } from "@/lib/assistant/farmer-context";
 import {
   resolveConversationIntent,
   shouldStartNewCase,
@@ -158,8 +159,13 @@ export async function persistConversationTurn(options: {
       ),
       humanEscalation: Boolean(options.payload?.escalationRecommended),
       severity: options.payload?.severity ?? record.severity,
-      possibleCauses: options.payload?.checksToday ?? record.possibleCauses,
+      possibleCauses:
+        options.payload?.likelyCauses ??
+        options.payload?.checksToday ??
+        record.possibleCauses,
       recommendedActions: options.payload?.safeActionsNow ?? record.recommendedActions,
+      userLevel:
+        farmerLevelToUserLevel(options.payload?.farmerLevel ?? null) ?? record.userLevel,
       caseStatus: options.payload?.escalationRecommended
         ? "human_review"
         : options.payload?.stage === "resolved"
@@ -188,7 +194,9 @@ export async function persistConversationTurn(options: {
     await addCaseObservation({
       caseId: record.id,
       observedFacts: [options.userMessage],
-      possibleCauses: options.payload.checksToday,
+      possibleCauses: options.payload.likelyCauses?.length
+        ? options.payload.likelyCauses
+        : options.payload.checksToday,
       confidence:
         options.payload.severity === "high"
           ? "medium"

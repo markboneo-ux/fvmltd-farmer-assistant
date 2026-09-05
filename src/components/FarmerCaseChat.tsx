@@ -68,7 +68,7 @@ type FarmerCaseChatProps = {
   showModeToggle?: boolean;
   showDiagnostics?: boolean;
   showTestPrompts?: boolean;
-  defaultCountry?: string;
+  defaultCountry?: string | null;
   defaultDistrict?: string | null;
   title?: string;
   subtitle?: string;
@@ -92,7 +92,7 @@ export function FarmerCaseChat({
   showModeToggle = false,
   showDiagnostics = false,
   showTestPrompts = false,
-  defaultCountry = "Trinidad and Tobago",
+  defaultCountry = null,
   defaultDistrict = null,
   title = PRODUCT_NAME,
   subtitle = PRODUCT_SUBTITLE,
@@ -249,8 +249,8 @@ export function FarmerCaseChat({
       form.append(
         "profile",
         JSON.stringify({
-          country: defaultCountry,
-          district: defaultDistrict,
+          country: defaultCountry || "",
+          district: defaultDistrict || "",
         }),
       );
       for (const file of preparedFiles) {

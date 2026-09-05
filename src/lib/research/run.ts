@@ -55,7 +55,7 @@ export async function runWebResearch(
     message: options.message,
     intent: options.intent,
   });
-  const country = options.country?.trim() || "Trinidad and Tobago";
+  const country = options.country?.trim() || "";
   const empty: WebResearchResult = {
     needed: need,
     usedWeb: false,
@@ -70,6 +70,14 @@ export async function runWebResearch(
 
   if (need === "none") {
     return empty;
+  }
+
+  if (!country) {
+    return {
+      ...empty,
+      brief:
+        "Country is unknown. Do not assume Trinidad and Tobago. Ask: What country are you farming in? Do not invent registrations, prices, or programmes.",
+    };
   }
 
   const category = categoryForNeed(need);
@@ -118,10 +126,12 @@ export async function runWebResearch(
 
   const citations = dedupeCitations(
     okDocs.map((doc) => ({
-      name: doc.source.name,
-      url: doc.url,
-      category: doc.source.category,
-      trustLevel: doc.source.trustLevel,
+        name: doc.source.name,
+        url: doc.url,
+        organization: doc.source.name,
+        publishedAt: doc.source.lastCheckedAt,
+        category: doc.source.category,
+        trustLevel: doc.source.trustLevel,
     })),
   );
 
@@ -141,6 +151,8 @@ export async function runWebResearch(
       citations.unshift({
         name: pesticide.sourceName,
         url: pesticide.sourceUrl,
+        organization: pesticide.sourceName,
+        publishedAt: pesticide.lastVerifiedAt,
         category: "pesticide_registration",
         trustLevel: "official_government",
       });
@@ -176,6 +188,8 @@ export async function runWebResearch(
       citations.unshift({
         name: "NAMDEVCO market data",
         url: namis?.url ?? "https://namistt.com/",
+        organization: "NAMDEVCO",
+        publishedAt: asOf,
         category: "market_prices",
         trustLevel: "statutory_authority",
       });
@@ -222,11 +236,16 @@ export function formatResearchBriefForModel(result: WebResearchResult): string {
   }
   if (result.citations.length > 0) {
     lines.push(
-      `Cite only these names if you use this information: ${result.citations.map((item) => item.name).join("; ")}`,
+      "Use these facts silently. Do not name the source organisations in the farmer-facing answer — the server attaches a collapsed Sources used list.",
     );
   }
   lines.push(
     "Do not invent prices, registrations, or programmes beyond this brief. If data may be old, say so.",
   );
+  if (result.needed === "pesticide_registration" || result.needed === "product_label") {
+    lines.push(
+      "Pesticide logic: country → crop → problem → active ingredient → local registration → label → local trade name only if verified. Never assume a trade name is legal. Only include rates, PHI, REI, or intervals if this brief verifies a current label.",
+    );
+  }
   return lines.join("\n");
 }

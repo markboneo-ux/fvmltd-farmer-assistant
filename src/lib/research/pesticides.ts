@@ -84,7 +84,24 @@ export function verifyPesticideForCountry(options: {
   tradeName?: string | null;
   message?: string;
 }): PesticideVerification {
-  const country = options.country?.trim() || "Trinidad and Tobago";
+  const country = options.country?.trim() || "";
+  if (!country) {
+    return {
+      country: "",
+      activeIngredient:
+        options.activeIngredient?.trim().toLowerCase() ||
+        extractActiveIngredient(options.message ?? "") ||
+        null,
+      tradeName: options.tradeName ?? extractTradeName(options.message ?? ""),
+      verified: false,
+      status: "unverified",
+      localTradeNames: [],
+      sourceName: null,
+      sourceUrl: null,
+      lastVerifiedAt: null,
+      farmerMessage: "I need the country you are farming in before I can check local pesticide registration.",
+    };
+  }
   const activeIngredient =
     options.activeIngredient?.trim().toLowerCase() ||
     extractActiveIngredient(options.message ?? "") ||

@@ -1,7 +1,9 @@
 export type UserLevel =
   | "home_gardener"
   | "farmer"
+  | "small_farmer"
   | "commercial_grower"
+  | "technical_user"
   | "agronomist"
   | "extension_officer";
 

@@ -3,6 +3,7 @@
  * Used by OpenAI Structured Outputs and the farmer UI.
  */
 
+import type { FarmerLevel } from "@/lib/assistant/farmer-context";
 import type { WebSourceCitation } from "@/lib/research/types";
 import {
   isQuestionType,
@@ -108,6 +109,13 @@ export type AgronomicCasePayload = {
   weatherRelevance?: WeatherRelevanceLevel;
   weatherBrief?: string | null;
   webSources?: WebSourceCitation[];
+  likelyCauses?: string[];
+  diagnosisWhy?: string | null;
+  whatWouldChangeDiagnosis?: string[];
+  monitorNext?: string | null;
+  farmerLevel?: FarmerLevel | null;
+  sourceVerificationLine?: string | null;
+  sourcesCollapsed?: boolean;
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
@@ -297,6 +305,13 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     weatherRelevance: "omit",
     weatherBrief: null,
     webSources: [],
+    likelyCauses: asStringArray(data.likelyCauses),
+    diagnosisWhy: asTrimmedString(data.diagnosisWhy) || null,
+    whatWouldChangeDiagnosis: asStringArray(data.whatWouldChangeDiagnosis),
+    monitorNext: asTrimmedString(data.monitorNext) || null,
+    farmerLevel: null,
+    sourceVerificationLine: null,
+    sourcesCollapsed: true,
   };
 }
 

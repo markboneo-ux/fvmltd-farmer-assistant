@@ -37,10 +37,10 @@ export type GetWeatherDiseaseRiskResult = {
 export async function getWeatherDiseaseRisk(
   args: GetWeatherDiseaseRiskArgs,
 ): Promise<GetWeatherDiseaseRiskResult> {
-  const country = args.country?.trim() || "Trinidad and Tobago";
+  const country = args.country?.trim() || "";
   const crop = args.crop?.trim().toLowerCase() || "";
 
-  if (!crop) {
+  if (!country || !crop) {
     return {
       country,
       district: args.district ?? null,
@@ -49,7 +49,7 @@ export async function getWeatherDiseaseRisk(
       provider: null,
       alerts: [],
       verified: false,
-      error: "Crop is required for weather disease risk.",
+      error: !country ? "Country is required for a local forecast." : "Crop is required.",
     };
   }
 

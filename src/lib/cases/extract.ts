@@ -1,4 +1,12 @@
 import { extractLastCrop } from "@/lib/assistant/crops";
+import {
+  extractRegionAndCountry,
+  farmerLevelToUserLevel,
+  inferFarmerLevel,
+  inferIrrigation,
+  inferProductionSystem,
+  userLevelToFarmerLevel,
+} from "@/lib/assistant/farmer-context";
 import type { UserLevel } from "@/lib/beta/identity";
 import type { HomeOrCommercial, StructuredCaseFacts } from "./types";
 
@@ -27,27 +35,17 @@ function titleCase(value: string): string {
 }
 
 export function inferUserLevel(text: string): UserLevel | null {
-  const lower = text.toLowerCase();
-  if (/\b(agronomist|plant patholog|crop advisor)\b/.test(lower)) return "agronomist";
-  if (/\b(extension officer|extension agent|ministry of agriculture)\b/.test(lower)) {
-    return "extension_officer";
-  }
-  if (
-    /\b(commercial grower|commercial farm|commercial production|greenhouse business)\b/.test(lower) ||
-    /\b\d+(\.\d+)?\s*(acres?|hectares?|ha)\b/.test(lower)
-  ) {
-    return "commercial_grower";
-  }
-  if (/\b(home garden|backyard|kitchen garden|pots? on (the )?porch)\b/.test(lower)) {
-    return "home_gardener";
-  }
-  if (/\b(farmer|farm)\b/.test(lower)) return "farmer";
-  return null;
+  return farmerLevelToUserLevel(inferFarmerLevel(text).level);
 }
 
 export function inferHomeOrCommercial(text: string, level: UserLevel | null): HomeOrCommercial {
-  if (level === "home_gardener") return "home";
-  if (level === "commercial_grower" || level === "agronomist" || level === "extension_officer") {
+  const farmerLevel = userLevelToFarmerLevel(level);
+  if (farmerLevel === "HOME_GARDENER") return "home";
+  if (
+    farmerLevel === "COMMERCIAL_FARMER" ||
+    farmerLevel === "AGRONOMIST" ||
+    farmerLevel === "TECHNICAL_USER"
+  ) {
     return "commercial";
   }
   const lower = text.toLowerCase();
@@ -127,15 +125,10 @@ export function extractStructuredFacts(
   const crop = extractLastCrop(text);
 
   const userLevel = inferUserLevel(text);
-  const district = extractDistrict(text) || profile?.district?.trim() || null;
-  let country = profile?.country?.trim() || null;
-  if (!country) {
-    if (/\btrinidad\b/.test(lower) || /\btobago\b/.test(lower) || district) {
-      country = "Trinidad and Tobago";
-    } else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
-    else if (/\bbarbados\b/.test(lower)) country = "Barbados";
-    else if (/\bguyana\b/.test(lower)) country = "Guyana";
-  }
+  const located = extractRegionAndCountry(text);
+  const district =
+    located.region || extractDistrict(text) || profile?.district?.trim() || null;
+  let country = profile?.country?.trim() || located.country || null;
 
   const areaMatch = lower.match(/\b(\d+(?:\.\d+)?)\s*(acres?|hectares?|ha)\b/);
   const ageMatch =
@@ -151,11 +144,7 @@ export function extractStructuredFacts(
     fieldDistribution = "few plants";
   }
 
-  let productionSystem: string | null = null;
-  if (/\bgreenhouse\b/.test(lower)) productionSystem = "greenhouse";
-  else if (/\bshade\s*house\b/.test(lower)) productionSystem = "shade_house";
-  else if (/\bhydroponic\b/.test(lower)) productionSystem = "hydroponic";
-  else if (/\bopen\s+field\b/.test(lower)) productionSystem = "open_field";
+  const productionSystem = inferProductionSystem(text);
 
   return {
     crop,
@@ -175,9 +164,7 @@ export function extractStructuredFacts(
     soilOrMedium: /\b(coco\s*peat|soil|compost| potting)\b/.test(lower)
       ? (lower.match(/\b(coco\s*peat|potting mix|clay|sandy soil|loam)\b/)?.[1] ?? "soil")
       : null,
-    irrigation: /\b(drip|sprinkler|flood|hose|hand water)/.test(lower)
-      ? (lower.match(/\b(drip|sprinkler|flood irrigation|hose|hand water(?:ing)?)\b/)?.[1] ?? null)
-      : null,
+    irrigation: inferIrrigation(text),
     drainage: /\b(poor drainage|waterlog|stays(?:\s+\w+){0,2}\s+wet|well drained)\b/.test(lower)
       ? (lower.match(/\b(poor drainage|waterlogged|stays(?:\s+\w+){0,2}\s+wet|well drained)\b/)?.[1] ?? "stays wet")
       : null,

@@ -22,12 +22,16 @@ import {
 } from "./intents";
 import type { KnownFarmerFacts } from "@/lib/agronomy/tomato-protocol";
 import { extractKnownFacts } from "@/lib/agronomy/tomato-protocol";
+import { userLevelToFarmerLevel } from "./farmer-context";
 
 export type ActiveCaseContext = {
   crop: string | null;
   variety?: string | null;
   conversationIntent?: string | null;
   farmerProblemText?: string | null;
+  country?: string | null;
+  district?: string | null;
+  farmerLevel?: string | null;
 };
 
 export type ResolvedTurnContext = {
@@ -139,6 +143,29 @@ export function resolveTurnContext(options: {
 
   if (currentCrop && historyCrop && currentCrop !== historyCrop) {
     knownFacts = extractKnownFacts(options.message, options.profile);
+  }
+
+  const stableFacts = extractKnownFacts(
+    `${options.profile?.country ?? ""} ${options.profile?.district ?? ""}\n${userHistoryText(history)}`,
+    options.profile,
+  );
+  if (options.activeCase?.country && !knownFacts.country) {
+    knownFacts.country = options.activeCase.country;
+  }
+  if (options.activeCase?.district && !knownFacts.district) {
+    knownFacts.district = options.activeCase.district;
+  }
+  if (!knownFacts.country && stableFacts.country) knownFacts.country = stableFacts.country;
+  if (!knownFacts.district && stableFacts.district) knownFacts.district = stableFacts.district;
+  if (!knownFacts.farmerLevel && stableFacts.farmerLevel) {
+    knownFacts.farmerLevel = stableFacts.farmerLevel;
+    knownFacts.userType = stableFacts.userType;
+    knownFacts.farmerScale = stableFacts.farmerScale;
+  }
+  if (options.activeCase?.farmerLevel && !knownFacts.farmerLevel) {
+    knownFacts.farmerLevel =
+      userLevelToFarmerLevel(options.activeCase.farmerLevel) ??
+      (options.activeCase.farmerLevel as KnownFarmerFacts["farmerLevel"]);
   }
 
   if (!carryCrop) {

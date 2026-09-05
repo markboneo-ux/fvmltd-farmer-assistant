@@ -40,6 +40,8 @@ export type TrustedSource = {
 export type WebSourceCitation = {
   name: string;
   url: string | null;
+  organization?: string | null;
+  publishedAt?: string | null;
   category?: SourceCategory;
   trustLevel?: TrustLevel;
 };

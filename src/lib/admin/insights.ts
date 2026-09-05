@@ -180,6 +180,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const byCaseType = new Map<string, number>();
   const byCalculation = new Map<string, number>();
   const byQuestionType = new Map<string, number>();
+  const byFarmerLevel = new Map<string, number>();
   let unresolved = 0;
   let escalations = 0;
   let nutrient = 0;
@@ -201,6 +202,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     increment(byIntent, item.conversationIntent);
     increment(byCaseType, item.caseType);
     increment(byQuestionType, questionBucket(item.questionCategory ?? item.conversationIntent));
+    increment(byFarmerLevel, item.userLevel);
     if (item.calculationType) increment(byCalculation, item.calculationType);
     for (const symptom of item.symptoms) increment(bySymptom, symptom);
     if (item.humanEscalation || item.caseStatus === "human_review") escalations += 1;
@@ -366,6 +368,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
           item.label !== "unknown",
       ),
       casesByType: topEntries(byCaseType),
+      casesByFarmerLevel: topEntries(byFarmerLevel),
       emergingTrends: trends.map((item) => ({
         label: [item.crop, item.region, item.symptomCluster].filter(Boolean).join(" · "),
         count: item.uniqueSessionCount,

@@ -173,7 +173,7 @@ export function sourcesForCountry(country: string | null | undefined): TrustedSo
   const needle = (country ?? "").trim().toLowerCase();
   return TRUSTED_SOURCES.filter((source) => {
     if (source.country === "Caribbean") return true;
-    if (!needle) return source.country === "Trinidad and Tobago" || source.country === "Caribbean";
+    if (!needle) return source.country === "Caribbean";
     return (
       source.country.toLowerCase() === needle ||
       (needle.includes("trinidad") && source.country === "Trinidad and Tobago") ||

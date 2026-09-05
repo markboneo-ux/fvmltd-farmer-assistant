@@ -115,6 +115,7 @@ type InsightsPayload = {
       mostCommonCalculations?: CountRow[];
       mostCommonNonDiagnosticNeeds?: CountRow[];
       casesByType?: CountRow[];
+      casesByFarmerLevel?: CountRow[];
       emergingTrends?: TrendRow[];
       nonDiagnosticCaseCount?: number;
     };
@@ -408,6 +409,10 @@ export function AdminInsightsView() {
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Cases by region</h2>
               <Bars rows={agronomy.casesByRegion ?? agronomy.problemsByDistrict} />
+            </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+              <h2 className="font-semibold">Farmer level</h2>
+              <Bars rows={agronomy.casesByFarmerLevel ?? []} />
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Guest vs registered</h2>
