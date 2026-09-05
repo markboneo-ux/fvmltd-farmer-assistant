@@ -150,6 +150,13 @@ export async function persistConversationTurn(options: {
       kind: "case",
       caseId: record.id,
     });
+    if (options.payload?.locationConfidence) {
+      await updateCaseFromConversation(record.id, options.userMessage, {
+        businessMetadata: {
+          locationConfidence: options.payload.locationConfidence,
+        },
+      });
+    }
   } else {
     await updateCaseFromConversation(record.id, options.userMessage, {
       productsRequested:
@@ -175,6 +182,10 @@ export async function persistConversationTurn(options: {
       questionCategory: classified.questionCategory,
       calculationType: classified.calculationType,
       caseType: classified.caseType,
+      businessMetadata: {
+        ...(record.businessMetadata ?? {}),
+        locationConfidence: options.payload?.locationConfidence ?? null,
+      },
     });
   }
 

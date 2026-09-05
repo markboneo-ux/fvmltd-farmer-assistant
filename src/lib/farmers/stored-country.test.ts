@@ -30,5 +30,11 @@ describe("new farmer country defaults", () => {
     );
     expect(sql).toMatch(/alter column country drop default/i);
     expect(sql).not.toMatch(/set default 'Trinidad and Tobago'/i);
+    const registerForm = readFileSync(
+      join(process.cwd(), "src/components/RegisterForm.tsx"),
+      "utf8",
+    );
+    expect(registerForm).toMatch(/country:\s*""/);
+    expect(registerForm).not.toMatch(/country:\s*DEFAULT_COUNTRY/);
   });
 });

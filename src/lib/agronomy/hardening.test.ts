@@ -205,6 +205,11 @@ describe("pesticide fallback and trend geography", () => {
       "pesticide_registration",
       "pesticide_registration",
     );
+    expect(targets[0]?.id).toBe("gy-ptccb");
+    expect(targets.some((source) => source.id === "cardi")).toBe(true);
+    expect(targets.some((source) => source.id === "fao-plant-production" || source.country === "International")).toBe(
+      true,
+    );
     expect(
       targets.some(
         (source) =>
@@ -224,6 +229,100 @@ describe("pesticide fallback and trend geography", () => {
     );
     expect(text.toLowerCase()).not.toMatch(/therefore you can use it/);
     expect(text).toMatch(/haven't verified registration for celery in Guyana/i);
+  });
+
+  it("keeps stored explicit country confidence on a later turn", () => {
+    const facts = extractKnownFacts("What fungicide can I use?", {
+      country: "Trinidad and Tobago",
+      countrySource: "continuing",
+      locationConfidence: "explicit",
+    });
+    expect(facts.country).toBe("Trinidad and Tobago");
+    expect(facts.locationConfidence).toBe("explicit");
+    expect(countryReliableForLocalFacts(facts.locationConfidence)).toBe(true);
+    expect(
+      shouldConfirmCountry({
+        country: "Trinidad and Tobago",
+        confidence: facts.locationConfidence,
+        asksForProducts: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("gives Cercospora spray answers general agronomy, not another country's registration", () => {
+    const facts = extractKnownFacts(
+      "I'm growing sweet pepper in Guyana. What can I spray for Cercospora?",
+    );
+    expect(facts.country).toBe("Guyana");
+    expect(facts.locationConfidence).toBe("explicit");
+    expect(facts.asksForProducts).toBe(true);
+    const shaped = applyDiagnosticPlaybook(payload(), {
+      facts,
+      farmerLevel: "SMALL_FARMER",
+      intent: "pest_disease",
+    });
+    expect(shaped.preliminaryAssessment.toLowerCase()).toMatch(
+      /haven't verified registration|general agronomy|not proof of local registration/,
+    );
+    expect(shaped.preliminaryAssessment.toLowerCase()).not.toMatch(
+      /trinidad.{0,40}therefore|registered in trinidad/,
+    );
+    expect((shaped.likelyCauses ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(shaped.checksToday.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("changes lettuce diagnosis depth across all five farmer levels", () => {
+    const message = "My lettuce has brown edges.";
+    const byLevel = {
+      HOME_GARDENER: applyDiagnosticPlaybook(payload(), {
+        facts: { ...extractKnownFacts("My backyard lettuce in pots on the porch has brown edges.") },
+        farmerLevel: "HOME_GARDENER",
+        intent: "crop_problem",
+      }),
+      SMALL_FARMER: applyDiagnosticPlaybook(payload(), {
+        facts: extractKnownFacts("I farm a small plot of lettuce with brown edges"),
+        farmerLevel: "SMALL_FARMER",
+        intent: "crop_problem",
+      }),
+      COMMERCIAL_FARMER: applyDiagnosticPlaybook(payload(), {
+        facts: extractKnownFacts("I am a commercial farmer with 3 acres of lettuce with brown edges"),
+        farmerLevel: "COMMERCIAL_FARMER",
+        intent: "crop_problem",
+      }),
+      TECHNICAL_USER: applyDiagnosticPlaybook(payload(), {
+        facts: extractKnownFacts(
+          "Lettuce foliar necrosis. Differential for tip burn vs Cercospora. Check EC and FRAC if we spray.",
+        ),
+        farmerLevel: "TECHNICAL_USER",
+        intent: "crop_problem",
+      }),
+      AGRONOMIST: applyDiagnosticPlaybook(payload(), {
+        facts: { ...extractKnownFacts(message), farmerLevel: "AGRONOMIST" },
+        farmerLevel: "AGRONOMIST",
+        intent: "crop_problem",
+      }),
+    };
+    expect(playbookFor(extractKnownFacts(message), "HOME_GARDENER")?.id).toBe("generic_home");
+    expect(playbookFor(extractKnownFacts("I farm a small plot of lettuce with brown edges"), "SMALL_FARMER")?.id).toBe(
+      "generic_small",
+    );
+    expect(byLevel.HOME_GARDENER.likelyCauses?.join(" ")).not.toEqual(
+      byLevel.AGRONOMIST.likelyCauses?.join(" "),
+    );
+    expect(byLevel.HOME_GARDENER.likelyCauses?.join(" ")).not.toEqual(
+      byLevel.SMALL_FARMER.likelyCauses?.join(" "),
+    );
+    expect(byLevel.HOME_GARDENER.preliminaryAssessment.toLowerCase()).not.toMatch(
+      /\bfrac\b|\bec\b|epidemiolog/,
+    );
+    expect(byLevel.SMALL_FARMER.preliminaryAssessment.toLowerCase()).toMatch(
+      /bed|field-management|scout/i,
+    );
+    expect(byLevel.COMMERCIAL_FARMER.preliminaryAssessment.toLowerCase()).toMatch(
+      /yield|harvest|resistance|production/,
+    );
+    expect(byLevel.TECHNICAL_USER.likelyCauses?.join(" ")).toMatch(/EC|pH|phytotoxicity/i);
+    expect(byLevel.AGRONOMIST.preliminaryAssessment).toMatch(/FRAC|epidemiolog|IRAC/i);
   });
 
   it("does not merge unknown-country cases into Trinidad trends", () => {

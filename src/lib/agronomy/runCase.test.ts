@@ -68,6 +68,15 @@ describe("parseCaseRequestBody", () => {
     expect(parsed.mode).toBe("full_crop_check");
   });
 
+  it("treats an empty profile country as unknown, not Trinidad", () => {
+    const parsed = parseCaseRequestBody({
+      message: "Tomato whiteflies",
+      profile: { country: "", district: "" },
+    });
+    expect(parsed.profile.country).toBeNull();
+    expect(parsed.profile.district).toBeNull();
+  });
+
   it("parses profile country and images", () => {
     const parsed = parseCaseRequestBody({
       message: "Tomato whiteflies",

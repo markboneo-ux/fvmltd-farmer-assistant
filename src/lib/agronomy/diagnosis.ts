@@ -63,6 +63,114 @@ const GENERIC_DIFFERENTIAL: DiagnosticPlaybook = {
   photoHelpful: true,
 };
 
+function genericDifferentialFor(farmerLevel: FarmerLevel | null): DiagnosticPlaybook {
+  if (farmerLevel === "HOME_GARDENER") {
+    return {
+      ...GENERIC_DIFFERENTIAL,
+      id: "generic_home",
+      likelyCauses: [
+        "Watering or roots under stress",
+        "Too much fertilizer or salt around the roots",
+        "A leaf disease or pest if you see spots or insects",
+      ],
+      why: "Several ordinary garden problems can look similar. Separate brown tips or edges from true spots, and check whether old leaves are worse than new ones, before naming one cause.",
+      checks: [
+        "Does the brown start at the tips, or is it separate spots?",
+        "Feel the soil — soggy or bone dry?",
+        "Did you feed or spray in the last week?",
+      ],
+      actionsToday: [
+        "Do not add more fertilizer today",
+        "Water only if the soil is dry",
+        "A close photo of the leaf and the whole plant would help",
+      ],
+      avoid: [
+        "Do not mix homemade chemical sprays",
+        "Do not keep adding feed while the plants look burnt",
+      ],
+    };
+  }
+  if (farmerLevel === "SMALL_FARMER") {
+    return {
+      ...GENERIC_DIFFERENTIAL,
+      id: "generic_small",
+      likelyCauses: [
+        "Uneven irrigation, drainage, or salt in the beds",
+        "Recent fertilizer or spray injury on the planting",
+        "Disease or insects only if separate spots or pests are present",
+      ],
+      why: "On a small farm planting, separate field-management causes (irrigation, salt, recent spray) from disease before changing the spray programme. Walk the beds and see which patches are worse.",
+      checks: [
+        "Walk the beds — dry patches, wet patches, or everywhere?",
+        "Did you fertigate or spray in the last week?",
+        "Are older leaves worse than new growth?",
+      ],
+      actionsToday: [
+        "Hold extra fertilizer and extra pesticide today",
+        "Fix obvious dry or waterlogged spots in the beds",
+        "Scout new growth over 24–72 hours before changing the spray programme",
+      ],
+    };
+  }
+  if (farmerLevel === "COMMERCIAL_FARMER") {
+    return {
+      ...GENERIC_DIFFERENTIAL,
+      id: "generic_commercial",
+      likelyCauses: [
+        "Irrigation uniformity or root-zone salt/EC affecting marketable quality",
+        "Nutrient imbalance with yield or harvest-timing risk",
+        "Foliar disease or insects if lesions or pests are present (spray-window and resistance implications)",
+      ],
+      why: "On a commercial planting this is a production problem first: map the pattern across beds, check irrigation and recent fertigation, then decide whether disease or insects would force extra sprays, harvest delay, or resistance pressure. Do not treat it as a backyard watering tip only.",
+      checks: [
+        "Map whether damage follows beds, drippers, or spray swaths",
+        "Check irrigation uniformity and recent EC/fertigation records",
+        "Look for discrete lesions versus uniform margin necrosis before planning sprays",
+      ],
+      actionsToday: [
+        "Hold extra N and extra pesticide until the pattern is mapped",
+        "Correct obvious dry or waterlogged zones; do not blanket-leach unless drainage is free and EC is high",
+        "Protect harvest quality by scouting new growth over 24–72 hours",
+      ],
+    };
+  }
+  if (farmerLevel === "TECHNICAL_USER") {
+    return {
+      ...GENERIC_DIFFERENTIAL,
+      id: "generic_technical",
+      likelyCauses: [
+        "Root-zone water relations, pH, or EC/nutrient antagonism",
+        "Phytotoxicity from a recent spray or foliar feed",
+        "Foliar pathogen if discrete lesions, sporulation, or systemic symptoms",
+      ],
+      why: "Treat this as a physiological/pathological differential. Tip or margin necrosis implicates water, salinity/EC, or nutrient transport. Discrete lesions shift prior toward a pathogen. pH and EC interact with nutrient availability and should be read together, not as isolated numbers.",
+      checks: [
+        "Tip/margin necrosis vs discrete lesions; older vs younger leaves",
+        "Recent fertilizer, foliar feed, or pesticide (product, rate, mix)",
+        "Root-zone moisture, drainage, pH, and EC if you can measure them",
+      ],
+    };
+  }
+  if (farmerLevel === "AGRONOMIST") {
+    return {
+      ...GENERIC_DIFFERENTIAL,
+      id: "generic_agronomist",
+      likelyCauses: [
+        "Rhizosphere water potential / osmotic scorch from NaCl or high EC",
+        "Nutrient antagonism or transport failure versus xenobiotic injury",
+        "Foliar mycosis or bacteriosis if lesion anatomy supports it; consider FRAC/IRAC only after that",
+      ],
+      why: "Full technical differential: competing aetiologies, lesion architecture, and epidemiology. Do not start a QoI/DMI (FRAC 11/3) or insecticide (IRAC) programme from a vague symptom. Humidity can increase both abiotic scorch and infection risk without proving either.",
+      checks: [
+        "Lesion architecture, halo, fruiting bodies, or water-soaking",
+        "Root-zone moisture, pH, EC, and recent fertigation recipe",
+        "Spray log: actives, FRAC/IRAC groups, tank-mix, and weather at application",
+      ],
+    };
+  }
+  return GENERIC_DIFFERENTIAL;
+}
+
 const CELERY_BURN: DiagnosticPlaybook = {
   id: "celery_burn",
   likelyCauses: [
@@ -258,12 +366,12 @@ export function playbookFor(
   }
   const text = facts.rawText.toLowerCase();
   if (
-    /\b(burn|burning|yellowing|spots?|stunt|wilt|holes?|leaf\s+spot|scorch|necrosis|brown(ing)?|leaf\s+edges?|tip\s*burn)\b/.test(
+    /\b(burn|burning|yellowing|spots?|stunt|wilt|holes?|leaf\s+spot|scorch|necrosis|brown(ing)?|leaf\s+edges?|tip\s*burn|cercospora|septoria|alternaria|mildew|anthracnose|blight|rot|lesion|chloros)\b/.test(
       text,
     ) &&
     facts.crop
   ) {
-    return GENERIC_DIFFERENTIAL;
+    return genericDifferentialFor(farmerLevel);
   }
   return null;
 }
@@ -400,42 +508,28 @@ export function applyDiagnosticPlaybook(
   const disconfirmers = next.whatWouldChangeDiagnosis ?? [];
 
   const celerySpecific = playbook.id.startsWith("celery");
-  const missingStructure =
-    celerySpecific ||
-    isThinAssessment(next) ||
-    next.checksToday.length === 0;
-
-  if (missingStructure) {
-    next = {
-      ...next,
-      likelyCauses: likelyCauses.length > 0 ? likelyCauses : playbook.likelyCauses,
-      diagnosisWhy:
-        next.diagnosisWhy ||
-        (celerySpecific || isThinAssessment(payload) ? playbook.why : null),
-      whatWouldChangeDiagnosis:
-        disconfirmers.length > 0 ? disconfirmers : playbook.whatWouldChange,
-      monitorNext: next.monitorNext || playbook.monitor,
-      checksToday: next.checksToday.length > 0 ? next.checksToday : playbook.checks,
-      safeActionsNow:
-        next.safeActionsNow.length > 0 ? next.safeActionsNow : playbook.actionsToday,
-      actionsToAvoid: next.actionsToAvoid.length > 0 ? next.actionsToAvoid : playbook.avoid,
-      photoRecommended: next.photoRecommended || playbook.photoHelpful,
-    };
-    if (
-      (celerySpecific || isThinAssessment(payload)) &&
-      playbook.why &&
-      (isThinAssessment(payload) || next.preliminaryAssessment.length < 80)
-    ) {
-      next.preliminaryAssessment = playbook.why;
-    }
-  } else {
-    next = {
-      ...next,
-      likelyCauses: likelyCauses.length > 0 ? likelyCauses : [],
-      diagnosisWhy: next.diagnosisWhy || null,
-      whatWouldChangeDiagnosis: disconfirmers,
-      monitorNext: next.monitorNext || null,
-    };
+  // Fill empty diagnostic slots from the playbook. Never invent extra pests or
+  // overwrite causes the model already ranked. Thin assessments may be replaced
+  // with the playbook's reasoning; a solid assessment is kept.
+  next = {
+    ...next,
+    likelyCauses: likelyCauses.length > 0 ? likelyCauses : playbook.likelyCauses,
+    diagnosisWhy: next.diagnosisWhy || playbook.why,
+    whatWouldChangeDiagnosis:
+      disconfirmers.length > 0 ? disconfirmers : playbook.whatWouldChange,
+    monitorNext: next.monitorNext || playbook.monitor,
+    checksToday: next.checksToday.length > 0 ? next.checksToday : playbook.checks,
+    safeActionsNow:
+      next.safeActionsNow.length > 0 ? next.safeActionsNow : playbook.actionsToday,
+    actionsToAvoid: next.actionsToAvoid.length > 0 ? next.actionsToAvoid : playbook.avoid,
+    photoRecommended: next.photoRecommended || playbook.photoHelpful,
+  };
+  if (
+    (celerySpecific || isThinAssessment(payload)) &&
+    playbook.why &&
+    (isThinAssessment(payload) || next.preliminaryAssessment.length < 80)
+  ) {
+    next.preliminaryAssessment = playbook.why;
   }
 
   if (isGuidanceStage(next.stage) || next.stage === "questioning") {
@@ -449,6 +543,17 @@ export function applyDiagnosticPlaybook(
     });
     if (followUp && !questionAsksForKnownFact(followUp, facts)) {
       next.nextQuestion = followUp;
+    }
+  }
+
+  if (
+    facts.asksForProducts &&
+    /\b(cercospora|septoria|alternaria|leaf\s+spot)\b/i.test(facts.rawText)
+  ) {
+    const general =
+      "Active ingredients normally used against Cercospora-type leaf spots include protectant coppers or chlorothalonil and, where a programme is justified, strobilurin (QoI) or DMI fungicides in rotation. That is general agronomy, not proof of local registration.";
+    if (!/haven't verified registration|active ingredients normally used/i.test(next.preliminaryAssessment)) {
+      next.preliminaryAssessment = `${next.preliminaryAssessment} ${general}`.trim();
     }
   }
 

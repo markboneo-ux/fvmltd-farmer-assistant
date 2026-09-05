@@ -30,6 +30,46 @@ describe("web research gating", () => {
       }),
     ).toBe(false);
   });
+
+  it("gates live research for the Preview smoke prompts", () => {
+    expect(
+      shouldUseWebResearch({
+        message: "I'm in Trinidad. My celery is burning from the edges.",
+        intent: "crop_problem",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseWebResearch({
+        message:
+          "I'm a commercial celery farmer in Trinidad. My root-zone EC is 2.8 and the older leaves have marginal scorch.",
+        intent: "crop_problem",
+      }),
+    ).toBe(false);
+    expect(
+      classifyResearchNeed({
+        message: "I'm growing sweet pepper in Guyana. What can I spray for Cercospora?",
+        intent: "pest_disease",
+      }),
+    ).toBe("pesticide_registration");
+    expect(
+      shouldUseWebResearch({
+        message: "I have 18 trays with 128 seedlings each. How many plants?",
+        intent: "simple_math",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseWebResearch({
+        message: "I grow 3 acres of cucumber. Help me prepare a cashflow for the bank.",
+        intent: "cashflow",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseWebResearch({
+        message: "My lettuce has brown edges.",
+        intent: "crop_problem",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("web source ranking", () => {

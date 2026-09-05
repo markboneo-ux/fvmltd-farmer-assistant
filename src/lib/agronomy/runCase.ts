@@ -20,6 +20,7 @@ import {
   responseTokenBudget,
   shouldAskCountry,
   countryReliableForLocalFacts,
+  type LocationConfidence,
 } from "@/lib/assistant/farmer-context";
 import {
   isCalculationIntent,
@@ -279,6 +280,7 @@ export type CaseProfileContext = {
   country?: string | null;
   district?: string | null;
   countrySource?: "client" | "continuing" | "registered" | null;
+  locationConfidence?: LocationConfidence | null;
 };
 
 export type CaseActiveContext = {
@@ -889,6 +891,14 @@ export async function runAgronomicCase(options: {
       confidence: farmerContext.farmerLevel.confidence ?? "inferred",
     };
   }
+  if (!turn.resetHistory && options.activeCase?.farmerProblemText) {
+    const recurring = knownFacts.suspectedIssue || knownFacts.problemCategory;
+    if (recurring) {
+      farmerContext.commonRecurringIssues = [
+        ...new Set([...farmerContext.commonRecurringIssues, recurring]),
+      ];
+    }
+  }
 
   const instructions = buildCaseSystemInstructions({
     mode: effectiveMode,
@@ -1073,6 +1083,15 @@ export async function runAgronomicCase(options: {
           }
         } catch {
           // Keep the first shaped answer if the improvement pass fails.
+        }
+        if (needsDiagnosisRewrite(parsed, { intent: classified.intent, facts: knownFacts })) {
+          parsed = applyDiagnosticPlaybook(parsed, {
+            facts: knownFacts,
+            farmerLevel: knownFacts.farmerLevel,
+            intent: classified.intent,
+            askForCrop: turn.askForCrop,
+            researchNeed,
+          });
         }
       }
 

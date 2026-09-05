@@ -17,7 +17,7 @@ import {
 } from "@/lib/research/citations";
 import { persistConversationTurn } from "@/lib/beta/conversation";
 import type { AppIdentity } from "@/lib/beta/identity";
-import { resetCaseStore, setCasePersistenceModeForTests, listCaseMessages } from "@/lib/cases/store";
+import { resetCaseStore, setCasePersistenceModeForTests, listCaseMessages, getCropCase } from "@/lib/cases/store";
 import { resetUsageStore } from "@/lib/beta/usage-store";
 import { unverifiedRegistrationMessage } from "@/lib/research/types";
 
@@ -174,6 +174,31 @@ describe("adaptive Caribbean assistant", () => {
     });
     expect(follow.knownFacts.country).toBe("Guyana");
     expect(follow.knownFacts.crop).toBe("celery");
+    expect(follow.knownFacts.locationConfidence).toBe("explicit");
+  });
+
+  it("keeps a registered country when the crop changes, and guests start unknown", () => {
+    const registered = resolveTurnContext({
+      message: "My lettuce has brown edges.",
+      history: [],
+      profile: {
+        country: "Guyana",
+        countrySource: "registered",
+        locationConfidence: "profile_confirmed",
+      },
+    });
+    expect(registered.knownFacts.crop).toBe("lettuce");
+    expect(registered.knownFacts.country).toBe("Guyana");
+    expect(registered.knownFacts.locationConfidence).toBe("profile_confirmed");
+
+    const guest = resolveTurnContext({
+      message: "My lettuce has brown edges.",
+      history: [],
+      profile: { country: null, locationConfidence: "unknown" },
+    });
+    expect(guest.knownFacts.country).toBeNull();
+    expect(guest.knownFacts.locationConfidence).toBe("unknown");
+    expect(guest.knownFacts.crop).toBe("lettuce");
   });
 
   it("does not assume Trinidad for a guest with no country", async () => {
@@ -233,6 +258,8 @@ describe("adaptive Caribbean assistant", () => {
     );
     expect(chat).toMatch(/Sources used \(/);
     expect(chat).toMatch(/<details>/);
+    expect(chat).not.toMatch(/<details\s+open/);
+    expect(chat).toMatch(/Checked /);
     const sources = enrichCitations([
       {
         name: "NAMDEVCO NAMIS market data",
@@ -289,6 +316,31 @@ describe("adaptive Caribbean assistant", () => {
     );
     expect(result.case.verifiedInputOptions).toEqual([]);
     expect(result.case.nextQuestion.toLowerCase()).toMatch(/tips?|edges?|spots/);
+  });
+
+  it("does one rewrite pass when a crop answer is still thin after the first model call", async () => {
+    let modelCalls = 0;
+    const result = await runAgronomicCase({
+      message: "My cassava plants are looking bad.",
+      skipRegionalTools: true,
+      createResponse: async () => {
+        modelCalls += 1;
+        return {
+          id: `resp_thin_${modelCalls}`,
+          output_text: JSON.stringify(
+            mockCase({
+              preliminaryAssessment: "Could be heat, watering or nutrients.",
+              likelyCauses: [],
+              checksToday: [],
+              safeActionsNow: [],
+              actionsToAvoid: [],
+            }),
+          ),
+        };
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(modelCalls).toBe(2);
   });
 
   it("only attaches products when the farmer asks, and requires local verification", async () => {
@@ -382,8 +434,12 @@ describe("adaptive Caribbean assistant", () => {
         preliminaryAssessment: "Check whether the burn starts at the tips.",
         likelyCauses: ["Root-zone stress"],
         farmerLevel: "SMALL_FARMER",
+        locationConfidence: "explicit",
       }),
     });
     expect(await listCaseMessages(persisted.caseId)).toHaveLength(2);
+    expect((await getCropCase(persisted.caseId))?.businessMetadata?.locationConfidence).toBe(
+      "explicit",
+    );
   });
 });

@@ -158,17 +158,25 @@ function allMatches(text: string, pattern: RegExp): Array<{ index: number; text:
 export type CaseProfileFields = {
   country?: string | null;
   district?: string | null;
+  locationConfidence?: LocationConfidence | null;
 };
 
 /**
  * Client/session values win over the stored farmer profile.
  * A spoken location in the message is applied later by extractors.
+ * Callers that are starting a new topic should omit `continuing` so only the
+ * registered profile (not the previous crop case) is reused.
  */
 export function mergeCaseProfileContext(parts: {
   client?: CaseProfileFields | null;
   continuing?: CaseProfileFields | null;
   registered?: CaseProfileFields | null;
-}): { country: string | null; district: string | null; countrySource: ProfileCountrySource } {
+}): {
+  country: string | null;
+  district: string | null;
+  countrySource: ProfileCountrySource;
+  locationConfidence: LocationConfidence;
+} {
   const pick = (
     ...entries: Array<{ value?: string | null; source: ProfileCountrySource }>
   ) => {
@@ -188,10 +196,23 @@ export function mergeCaseProfileContext(parts: {
     { value: parts.continuing?.district, source: "continuing" },
     { value: parts.registered?.district, source: "registered" },
   );
+  let locationConfidence: LocationConfidence = "unknown";
+  if (!country.value) {
+    locationConfidence = "unknown";
+  } else if (country.source === "registered" || country.source === "client") {
+    locationConfidence = "profile_confirmed";
+  } else if (country.source === "continuing") {
+    const stored = parts.continuing?.locationConfidence;
+    locationConfidence =
+      stored === "explicit" || stored === "profile_confirmed"
+        ? stored
+        : "conversation_inferred";
+  }
   return {
     country: country.value,
     district: district.value,
     countrySource: country.source,
+    locationConfidence,
   };
 }
 
@@ -200,9 +221,16 @@ export function resolveLocationConfidence(options: {
   countryFromRegion: boolean;
   profileCountry?: string | null;
   profileSource?: ProfileCountrySource;
+  storedConfidence?: LocationConfidence | null;
 }): LocationConfidence {
   if (options.spokenCountry && !options.countryFromRegion) return "explicit";
   if (options.spokenCountry && options.countryFromRegion) return "conversation_inferred";
+  if (
+    options.storedConfidence === "explicit" ||
+    options.storedConfidence === "profile_confirmed"
+  ) {
+    return options.storedConfidence;
+  }
   if (options.profileCountry?.trim() && options.profileSource === "continuing") {
     return "conversation_inferred";
   }

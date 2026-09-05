@@ -9,7 +9,7 @@ export default function AiLabPage() {
       showModeToggle
       showDiagnostics
       showTestPrompts
-      defaultCountry="Trinidad and Tobago"
+      defaultCountry={null}
       title={PRODUCT_NAME}
       subtitle="Developer lab — diagnostics stay hidden unless opened"
     />

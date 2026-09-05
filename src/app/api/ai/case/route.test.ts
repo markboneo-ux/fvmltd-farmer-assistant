@@ -186,9 +186,71 @@ describe("POST /api/ai/case persistence", () => {
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     );
     const call = vi.mocked(runAgronomicCase).mock.calls.at(-1)?.[0] as {
-      profile?: { country?: string | null; district?: string | null };
+      profile?: {
+        country?: string | null;
+        district?: string | null;
+        locationConfidence?: string | null;
+      };
     };
     expect(call.profile?.country).toBe("Guyana");
     expect(call.profile?.district).toBe("Berbice");
+    expect(call.profile?.locationConfidence).toBe("profile_confirmed");
+  });
+
+  it("starts a guest session with unknown country", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "My lettuce has brown edges.",
+          profile: { country: "", district: "" },
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const call = vi.mocked(runAgronomicCase).mock.calls.at(-1)?.[0] as {
+      profile?: { country?: string | null; locationConfidence?: string | null };
+    };
+    expect(call.profile?.country).toBeNull();
+    expect(call.profile?.locationConfidence).toBe("unknown");
+  });
+
+  it("does not carry a previous crop's country into a guest topic switch", async () => {
+    const { POST } = await import("./route");
+    const first = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "I'm in Trinidad. My celery is burning from the edges.",
+          profile: { country: "Trinidad and Tobago" },
+        }),
+      }),
+    );
+    const firstBody = (await first.json()) as { caseId?: string };
+    expect(firstBody.caseId).toBeTruthy();
+
+    const second = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "My lettuce has brown edges.",
+          caseId: firstBody.caseId,
+          profile: { country: "", district: "" },
+        }),
+      }),
+    );
+    expect(second.status).toBe(200);
+    const call = vi.mocked(runAgronomicCase).mock.calls.at(-1)?.[0] as {
+      profile?: { country?: string | null };
+      history?: unknown[];
+      activeCase?: { crop?: string | null } | null;
+    };
+    expect(call.profile?.country).toBeNull();
+    expect(call.history ?? []).toEqual([]);
+    expect(call.activeCase).toBeNull();
   });
 });

@@ -161,6 +161,7 @@ export function extractKnownFacts(
     country?: string | null;
     district?: string | null;
     countrySource?: ProfileCountrySource;
+    locationConfidence?: LocationConfidence | null;
   } | null,
 ): KnownFarmerFacts {
   const rawText = text.trim();
@@ -211,6 +212,7 @@ export function extractKnownFacts(
     countryFromRegion: located.countryFromRegion,
     profileCountry: profile?.country,
     profileSource: profile?.countrySource ?? null,
+    storedConfidence: profile?.locationConfidence ?? null,
   });
 
   let distributionHint: string | null = null;
@@ -270,7 +272,7 @@ export function extractKnownFacts(
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
     asksForProducts:
-      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+(to|should i)\s+spray|spray for\b|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:

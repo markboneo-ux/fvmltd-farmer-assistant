@@ -501,7 +501,7 @@ export function AdminInsightsView() {
                       {(item.crop || "Unknown crop") + " · " + (item.issue || "unspecified")}
                     </Link>
                     <p className="text-xs text-muted">
-                      {item.country || "Unknown country"}
+                      {item.country || "Unknown"}
                       {item.region ? ` / ${item.region}` : ""} · {item.status} ·{" "}
                       {item.guest ? "guest" : "registered"} · {item.questionType}
                     </p>

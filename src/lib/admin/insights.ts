@@ -48,7 +48,7 @@ function matchesCountry(
   needle: string | null | undefined,
 ): boolean {
   if (!needle) return true;
-  return trendCountryKey(value) === trendCountryKey(needle);
+  return trendCountryKey(value) === trendCountryKey(needle === "Unknown" ? "unknown" : needle);
 }
 
 function matches(value: string | null | undefined, needle: string | null | undefined): boolean {
@@ -202,7 +202,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
 
   for (const item of allCases) {
     increment(byCrop, item.crop);
-    increment(byCountry, trendCountryKey(item.country) === "unknown" ? "unknown" : item.country);
+    increment(byCountry, trendCountryKey(item.country) === "unknown" ? "Unknown" : item.country);
     increment(byDistrict, item.district);
     increment(byVariety, item.variety);
     increment(byProblem, item.problemCategory);
@@ -379,7 +379,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       casesByType: topEntries(byCaseType),
       casesByFarmerLevel: topEntries(byFarmerLevel),
       emergingTrends: trends.map((item) => ({
-        label: [item.crop, item.country || "unknown", item.region, item.symptomCluster]
+        label: [item.crop, item.country || "Unknown", item.region, item.symptomCluster]
           .filter(Boolean)
           .join(" · "),
         count: item.uniqueSessionCount,

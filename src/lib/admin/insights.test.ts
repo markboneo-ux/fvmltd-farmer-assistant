@@ -133,18 +133,18 @@ describe("admin dashboard metrics", () => {
 
     const insights = await buildInsights();
     const countries = insights.agronomy.casesByCountry.map((row) => row.label);
-    expect(countries).toContain("unknown");
+    expect(countries).toContain("Unknown");
     expect(countries).toContain("Trinidad and Tobago");
 
     const trinidadOnly = await buildInsights({ country: "Trinidad and Tobago" });
     expect(trinidadOnly.summary.totalCropCases).toBe(1);
-    expect(trinidadOnly.agronomy.casesByCountry.some((row) => row.label === "unknown")).toBe(
+    expect(trinidadOnly.agronomy.casesByCountry.some((row) => row.label === "Unknown")).toBe(
       false,
     );
 
-    const unknownOnly = await buildInsights({ country: "unknown" });
+    const unknownOnly = await buildInsights({ country: "Unknown" });
     expect(unknownOnly.summary.totalCropCases).toBe(1);
-    expect(unknownOnly.agronomy.casesByCountry.some((row) => row.label === "unknown")).toBe(
+    expect(unknownOnly.agronomy.casesByCountry.some((row) => row.label === "Unknown")).toBe(
       true,
     );
   });

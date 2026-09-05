@@ -271,27 +271,38 @@ export async function POST(request: Request) {
 
     const continuingCase = incomingCaseId ? await getCropCase(incomingCaseId) : null;
     const registeredProfile = await loadRegisteredFarmerContext(identity.farmerProfileId);
-    profile = mergeCaseProfileContext({
-      client: profile,
-      continuing: continuingCase
-        ? { country: continuingCase.country, district: continuingCase.district }
-        : null,
-      registered: registeredProfile,
-    });
-    let topicReset = false;
-    if (
+    const topicReset = Boolean(
       continuingCase &&
-      shouldStartNewCase({
-        message,
-        activeCrop: continuingCase.crop,
-        activeIntent: continuingCase.conversationIntent,
-      })
-    ) {
+        shouldStartNewCase({
+          message,
+          activeCrop: continuingCase.crop,
+          activeIntent: continuingCase.conversationIntent,
+        }),
+    );
+    if (topicReset) {
       incomingCaseId = null;
       history = [];
       previousResponseId = null;
-      topicReset = true;
     }
+    const storedConfidence = continuingCase?.businessMetadata?.locationConfidence;
+    profile = mergeCaseProfileContext({
+      client: profile,
+      continuing:
+        !topicReset && continuingCase
+          ? {
+              country: continuingCase.country,
+              district: continuingCase.district,
+              locationConfidence:
+                storedConfidence === "explicit" ||
+                storedConfidence === "profile_confirmed" ||
+                storedConfidence === "conversation_inferred" ||
+                storedConfidence === "unknown"
+                  ? storedConfidence
+                  : null,
+            }
+          : null,
+      registered: registeredProfile,
+    });
 
     const persistedHistory = await loadPersistedConversationHistory(
       incomingCaseId,

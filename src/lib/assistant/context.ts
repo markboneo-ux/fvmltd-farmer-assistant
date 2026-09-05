@@ -86,6 +86,7 @@ export function resolveTurnContext(options: {
     country?: string | null;
     district?: string | null;
     countrySource?: "client" | "continuing" | "registered" | null;
+    locationConfidence?: "explicit" | "profile_confirmed" | "conversation_inferred" | "unknown" | null;
   } | null;
   activeCase?: ActiveCaseContext | null;
 }): ResolvedTurnContext {
@@ -153,7 +154,11 @@ export function resolveTurnContext(options: {
   if (options.activeCase?.country && !knownFacts.country) {
     knownFacts.country = options.activeCase.country;
     if (knownFacts.locationConfidence === "unknown") {
-      knownFacts.locationConfidence = "conversation_inferred";
+      const stored = options.profile?.locationConfidence;
+      knownFacts.locationConfidence =
+        stored === "explicit" || stored === "profile_confirmed"
+          ? stored
+          : "conversation_inferred";
     }
   }
   if (options.activeCase?.district && !knownFacts.district) {

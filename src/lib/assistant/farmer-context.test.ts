@@ -63,14 +63,59 @@ describe("farmer country and region", () => {
         continuing: null,
         registered: { country: "Guyana", district: "Berbice" },
       }),
-    ).toEqual({ country: "Guyana", district: "Berbice", countrySource: "registered" });
+    ).toEqual({
+      country: "Guyana",
+      district: "Berbice",
+      countrySource: "registered",
+      locationConfidence: "profile_confirmed",
+    });
     expect(
       mergeCaseProfileContext({
         client: { country: "Jamaica", district: "" },
         continuing: { country: "Trinidad and Tobago", district: "Couva" },
         registered: { country: "Guyana", district: "Berbice" },
       }),
-    ).toEqual({ country: "Jamaica", district: "Couva", countrySource: "client" });
+    ).toEqual({
+      country: "Jamaica",
+      district: "Couva",
+      countrySource: "client",
+      locationConfidence: "profile_confirmed",
+    });
+    expect(
+      mergeCaseProfileContext({
+        client: { country: "", district: "" },
+        continuing: {
+          country: "Trinidad and Tobago",
+          district: "Couva",
+          locationConfidence: "explicit",
+        },
+        registered: { country: "Guyana", district: "Berbice" },
+      }),
+    ).toEqual({
+      country: "Trinidad and Tobago",
+      district: "Couva",
+      countrySource: "continuing",
+      locationConfidence: "explicit",
+    });
+    expect(
+      mergeCaseProfileContext({
+        client: { country: "", district: "" },
+        continuing: null,
+        registered: { country: "Guyana", district: "Berbice" },
+      }).country,
+    ).toBe("Guyana");
+    expect(
+      mergeCaseProfileContext({
+        client: { country: "", district: "" },
+        continuing: null,
+        registered: null,
+      }),
+    ).toEqual({
+      country: null,
+      district: null,
+      countrySource: null,
+      locationConfidence: "unknown",
+    });
   });
 
   it("asks country only when local facts matter and country is unknown", () => {

@@ -1,106 +1,127 @@
-# Caribbean assistant live smoke tests
+# Caribbean assistant live Preview smoke tests
 
-Run these on Preview after deploy. Guest chat is enough. Do not use them as agronomy training data.
+Run these on the Vercel Preview guest chat after deploy. Open a **new conversation** for every prompt. This environment has no `OPENAI_API_KEY`, so these cannot be executed here.
 
-For each prompt, send it in a **new conversation**.
+Use the guest chat on `/`. Do not stay in a previous thread.
 
-## A. Edge burn with explicit country
+## How to run
 
-**Prompt**
+1. Open Preview.
+2. Click **New conversation**.
+3. Paste the prompt exactly.
+4. Record pass/fail against the checks below.
+5. Repeat from step 2 for the next letter.
 
-> I'm in Trinidad. My celery looks like it is burning from the edges.
+---
 
-**Pass**
-- Ranked causes, not one guess
-- Separates tip/edge burn from spots
-- Field checks and what not to do today
-- One follow-up at most
-- Uses Trinidad only because the farmer said it
-- No “Ask about products” button
-- Weather does not lead the answer
-
-**Fail**
-- “Could be heat, watering or nutrients”
-- Assumes the country without the farmer naming it
-- Leads with a 72-hour disease-pressure alert
-- Pushes a product
-
-## B. Commercial / technical celery
+## A
 
 **Prompt**
 
-> I'm a commercial celery grower in Trinidad. EC is 2.8 and the older leaves are showing marginal scorch. What would you check?
+> I'm in Trinidad. My celery is burning from the edges.
 
-**Pass**
-- Deeper differential than a backyard answer
-- Uses EC / older-leaf pattern
-- Production implications (quality, spray/fertigation, resistance if chemicals come up)
-- Does not confirm a disease from those words alone
+| | Expected |
+|---|---|
+| Intent | Crop problem / diagnosis |
+| Context | Country = Trinidad and Tobago, **explicit**. Crop = celery. Farmer level inferred, not agronomist. |
+| Web research | **No** |
+| Answer | Direct assessment; ranked likely causes (tip/edge burn vs spots); reasoning; field checks; what to do now; what NOT to do; what would change the diagnosis; what to monitor; at most one follow-up. Trinidad used only because the farmer said it. No product CTA. Weather does not lead. No Sources element. |
 
-**Fail**
-- Home-garden “feel the soil” only
-- Invented spray rates
-- “Confirmed Cercospora”
+**Fail if:** one vague “could be heat/watering/nutrients” line; assumes Trinidad without the spoken sentence; leads with a 72-hour disease-pressure alert; shows “Ask about products”; invents a confirmed disease.
 
-## C. Guyana fungicide
+---
 
-**Prompt**
-
-> I'm growing sweet pepper in Guyana. What fungicide can I use for Cercospora?
-
-**Pass**
-- May name active ingredients used against Cercospora
-- Registration for Guyana is verified or clearly **not** verified
-- Must **not** say Trinidad registration makes it legal in Guyana
-- If sources appear, they are collapsed `Sources used (n)`
-
-**Fail**
-- “Use the Trinidad product”
-- Invented Guyana registration, rate, PHI, or REI
-- A sales-style product button
-
-## D. Nursery maths
+## B
 
 **Prompt**
 
-> I have 18 trays of 128 seedlings. How many plants is that?
+> I'm a commercial celery farmer in Trinidad. My root-zone EC is 2.8 and the older leaves have marginal scorch.
 
-**Pass**
-- Direct calculation: 18 × 128 = 2,304
-- Short answer, no crop diagnosis
+| | Expected |
+|---|---|
+| Intent | Crop problem / diagnosis |
+| Context | Country = Trinidad and Tobago, **explicit**. Crop = celery. Farmer level = **COMMERCIAL_FARMER**. EC 2.8 and older-leaf pattern retained. |
+| Web research | **No** |
+| Answer | Materially deeper than a backyard answer: production/quality implications, irrigation/EC/fertigation, harvest or spray-window risk. Ranked differential. Does **not** confirm Cercospora from those words. Agronomy before any product mention. No product CTA unless the farmer asked to spray. |
 
-**Fail**
-- Starts a disease interview
-- Asks country or variety
+**Fail if:** home-garden “feel the soil” only; no EC / older-leaf / production content; invented spray rates; “confirmed Cercospora”; product cards first.
 
-## E. Cashflow
+---
 
-**Prompt**
-
-> I farm 3 acres of cucumber. Help me prepare a cashflow for the bank.
-
-**Pass**
-- Stays on cashflow / costing
-- Asks one missing business fact if numbers are incomplete
-- Does not diagnose a crop disease
-
-**Fail**
-- Whitefly or leaf-spot workflow
-- Invented prices presented as official
-
-## F. No country
+## C
 
 **Prompt**
 
-> My lettuce has brown leaf edges.
+> I'm growing sweet pepper in Guyana. What can I spray for Cercospora?
 
-**Pass**
-- Ranked differential for tip/edge burn vs spots
-- Country stays unknown — not Trinidad
-- Does **not** give Guyana/Trinidad pesticide registration as fact
-- May ask one high-value question (pattern or photo), not a country form unless chemicals/prices are requested
+| | Expected |
+|---|---|
+| Intent | Pest/disease + chemical management (asks what to spray) |
+| Context | Country = Guyana, **explicit**. Crop = pepper. Location is authoritative for local legality. |
+| Web research | **Yes** (pesticide registration). Official Guyana source first, then CARDI/regional research, then FAO/international. **Never** Trinidad’s pesticide register as Guyana proof. |
+| Answer | Useful general agronomy (protectant coppers/chlorothalonil, QoI/DMI only as classes). If Guyana registration is not verified, say so clearly (`haven't verified registration` or equivalent). Sources, if any live research was used: collapsed `Sources used (n) ▾` with organization, what it supported, date checked, and link. Agronomy before products. |
 
-**Fail**
-- Assumes Trinidad and Tobago
-- “This is registered in Trinidad”
-- Many questions at once
+**Fail if:** “use the Trinidad product”; invented Guyana registration, rate, PHI, or REI; Trinidad registration treated as legal in Guyana; a sales-style product button; sources dumped into the prose; Sources shown when no web research ran.
+
+---
+
+## D
+
+**Prompt**
+
+> I have 18 trays with 128 seedlings each. How many plants?
+
+| | Expected |
+|---|---|
+| Intent | Calculation / nursery maths |
+| Context | No crop diagnosis. Country unknown and **not asked**. |
+| Web research | **No** |
+| Answer | Direct calculation: 18 × 128 = **2,304**. Short. No disease interview. No Sources. No products. |
+
+**Fail if:** starts a crop diagnosis; asks country or variety; wrong arithmetic.
+
+---
+
+## E
+
+**Prompt**
+
+> I grow 3 acres of cucumber. Help me prepare a cashflow for the bank.
+
+| | Expected |
+|---|---|
+| Intent | Cashflow / farm business |
+| Context | Crop = cucumber. Area = 3 acres. Country unknown unless needed for prices. Farmer level commercial-leaning from acreage. |
+| Web research | **No** unless they also ask a live market price |
+| Answer | Stays on cashflow/costing. May ask one missing business fact. Does not diagnose a disease. Does not invent official prices. |
+
+**Fail if:** whitefly or leaf-spot workflow; product CTA; assumed Trinidad; invented NAMDEVCO figures presented as official.
+
+---
+
+## F
+
+**Prompt**
+
+> My lettuce has brown edges.
+
+(no country)
+
+| | Expected |
+|---|---|
+| Intent | Crop problem / diagnosis |
+| Context | Crop = lettuce. Country = **unknown** (not Trinidad). Location confidence = unknown. Do not ask country unless they request chemicals, registration, or local prices. |
+| Web research | **No** |
+| Answer | Ranked differential for tip/edge burn vs spots. Field checks, what to do / not do, what would change the diagnosis, monitor window, at most one follow-up. No pesticide registration as fact. No Sources. No product CTA. |
+
+**Fail if:** assumes Trinidad and Tobago; “this is registered in Trinidad”; many questions at once; product button.
+
+---
+
+## Cross-checks while you are there
+
+- **New conversation:** guest country is unknown until spoken. A registered farmer’s profile country should already be in context on the first message.
+- **Spoken country** in a later turn overrides an old or inferred country.
+- **Crop switch** (celery → lettuce) must not keep celery symptoms. Keep the registered profile country. Guests who never named a country stay unknown.
+- **Sources used (n) ▾** is collapsed by default. There is no second source list. Assistant prose does not copy source names unless naturally needed.
+- There is **no** permanent “Ask about products” control.

@@ -225,18 +225,39 @@ export function researchTargetsForNeed(
   category: SourceCategory | null,
   need: string,
 ): TrustedSource[] {
+  const regionalResearch = TRUSTED_SOURCES.filter(
+    (source) => source.country === "Caribbean" && source.category === "research",
+  );
+  const internationalResearch = TRUSTED_SOURCES.filter(
+    (source) => source.country === "International" && source.category === "research",
+  );
   if (need === "pesticide_registration" || need === "product_label" || need === "regulatory") {
     const local = category ? localOfficialSources(country, category) : [];
-    if (local.length > 0) return local.slice(0, 3);
-    return TRUSTED_SOURCES.filter(
-      (source) =>
-        (source.country === "Caribbean" || source.country === "International") &&
-        source.category === "research",
-    ).slice(0, 2);
+    const chain = [...local, ...regionalResearch, ...internationalResearch];
+    const seen = new Set<string>();
+    return chain.filter((source) => {
+      if (seen.has(source.id)) return false;
+      if (
+        source.category === "pesticide_registration" &&
+        country?.trim() &&
+        source.country !== "Caribbean" &&
+        source.country !== "International" &&
+        source.country.toLowerCase() !== country.trim().toLowerCase() &&
+        !(country.toLowerCase().includes("trinidad") && source.country === "Trinidad and Tobago")
+      ) {
+        return false;
+      }
+      seen.add(source.id);
+      return true;
+    }).slice(0, 4);
   }
   if (category) {
     const local = localOfficialSources(country, category);
-    if (local.length > 0) return local.slice(0, 3);
+    if (local.length > 0) {
+      return [...local, ...regionalResearch, ...internationalResearch]
+        .filter((source, index, all) => all.findIndex((item) => item.id === source.id) === index)
+        .slice(0, 4);
+    }
   }
   return sourcesForCountry(country).slice(0, 3);
 }
