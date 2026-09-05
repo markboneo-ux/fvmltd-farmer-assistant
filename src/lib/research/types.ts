@@ -125,6 +125,8 @@ export type WebCitation = {
   sourceType: SourceType;
   publishedAt: string | null;
   stale: boolean;
+  evidenceType?: string | null;
+  regulatoryConfidence?: string | null;
 };
 
 export type WebSourceCitation = {
@@ -153,6 +155,9 @@ export type PesticideCheck = {
   phi: string | null;
   rei: string | null;
   farmerNote: string;
+  evidenceType?: string | null;
+  regulatoryConfidence?: string | null;
+  registerFound?: boolean;
 };
 
 export type MarketPriceNote = {
@@ -173,6 +178,15 @@ export type ResearchFailure = {
   message: string;
 };
 
+export type PesticideFarmerAnswer = {
+  country: string;
+  farmerText: string;
+  registerFound: boolean;
+  offeredFilters: boolean;
+  sources: WebSourceCitation[];
+  verificationLine: string | null;
+};
+
 export type ResearchResult = {
   used: boolean;
   topics: ResearchTopic[];
@@ -186,6 +200,7 @@ export type ResearchResult = {
   staleWarnings: string[];
   failure: ResearchFailure | null;
   farmerFallback: string | null;
+  pesticideAnswer?: PesticideFarmerAnswer | null;
 };
 
 export type SearchProvider = {

@@ -303,7 +303,7 @@ export function extractKnownFacts(
         lower,
       ),
     asksForPesticideRegistration:
-      /\b(registered|registration|approved (for|in)|pesticide register|is .{0,40} legal to (use|spray))\b/.test(
+      /\b(registered|registration|approved (for|in)|pesticide register|list of pesticides?|pesticides? (available|in)|is .{0,40} legal to (use|spray))\b/.test(
         lower,
       ),
     asksForRegulation:

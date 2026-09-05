@@ -350,6 +350,69 @@ describe("POST /api/ai/case persistence", () => {
     ).toBeNull();
   });
 
+  it("returns a caseId when Preview crop_cases is missing later columns such as business_metadata", async () => {
+    for (const column of [
+      "business_metadata",
+      "conversation_intent",
+      "question_category",
+      "calculation_type",
+      "case_type",
+      "knowledge_state",
+      "diagnosis_incorrect",
+      "needs_review",
+      "useful_for_trend",
+      "exclude_from_learning",
+      "review_notes",
+      "reviewed_at",
+      "reviewed_by",
+      "include_in_trend_learning",
+    ]) {
+      fake.schemaMissingColumns.add(column);
+    }
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-fvm-debug": "1" },
+        body: JSON.stringify({
+          message: "What pesticides are available in Trinidad and Tobago",
+          profile: { country: "Trinidad and Tobago" },
+        }),
+      }),
+    );
+    warnSpy.mockRestore();
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      caseId?: string | null;
+      persistenceFailed?: boolean;
+      persistenceError?: string | null;
+      schemaCompatUsed?: boolean;
+      schemaCompatDroppedColumns?: Array<{ table: string; column: string }>;
+    };
+    expect(body.caseId).toBeTruthy();
+    expect(body.persistenceFailed).toBe(false);
+    expect(body.schemaCompatUsed).toBe(true);
+    expect(
+      (body.schemaCompatDroppedColumns ?? []).some((item) => item.column === "business_metadata"),
+    ).toBe(true);
+    expect(
+      (body.schemaCompatDroppedColumns ?? []).some((item) => item.column === "reviewed_at"),
+    ).toBe(true);
+    expect(fake.db.crop_cases).toHaveLength(1);
+    expect(fake.db.case_messages).toHaveLength(2);
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("business_metadata");
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("reviewed_at");
+    expect(
+      farmerPersistenceBanner({
+        persistenceFailed: body.persistenceFailed,
+        caseId: body.caseId,
+      }),
+    ).toBeNull();
+  });
+
   it("uses the registered farmer country on a new session without assuming Trinidad", async () => {
     vi.mocked(resolveIdentityFromRequest).mockResolvedValue({
       kind: "registered",

@@ -4,6 +4,12 @@
  */
 
 import { canonicalizeCountry } from "./countries";
+import { classifyPesticideQuery } from "./pesticide-query";
+import {
+  classifyRegulatoryEvidence,
+  evidenceSupportsProductClaim,
+  hasPesticideRegisterData,
+} from "./evidence";
 import { sourceByDomain, trustPriority } from "./sources";
 import {
   unverifiedRegistrationMessage,
@@ -60,9 +66,10 @@ export function pesticideCheckFromEvidence(options: {
   hits: SearchHit[];
 }): PesticideCheck {
   const country = canonicalizeCountry(options.country);
+  const query = classifyPesticideQuery(options.farmerText);
   const ingredient =
-    extractPossibleIngredient(options.farmerText) ||
-    extractPossibleIngredient(options.hits.map((hit) => `${hit.title} ${hit.snippet}`).join(" "));
+    query.activeIngredient ||
+    extractPossibleIngredient(options.farmerText);
 
   const verifiedHit = country
     ? options.hits.find((hit) => hitSupportsRegistration(hit, country, ingredient))
@@ -70,11 +77,43 @@ export function pesticideCheckFromEvidence(options: {
 
   const verified = Boolean(verifiedHit);
   const source = verifiedHit ? sourceByDomain(verifiedHit.domain) : null;
+  const evidence = verifiedHit
+    ? classifyRegulatoryEvidence({
+        url: verifiedHit.url,
+        title: verifiedHit.title,
+        text: verifiedHit.snippet,
+        country,
+        organization: source?.sourceName,
+        sourceType: source?.sourceType,
+        sourceCountry: source?.country,
+        retrievedAt: verifiedHit.retrievedAt,
+        publishedAt: verifiedHit.publishedAt,
+      })
+    : null;
+  const registerFound = options.hits.some((hit) => {
+    const item = sourceByDomain(hit.domain);
+    const classified = classifyRegulatoryEvidence({
+      url: hit.url,
+      title: hit.title,
+      text: hit.snippet,
+      country,
+      organization: item?.sourceName,
+      sourceType: item?.sourceType,
+      sourceCountry: item?.country,
+      retrievedAt: hit.retrievedAt,
+      publishedAt: hit.publishedAt,
+    });
+    return classified.sufficientForRegisterLocation;
+  });
 
   const farmerNote = country
-    ? verified
-      ? `Country status is verified from ${source?.sourceName ?? verifiedHit?.title ?? "an official source"} for ${country}. Still read the current local label before applying anything.`
-      : UNVERIFIED_CHEMICAL_TEMPLATE(country)
+    ? query.isBroadList
+      ? registerFound
+        ? `${country} has a large official pesticide listing. Narrow it by crop, pest, active ingredient, or trade name rather than dumping every product.`
+        : `I could not find a current public pesticide register for ${country} that I can verify online. I can still check a specific crop, pest, active ingredient, or product against available ${country} and regional sources.`
+      : verified
+        ? `Country status is verified from ${source?.sourceName ?? verifiedHit?.title ?? "an official source"} for ${country}. Still read the current local label before applying anything.`
+        : UNVERIFIED_CHEMICAL_TEMPLATE(country)
     : "I need the country before I can check whether a product is registered.";
 
   return {
@@ -82,7 +121,7 @@ export function pesticideCheckFromEvidence(options: {
     pestOrDisease: options.pestOrDisease,
     country,
     activeIngredient: ingredient,
-    tradeName: extractTradeNameFromText(options.farmerText),
+    tradeName: query.tradeName || extractTradeNameFromText(options.farmerText),
     verified,
     countryStatus: verified ? "verified" : "not_verified",
     sourceName: source?.sourceName ?? null,
@@ -92,6 +131,9 @@ export function pesticideCheckFromEvidence(options: {
     phi: verified ? extractPhi(verifiedHit?.snippet ?? "") : null,
     rei: verified ? extractRei(verifiedHit?.snippet ?? "") : null,
     farmerNote,
+    evidenceType: evidence?.evidenceType ?? null,
+    regulatoryConfidence: evidence?.regulatoryConfidence ?? (registerFound ? "supporting_official" : "insufficient"),
+    registerFound,
   };
 }
 
@@ -109,8 +151,25 @@ function hitSupportsRegistration(
     return false;
   }
   if (trustPriority(source.sourceType, source.trustLevel) > 2) return false;
-  const blob = `${hit.title} ${hit.snippet}`.toLowerCase();
+  const evidence = classifyRegulatoryEvidence({
+    url: hit.url,
+    title: hit.title,
+    text: hit.snippet,
+    country,
+    organization: source.sourceName,
+    sourceType: source.sourceType,
+    sourceCountry: source.country,
+    retrievedAt: hit.retrievedAt,
+    publishedAt: hit.publishedAt,
+  });
+  if (!evidence.sufficientForProductClaim && !evidenceSupportsProductClaim(evidence.evidenceType)) {
+    return false;
+  }
+  if (!hasPesticideRegisterData({ url: hit.url, title: hit.title, text: hit.snippet })) {
+    return false;
+  }
   if (!ingredient) return false;
+  const blob = `${hit.title} ${hit.snippet}`.toLowerCase();
   if (!blob.includes(ingredient.toLowerCase())) return false;
   return /\b(registered|approved|on the register|registration number)\b/i.test(blob);
 }

@@ -6,7 +6,7 @@
  * development / test fallback only.
  */
 
-import { readProcessEnv } from "@/lib/supabase/env";
+import { getMissingSupabaseEnv, readProcessEnv } from "@/lib/supabase/env";
 import { redactSecrets } from "@/lib/security/ops-log";
 
 export type CasePersistenceMode = "supabase" | "memory";
@@ -101,7 +101,25 @@ export function safePersistenceError(error: unknown): string {
   return redactSecrets(String(error));
 }
 
+type SchemaCompatDrop = { table: string; column: string };
+
+let schemaCompatDrops: SchemaCompatDrop[] = [];
+
+export function resetSchemaCompatDrops() {
+  schemaCompatDrops = [];
+}
+
+export function noteSchemaCompatDrop(table: string, column: string) {
+  schemaCompatDrops.push({ table, column });
+  console.warn(`CASE_PERSISTENCE_DROP_COLUMN table=${table} column=${column}`);
+}
+
+export function getSchemaCompatDrops(): SchemaCompatDrop[] {
+  return [...schemaCompatDrops];
+}
+
 export function logCasePersistenceStart() {
+  resetSchemaCompatDrops();
   console.info("CASE_PERSISTENCE_START");
 }
 
@@ -120,6 +138,29 @@ export function logCaseMessageSaved(caseId: string, role: string) {
 export function logCasePersistenceError(error: unknown, table?: string | null) {
   const tablePart = table ? ` table=${table}` : "";
   console.error(`CASE_PERSISTENCE_ERROR ${safePersistenceError(error)}${tablePart}`);
+}
+
+export function supabaseHostForLogs(): string {
+  const raw = readProcessEnv("NEXT_PUBLIC_SUPABASE_URL");
+  if (!raw) return "missing";
+  try {
+    return new URL(raw).host;
+  } catch {
+    return "invalid";
+  }
+}
+
+export function persistenceDebugInfo(error?: unknown, table?: string | null) {
+  const schemaCompatDroppedColumns = getSchemaCompatDrops();
+  return {
+    persistenceError: error ? safePersistenceError(error) : null,
+    persistenceMode: resolveCasePersistenceMode(),
+    persistenceTable: table ?? null,
+    supabaseHost: supabaseHostForLogs(),
+    missingSupabaseEnv: getMissingSupabaseEnv({ requireServiceRole: true }),
+    schemaCompatDroppedColumns,
+    schemaCompatUsed: schemaCompatDroppedColumns.length > 0,
+  };
 }
 
 /**

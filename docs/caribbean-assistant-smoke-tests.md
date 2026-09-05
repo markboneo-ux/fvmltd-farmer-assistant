@@ -118,6 +118,52 @@ Use the guest chat on `/`. Do not stay in a previous thread.
 
 ---
 
+## G — Trinidad pesticide list (must use this PR Preview, not git-main)
+
+See `docs/PREVIEW_DEPLOYMENT.md`. URL must **not** contain `git-main`.
+
+**Prompt**
+
+> What is the list of pesticides available in Trinidad
+
+| | Expected |
+|---|---|
+| Intent | Pesticide / regulatory lookup |
+| Web research | **Yes**, Trinidad CFDD / official pesticide listing — not a ministry homepage as the only evidence |
+| Answer | Acknowledges a large register; names the official Trinidad and Tobago source; offers filters (crop / pest / active ingredient / trade name / full official register); compact “Checked against Trinidad and Tobago official sources.” Collapsed `Sources used (n) ▾`. |
+| Not | “Refer to the Ministry”; dumping hundreds of products; using another country’s register |
+
+---
+
+## H — Grenada pesticide list
+
+**Prompt** (new conversation)
+
+> List of pesticides in Grenada
+
+| | Expected |
+|---|---|
+| Web research | Grenada-specific. **Never** Trinidad CFDD / NAMDEVCO as proof |
+| Answer | If no current public register is found: “I could not find a current public pesticide register for Grenada that I can verify online.” Then offer to check a crop, pest, active ingredient, or product. Authority contact is secondary, not the whole answer. |
+| Not | “Contact the Ministry or extension office” as the entire reply; Trinidad products presented as Grenada-legal |
+
+---
+
+## I — “Refer to what?”
+
+After an assistant reply that said “you can refer to the official pesticide register”:
+
+**Prompt**
+
+> Refer to the what??
+
+| | Expected |
+|---|---|
+| Answer | Explains / links the pesticide register from the previous turn |
+| Not | “Could you clarify what assistance you need?” |
+
+---
+
 ## Cross-checks while you are there
 
 - **New conversation:** guest country is unknown until spoken. A registered farmer’s profile country should already be in context on the first message.

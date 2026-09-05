@@ -105,13 +105,22 @@ export function ChatAssistantMessage({
           : null)
       : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
-  const sources = [
-    ...(payload.webSources ?? []).map((item) => ({ name: item.name, url: item.url })),
-    ...(payload.webCitations ?? []).map((item) => ({ name: item.sourceName, url: item.url })),
-  ].filter((item) => item.name.trim());
-  const uniqueSources = sources.filter(
-    (item, index) => sources.findIndex((other) => other.name === item.name && other.url === item.url) === index,
-  );
+  const uniqueSources: WebSourceCitation[] =
+    payload.webSources && payload.webSources.length > 0
+      ? payload.webSources
+      : (payload.webCitations ?? []).map((item) => ({
+          name: item.sourceName,
+          url: item.url,
+          organization: item.sourceName,
+          publishedAt: item.publishedAt,
+          checkedAt: item.retrievedAt,
+          supported:
+            item.evidenceType === "product_listing"
+              ? "pesticide product listing"
+              : item.sourceType === "regulator"
+                ? "pesticide registration"
+                : item.title,
+        }));
   const urgent = payload.escalationRecommended || payload.severity === "high";
 
   const replies = payload.quickReplies.filter(
@@ -247,11 +256,7 @@ export function ChatAssistantMessage({
       ) : null}
 
       <SourcesUsed
-        sources={uniqueSources.map((item) => ({
-          name: item.name,
-          url: item.url,
-          organization: item.name,
-        }))}
+        sources={uniqueSources}
         verificationLine={payload.sourceVerificationLine}
       />
 

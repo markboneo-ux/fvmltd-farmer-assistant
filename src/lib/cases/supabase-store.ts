@@ -6,6 +6,7 @@ import type { AccessState } from "@/lib/beta/limits";
 import {
   CasePersistenceError,
   logCasePersistenceError,
+  noteSchemaCompatDrop,
 } from "./persistence";
 import {
   actionToRow,
@@ -53,7 +54,12 @@ import type {
   StructuredCaseFacts,
 } from "./types";
 
-type QueryError = { message?: string } | null;
+type QueryError = {
+  message?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+} | null;
 
 type QueryResult<T> = {
   data: T | null;
@@ -100,7 +106,7 @@ function persistFail(table: string, message: string): never {
     error: message,
     backend: "supabase",
   });
-  throw new CasePersistenceError("case_persistence_failed", table);
+  throw new CasePersistenceError(message, table);
 }
 
 function adminClient(): CaseStoreAdminClient {
@@ -112,20 +118,62 @@ function adminClient(): CaseStoreAdminClient {
   return created.client as unknown as CaseStoreAdminClient;
 }
 
+const REQUIRED_WRITE_COLUMNS = new Set([
+  "id",
+  "farmer_problem_text",
+  "case_id",
+  "role",
+  "content",
+]);
+
+function queryErrorText(error: QueryError): string {
+  if (!error) return "";
+  return [error.code, error.message, error.details, error.hint].filter(Boolean).join(" ");
+}
+
+function missingColumnFromError(error: QueryError): string | null {
+  const text = queryErrorText(error);
+  const match =
+    text.match(/Could not find the '([^']+)' column/i) ||
+    text.match(/column ["']([^"']+)["'](?: of relation [^ ]+)? does not exist/i) ||
+    text.match(/undefined column ["']([^"']+)["']/i);
+  return match?.[1] ?? null;
+}
+
+function writeErrorText(error: QueryError, fallback: string): string {
+  const text = queryErrorText(error).trim();
+  return text || fallback;
+}
+
+const MAX_OPTIONAL_COLUMN_DROPS = 48;
+
+// Defensive only: if Preview/Production schema is one additive migration
+// behind, drop the unknown optional column and retry. Required columns
+// still fail. Aligned schemas should never enter this loop.
+
 async function insertRow<T>(
   table: string,
   row: Record<string, unknown>,
   map: (value: Record<string, unknown>) => T,
 ): Promise<T> {
-  const { data, error } = await adminClient()
-    .from(table)
-    .insert(row)
-    .select("*")
-    .single<Record<string, unknown>>();
-  if (error || !data) {
-    persistFail(table, error?.message ?? "insert failed");
+  const payload = { ...row };
+  let lastError: QueryError = { message: "insert failed" };
+  for (let attempt = 0; attempt < MAX_OPTIONAL_COLUMN_DROPS; attempt++) {
+    const { data, error } = await adminClient()
+      .from(table)
+      .insert(payload)
+      .select("*")
+      .single<Record<string, unknown>>();
+    if (!error && data) return map(data);
+    lastError = error;
+    const missing = missingColumnFromError(error);
+    if (!missing || REQUIRED_WRITE_COLUMNS.has(missing) || !(missing in payload)) {
+      break;
+    }
+    noteSchemaCompatDrop(table, missing);
+    delete payload[missing];
   }
-  return map(data);
+  persistFail(table, writeErrorText(lastError, "insert failed"));
 }
 
 async function updateRow<T>(
@@ -134,16 +182,25 @@ async function updateRow<T>(
   patch: Record<string, unknown>,
   map: (value: Record<string, unknown>) => T,
 ): Promise<T> {
-  const { data, error } = await adminClient()
-    .from(table)
-    .update(patch)
-    .eq("id", id)
-    .select("*")
-    .single<Record<string, unknown>>();
-  if (error || !data) {
-    persistFail(table, error?.message ?? "update failed");
+  const payload = { ...patch };
+  let lastError: QueryError = { message: "update failed" };
+  for (let attempt = 0; attempt < MAX_OPTIONAL_COLUMN_DROPS; attempt++) {
+    const { data, error } = await adminClient()
+      .from(table)
+      .update(payload)
+      .eq("id", id)
+      .select("*")
+      .single<Record<string, unknown>>();
+    if (!error && data) return map(data);
+    lastError = error;
+    const missing = missingColumnFromError(error);
+    if (!missing || REQUIRED_WRITE_COLUMNS.has(missing) || !(missing in payload)) {
+      break;
+    }
+    noteSchemaCompatDrop(table, missing);
+    delete payload[missing];
   }
-  return map(data);
+  persistFail(table, writeErrorText(lastError, "update failed"));
 }
 
 async function selectRows(

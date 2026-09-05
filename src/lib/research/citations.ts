@@ -12,6 +12,12 @@ export function farmerFacingCitations(citations: WebCitation[]): string {
 }
 
 function citationHint(item: WebCitation): string {
+  if (item.evidenceType === "product_listing") return "pesticide product listing";
+  if (item.evidenceType === "official_register" || item.evidenceType === "official_register_pdf") {
+    return "official pesticide register";
+  }
+  if (item.evidenceType === "approved_product_list") return "approved pesticide product list";
+  if (item.evidenceType === "regulator_portal") return "official pesticide listing portal";
   if (item.sourceType === "market_data") return "market information";
   if (item.sourceType === "regulator") return "pesticide / chemical information";
   if (item.sourceType === "government") return "crop guidance";
@@ -22,11 +28,25 @@ function citationHint(item: WebCitation): string {
   return item.title || "public source";
 }
 
-export function citationForUi(item: WebCitation): { name: string; url: string; hint: string } {
+export function citationToUiSource(item: WebCitation): WebSourceCitation {
   return {
     name: item.sourceName,
     url: item.url,
-    hint: citationHint(item),
+    organization: item.sourceName,
+    publishedAt: item.publishedAt,
+    checkedAt: item.retrievedAt,
+    category:
+      item.sourceType === "regulator"
+        ? "pesticide_registration"
+        : item.sourceType === "market_data"
+          ? "market_prices"
+          : item.sourceType === "research_institute" || item.sourceType === "university"
+            ? "research"
+            : item.sourceType === "extension"
+              ? "extension"
+              : "other",
+    trustLevel: "official",
+    supported: citationHint(item),
   };
 }
 
@@ -70,8 +90,8 @@ export function sourceVerificationLine(
   );
   if (!sensitive) return null;
   const place = country?.trim();
-  if (place) return `Verified using ${place} official sources.`;
-  return "Verified using official sources.";
+  if (place) return `Checked against ${place} official sources.`;
+  return "Checked against official sources.";
 }
 
 export function stripCitedSourceNames(
@@ -86,10 +106,34 @@ export function stripCitedSourceNames(
     );
     for (const name of names) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      next = next.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "").replace(/\s{2,}/g, " ");
+      const candidate = next
+        .replace(new RegExp(`\\b${escaped}\\b`, "gi"), "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/\s+([.,;:])/g, "$1")
+        .trim();
+      if (hasEmptyOrganizationSentence(candidate) && !hasEmptyOrganizationSentence(next)) {
+        continue;
+      }
+      next = candidate;
     }
   }
-  return next.replace(/\s+([.,;:])/g, "$1").trim();
+  return repairEmptyOrganizationSentences(next);
+}
+
+const EMPTY_ORG_VERB =
+  /\bthe\s+(maintains|provides|lists|publishes|issues|regulates|keeps)\b/gi;
+
+export function repairEmptyOrganizationSentences(text: string): string {
+  return text
+    .replace(EMPTY_ORG_VERB, "the official regulator $1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export function hasEmptyOrganizationSentence(text: string): boolean {
+  return /\bthe\s+(maintains|provides|lists|publishes|issues|regulates|keeps)\b/i.test(
+    text,
+  );
 }
 
 const SUPPORT_LABEL: Record<SourceCategory, string> = {

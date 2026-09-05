@@ -42,17 +42,16 @@ import { getOpenAIEnvDiagnostics, getOpenAIModel } from "@/lib/openai/env";
 import { tryCreateOpenAIClient } from "@/lib/openai/client";
 import { getVerifiedRegionalInputs } from "@/lib/regional-inputs/get-verified-regional-inputs";
 import { NO_VERIFIED_PRODUCT_MESSAGE } from "@/lib/regional-inputs/types";
+import { classifyPesticideQuery } from "@/lib/research/pesticide-query";
 import { classifyResearchNeed } from "@/lib/research/should-research";
 import { researchNotesForPrompt, runCountryResearch } from "@/lib/research/run";
 import { recordWebResearchEvent } from "@/lib/research/events";
 import { persistWebResearchEvent } from "@/lib/research/persist";
 import { detectResearchTopics, countryPromptIfNeeded, shouldRunWebResearch } from "@/lib/research/policy";
 import { sanitizeUnverifiedPesticideClaims } from "@/lib/research/pesticides";
-import {
-  enrichCitations,
-  sourceVerificationLine,
-  stripCitedSourceNames,
-} from "@/lib/research/citations";
+import { resolveConversationReference } from "@/lib/assistant/reference-resolution";
+import { citationToUiSource, enrichCitations, sourceVerificationLine, stripCitedSourceNames } from "@/lib/research/citations";
+import { applyPesticideAnswerToText, isGenericRegulatoryRefusal } from "@/lib/research/pesticide-answer";
 import type { ResearchResult, WebResearchResult } from "@/lib/research/types";
 import { newCorrelationId, logStageFailure } from "@/lib/errors/correlation";
 import { logOps } from "@/lib/security/ops-log";
@@ -592,7 +591,23 @@ async function enrichWithRegionalTools(
     }
   }
 
-  if (research?.pesticideChecks.some((item) => !item.verified && item.farmerNote)) {
+  if (
+    research?.pesticideAnswer &&
+    (classifyPesticideQuery(facts.rawText).isBroadList ||
+      classifyPesticideQuery(facts.rawText).wantsFullList ||
+      isGenericRegulatoryRefusal(payload.preliminaryAssessment))
+  ) {
+    payload = {
+      ...payload,
+      preliminaryAssessment: applyPesticideAnswerToText({
+        currentText: payload.preliminaryAssessment,
+        answer: research.pesticideAnswer,
+      }),
+      nextQuestion: isGenericRegulatoryRefusal(payload.nextQuestion)
+        ? ""
+        : payload.nextQuestion,
+    };
+  } else if (research?.pesticideChecks.some((item) => !item.verified && item.farmerNote)) {
     const note = research.pesticideChecks[0]?.farmerNote;
     if (note && !payload.preliminaryAssessment.includes(note)) {
       payload = {
@@ -650,19 +665,20 @@ async function enrichWithRegionalTools(
 
   const citations = research?.citations ?? [];
   const webSources =
-    citations.length > 0
-      ? enrichCitations(
-          citations.map((item) => ({
-            name: item.sourceName,
-            url: item.url,
-            organization: item.sourceName,
-          })),
-        )
-      : payload.webSources ?? [];
+    research?.pesticideAnswer?.sources && research.pesticideAnswer.sources.length > 0
+      ? enrichCitations(research.pesticideAnswer.sources)
+      : citations.length > 0
+        ? enrichCitations(citations.map(citationToUiSource))
+        : payload.webSources ?? [];
 
   payload = {
     ...payload,
-    preliminaryAssessment: stripCitedSourceNames(payload.preliminaryAssessment, webSources),
+    preliminaryAssessment:
+      research?.pesticideAnswer &&
+      (classifyPesticideQuery(facts.rawText).isBroadList ||
+        classifyPesticideQuery(facts.rawText).wantsFullList)
+        ? payload.preliminaryAssessment
+        : stripCitedSourceNames(payload.preliminaryAssessment, webSources),
   };
 
   return {
@@ -682,7 +698,9 @@ async function enrichWithRegionalTools(
     weatherRelevance,
     weatherBrief,
     webSources,
-    sourceVerificationLine: sourceVerificationLine(webSources, country || facts.country),
+    sourceVerificationLine:
+      research?.pesticideAnswer?.verificationLine ??
+      sourceVerificationLine(webSources, country || facts.country),
     sourcesCollapsed: true,
     farmerLevel: facts.farmerLevel,
   };
@@ -822,9 +840,14 @@ export async function runAgronomicCase(options: {
     };
   }
 
-  const effectiveMessage =
+  const rawMessage =
     message ||
     "Please assess the uploaded crop photo(s). State only what you can observe.";
+  const reference = resolveConversationReference({
+    message: rawMessage,
+    history: options.history ?? [],
+  });
+  const effectiveMessage = reference.isReference ? reference.resolvedMessage : rawMessage;
 
   // Mode switch via quick reply.
   const effectiveMode: CaseMode =
@@ -983,6 +1006,43 @@ export async function runAgronomicCase(options: {
     });
   }
 
+  const pesticideQuery = classifyPesticideQuery(effectiveMessage);
+  if (
+    research?.pesticideAnswer &&
+    (pesticideQuery.isBroadList ||
+      pesticideQuery.wantsFullList ||
+      reference.isReference ||
+      pesticideQuery.kind === "broad_list" ||
+      pesticideQuery.kind === "full_register")
+  ) {
+    const base = attachIntent(
+      assistantPayloadFromText({
+        text: research.pesticideAnswer.farmerText,
+        intent:
+          classified.intent === "other" ? "general_agriculture" : classified.intent,
+        questionCategory: classified.questionCategory,
+        country: knownFacts.country,
+        district: knownFacts.district,
+      }),
+      turn,
+    );
+    const payload = await enrichWithRegionalTools(
+      base,
+      knownFacts,
+      research,
+      classified.intent,
+    );
+    return {
+      ok: true,
+      case: payload,
+      responseId: `pesticide_${Date.now()}`,
+      model: "farmer-pesticide-research",
+      diagnosticCode: "AI_READY",
+      requestCompleted: true,
+      questionsAsked: 0,
+    };
+  }
+
   const weatherRelevance = weatherRelevanceFor(knownFacts, classified.intent);
 
   const createResponse: (
@@ -1104,6 +1164,9 @@ export async function runAgronomicCase(options: {
       ? `Farmer attached ${images.length} photo(s). Describe only observable features. If blurry, distant, missing leaf underside, or missing root/stem base, say so and request a better photo.`
       : "No photo attached on this turn.",
     `Farmer message: ${effectiveMessage}`,
+    reference.isReference
+      ? `The farmer is asking about "${reference.referent}" from your previous message. Answer that directly. Do not ask them to clarify.`
+      : "",
     cropLockInstruction({
       crop: knownFacts.crop,
       allowedCrops: turn.allowedCrops,
@@ -1279,11 +1342,9 @@ export async function runAgronomicCase(options: {
         );
       } else {
         const webSources = enrichCitations(
-          (research?.citations ?? []).map((item) => ({
-            name: item.sourceName,
-            url: item.url,
-            organization: item.sourceName,
-          })),
+          research?.pesticideAnswer?.sources?.length
+            ? research.pesticideAnswer.sources
+            : (research?.citations ?? []).map(citationToUiSource),
         );
         parsed = {
           ...parsed,
@@ -1294,11 +1355,21 @@ export async function runAgronomicCase(options: {
           weatherRelevance,
           weatherBrief: parsed.weatherBrief ?? null,
           webSources,
-          sourceVerificationLine: sourceVerificationLine(webSources, knownFacts.country),
+          sourceVerificationLine:
+            research?.pesticideAnswer?.verificationLine ??
+            sourceVerificationLine(webSources, knownFacts.country),
           sourcesCollapsed: true,
           farmerLevel: knownFacts.farmerLevel,
         };
-        if (injectedResearch?.pesticide && !injectedResearch.pesticide.verified) {
+        if (research?.pesticideAnswer) {
+          parsed = {
+            ...parsed,
+            preliminaryAssessment: applyPesticideAnswerToText({
+              currentText: parsed.preliminaryAssessment,
+              answer: research.pesticideAnswer,
+            }),
+          };
+        } else if (injectedResearch?.pesticide && !injectedResearch.pesticide.verified) {
           parsed = {
             ...parsed,
             preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
@@ -1309,10 +1380,9 @@ export async function runAgronomicCase(options: {
         }
         parsed = {
           ...parsed,
-          preliminaryAssessment: stripCitedSourceNames(
-            parsed.preliminaryAssessment,
-            webSources,
-          ),
+          preliminaryAssessment: research?.pesticideAnswer
+            ? parsed.preliminaryAssessment
+            : stripCitedSourceNames(parsed.preliminaryAssessment, webSources),
         };
       }
     } catch (parseError) {

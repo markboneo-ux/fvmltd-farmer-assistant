@@ -51,14 +51,14 @@ export const TRUSTED_SOURCES: CatalogTrustedSource[] = [
   },
   {
     id: "tt-ptccb",
-    name: "Pesticides and Toxic Chemicals Inspectorate",
+    name: "Chemistry, Food and Drugs Division (Pesticides and Toxic Chemicals)",
     country: "Trinidad and Tobago",
-    url: "https://agriculture.gov.tt/",
-    domain: "agriculture.gov.tt",
+    url: "https://health.gov.tt/cfdd/portal",
+    domain: "health.gov.tt",
     category: "pesticide_registration",
     trustLevel: "official_government",
     lastCheckedAt: SEED_CHECKED,
-    notes: "Confirm local labels; do not assume other CARICOM registrations.",
+    notes: "Official CFDD pesticide listings. Confirm the specific product page; do not assume other CARICOM registrations.",
   },
   {
     id: "cardi",

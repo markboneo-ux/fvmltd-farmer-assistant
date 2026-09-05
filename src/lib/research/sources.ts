@@ -141,6 +141,17 @@ export const TRUSTED_SOURCES: TrustedSource[] = [
     preferredFor: ["pesticide_registration", "chemical_approval", "product_label", "regulation"],
   }),
   source({
+    id: "intl-fao",
+    country: "regional",
+    sourceName: "FAO plant production and protection",
+    domain: "fao.org",
+    homepageUrl: "https://www.fao.org/plant-production-protection/en",
+    sourceType: "research_institute",
+    trustLevel: "official",
+    notes: "General agronomy only. Never proof of national pesticide registration.",
+    preferredFor: ["government_guidance"],
+  }),
+  source({
     id: "regional-cardi",
     country: "regional",
     sourceName: "CARDI",
