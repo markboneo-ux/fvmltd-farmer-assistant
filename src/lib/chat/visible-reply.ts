@@ -32,24 +32,26 @@ export function shouldUseDiagnosisLayout(payload: AgronomicCasePayload): boolean
 
   return (
     payload.checksToday.length > 0 ||
-    payload.safeActionsNow.length > 0
+    payload.safeActionsNow.length > 0 ||
+    (payload.likelyCauses ?? []).length > 0
   );
 }
 
 export function farmerHistoryContent(payload: AgronomicCasePayload): string {
   const lines = [buildFarmerVisibleReply(payload)];
 
+  if ((payload.likelyCauses ?? []).length > 0) {
+    lines.push(`Most likely: ${(payload.likelyCauses ?? []).join("; ")}`);
+  }
   if (payload.checksToday.length > 0) {
     lines.push(`What to check: ${payload.checksToday.join("; ")}`);
   }
   if (payload.safeActionsNow.length > 0) {
     lines.push(`What I would do next: ${payload.safeActionsNow.join("; ")}`);
   }
-  if (payload.weatherRisks.length > 0) {
+  if ((payload.whatWouldChangeDiagnosis ?? []).length > 0) {
     lines.push(
-      `Weather risk noted (not a diagnosis): ${payload.weatherRisks
-        .map((risk) => `${risk.riskLevel} ${risk.diseaseOrPest}`)
-        .join("; ")}`,
+      `What would change this: ${(payload.whatWouldChangeDiagnosis ?? []).join("; ")}`,
     );
   }
   if (payload.verifiedInputOptions.length > 0) {
@@ -58,13 +60,6 @@ export function farmerHistoryContent(payload: AgronomicCasePayload): string {
         .map((option) => option.activeIngredientOrNutrient)
         .join("; ")}`,
     );
-  }
-  if ((payload.webSources ?? []).length > 0 || (payload.webCitations ?? []).length > 0) {
-    const names = [
-      ...(payload.webSources ?? []).map((item) => item.name),
-      ...(payload.webCitations ?? []).map((item) => item.sourceName),
-    ].filter(Boolean);
-    lines.push(`Sources: ${[...new Set(names)].join("; ")}`);
   }
 
   return lines.filter(Boolean).join("\n");

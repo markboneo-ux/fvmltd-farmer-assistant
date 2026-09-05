@@ -1,11 +1,13 @@
 "use client";
 
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
+import { diagnosisConfidenceLabel } from "@/lib/agronomy/diagnosis-confidence";
 import {
   buildFarmerVisibleReply,
   shouldUseDiagnosisLayout,
   stripGuidancePrefix,
 } from "@/lib/chat/visible-reply";
+import type { WebSourceCitation } from "@/lib/research/types";
 
 type ChatAssistantMessageProps = {
   payload?: AgronomicCasePayload;
@@ -17,16 +19,61 @@ type ChatAssistantMessageProps = {
   similarCaseNote?: string;
 };
 
-function BulletList({ items }: { items: string[] }) {
+function BulletList({ items, ordered = false }: { items: string[]; ordered?: boolean }) {
   if (items.length === 0) return null;
+  const Tag = ordered ? "ol" : "ul";
   return (
-    <ul className="mt-1 space-y-1 pl-4 text-sm leading-relaxed">
+    <Tag className={`${ordered ? "list-decimal" : "list-disc"} mt-1 space-y-1 pl-5 text-sm leading-relaxed`}>
       {items.map((item) => (
-        <li key={item} className="list-disc">
-          {item}
-        </li>
+        <li key={item}>{item}</li>
       ))}
-    </ul>
+    </Tag>
+  );
+}
+
+function SourcesUsed({
+  sources,
+  verificationLine,
+}: {
+  sources: WebSourceCitation[];
+  verificationLine?: string | null;
+}) {
+  if (sources.length === 0) return null;
+  return (
+    <div className="text-xs text-muted">
+      {verificationLine ? <p className="mb-1">{verificationLine}</p> : null}
+      <details>
+        <summary className="cursor-pointer text-muted hover:text-ink">
+          Sources used ({sources.length}) ▾
+        </summary>
+        <ul className="mt-1.5 space-y-1.5">
+          {sources.slice(0, 6).map((source) => (
+            <li key={`${source.name}-${source.url ?? ""}`}>
+              <p className="text-ink">
+                {source.url ? (
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-leaf underline-offset-2 hover:underline"
+                  >
+                    {source.organization && source.organization !== source.name
+                      ? source.organization
+                      : source.name}
+                  </a>
+                ) : (
+                  source.organization || source.name
+                )}
+              </p>
+              {source.supported ? <p>{source.supported}</p> : null}
+              {source.checkedAt || source.publishedAt ? (
+                <p>Checked {(source.checkedAt || source.publishedAt || "").slice(0, 10)}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
   );
 }
 
@@ -45,14 +92,16 @@ export function ChatAssistantMessage({
 
   const assessment = stripGuidancePrefix(payload.preliminaryAssessment);
   const question = payload.nextQuestion.trim();
-  const useDiagnosis = shouldUseDiagnosisLayout(payload);
+  const likelyCauses = payload.likelyCauses ?? [];
+  const useDiagnosis =
+    shouldUseDiagnosisLayout(payload) || likelyCauses.length > 0;
   const relevance = payload.weatherRelevance ?? (payload.weatherRisks.length > 0 ? "supporting" : "omit");
   const showWeatherCard = relevance === "central" && (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
   const supportingNote =
     relevance === "supporting"
       ? payload.weatherBrief ||
         (payload.weatherRisks.length > 0
-          ? "Also, the next few days are wet/humid, so leaf disease pressure may increase."
+          ? "The next few days are humid, however, so keep watching for spotting or lesions."
           : null)
       : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
@@ -66,7 +115,7 @@ export function ChatAssistantMessage({
   const urgent = payload.escalationRecommended || payload.severity === "high";
 
   const replies = payload.quickReplies.filter(
-    (reply) => !/start full crop check/i.test(reply),
+    (reply) => !/start full crop check/i.test(reply) && !/ask about products/i.test(reply),
   );
   const showReplies =
     showQuickReplies && Boolean(onQuickReply) && replies.length > 0;
@@ -87,9 +136,17 @@ export function ChatAssistantMessage({
         <div className="space-y-3">
           <section>
             <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-              Likely issue
+              What I think is most likely
             </h3>
-            <p className="mt-1 whitespace-pre-wrap">{assessment}</p>
+            {likelyCauses.length > 0 ? (
+              <BulletList items={likelyCauses} ordered />
+            ) : null}
+            {payload.diagnosisConfidence ? (
+              <p className="mt-1 text-xs text-muted">
+                {diagnosisConfidenceLabel(payload.diagnosisConfidence)}
+              </p>
+            ) : null}
+            <p className="mt-1 whitespace-pre-wrap">{payload.diagnosisWhy || assessment}</p>
           </section>
           {payload.rankedCauses && payload.rankedCauses.length > 0 ? (
             <section>
@@ -108,23 +165,37 @@ export function ChatAssistantMessage({
           {payload.checksToday.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to check now
+                Check this now
               </h3>
-              <BulletList items={payload.checksToday} />
+              <BulletList items={payload.checksToday} ordered />
             </section>
           ) : null}
           {payload.safeActionsNow.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What I would do next
+                What to do today
               </h3>
               <BulletList items={payload.safeActionsNow} />
             </section>
           ) : null}
           {payload.actionsToAvoid.length > 0 ? (
-            <p className="text-sm text-muted">
-              Avoid: {payload.actionsToAvoid.join(" ")}
-            </p>
+            <section>
+              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                What not to do
+              </h3>
+              <BulletList items={payload.actionsToAvoid} />
+            </section>
+          ) : null}
+          {(payload.whatWouldChangeDiagnosis ?? []).length > 0 ? (
+            <section>
+              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                What would change my diagnosis
+              </h3>
+              <BulletList items={payload.whatWouldChangeDiagnosis ?? []} />
+            </section>
+          ) : null}
+          {payload.monitorNext ? (
+            <p className="text-sm text-muted">{payload.monitorNext}</p>
           ) : null}
           {question ? (
             <p className="font-medium whitespace-pre-wrap">{question}</p>
@@ -162,69 +233,27 @@ export function ChatAssistantMessage({
       ) : null}
 
       {showProducts ? (
-        <div className="rounded-xl bg-field px-3 py-2.5 ring-1 ring-line">
-          <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
-            Local options
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            Only verified catalogue entries. Availability is not invented.
-          </p>
-          <div className="mt-2 space-y-2">
-            {payload.verifiedInputOptions.slice(0, 3).map((option) => (
-              <div key={`${option.productType}-${option.activeIngredientOrNutrient}`}>
-                <p className="text-sm font-medium text-ink">
-                  {option.activeIngredientOrNutrient}
-                </p>
-                <p className="text-xs text-muted">
-                  {option.productType}
-                  {option.registrationStatus
-                    ? ` · ${option.registrationStatus}`
-                    : ""}
-                  {option.availabilityStatus
-                    ? ` · ${option.availabilityStatus}`
-                    : ""}
-                </p>
-                {option.verifiedBrands[0] ? (
-                  <p className="text-xs text-ink">
-                    {option.verifiedBrands[0].brandName}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted">
-                    Brand names stay hidden until registration and availability
-                    are verified.
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
+        <div className="text-sm">
+          {payload.verifiedInputOptions.slice(0, 2).map((option) => (
+            <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1">
+              One locally available option is{" "}
+              {option.verifiedBrands[0]?.brandName
+                ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
+                : option.activeIngredientOrNutrient}
+              {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
+            </p>
+          ))}
         </div>
       ) : null}
 
-      {uniqueSources.length > 0 ? (
-        <div className="text-sm">
-          <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
-            Sources
-          </p>
-          <ul className="mt-1 space-y-1">
-            {uniqueSources.slice(0, 6).map((item) => (
-              <li key={`${item.name}-${item.url ?? ""}`}>
-                {item.url ? (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-canopy underline underline-offset-2"
-                  >
-                    {item.name}
-                  </a>
-                ) : (
-                  <span>{item.name}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <SourcesUsed
+        sources={uniqueSources.map((item) => ({
+          name: item.name,
+          url: item.url,
+          organization: item.name,
+        }))}
+        verificationLine={payload.sourceVerificationLine}
+      />
 
       {similarCaseNote ? (
         <p className="text-xs text-muted">

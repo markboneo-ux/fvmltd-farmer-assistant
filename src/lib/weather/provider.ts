@@ -80,7 +80,7 @@ export const TT_DISTRICT_COORDINATES: Record<string, WeatherCoordinates> = {
 
 /** Country centroids for Caribbean weather. Never use Trinidad when another country is named. */
 export const CARIBBEAN_COUNTRY_COORDINATES: Record<string, WeatherCoordinates> = {
-  "trinidad and tobago": { latitude: 10.6918, longitude: -61.2225 },
+  "trinidad and tobago": TT_DISTRICT_COORDINATES.default,
   guyana: { latitude: 6.8013, longitude: -58.1551 },
   jamaica: { latitude: 18.1096, longitude: -77.2975 },
   barbados: { latitude: 13.1939, longitude: -59.5432 },
@@ -92,9 +92,12 @@ export const CARIBBEAN_COUNTRY_COORDINATES: Record<string, WeatherCoordinates> =
   "saint kitts and nevis": { latitude: 17.3578, longitude: -62.783 },
   belize: { latitude: 17.1899, longitude: -88.4976 },
   bahamas: { latitude: 25.0343, longitude: -77.3963 },
+  "the bahamas": { latitude: 25.0343, longitude: -77.3963 },
   suriname: { latitude: 5.852, longitude: -55.2038 },
   anguilla: { latitude: 18.2206, longitude: -63.0686 },
   "british virgin islands": { latitude: 18.4207, longitude: -64.64 },
+  haiti: { latitude: 18.5944, longitude: -72.3074 },
+  "dominican republic": { latitude: 18.4861, longitude: -69.9312 },
 };
 
 export function resolveCoordinates(
@@ -121,7 +124,6 @@ export function resolveCoordinates(
   if (country.includes("tobago") && !country.includes("trinidad")) {
     return TT_DISTRICT_COORDINATES.tobago;
   }
-
   for (const [name, coords] of Object.entries(CARIBBEAN_COUNTRY_COORDINATES)) {
     if (country.includes(name) || name.includes(country)) {
       return coords;

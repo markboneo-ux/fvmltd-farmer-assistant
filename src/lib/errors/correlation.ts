@@ -13,6 +13,7 @@ export function logStageFailure(options: {
   externalService?: string;
   errorType: string;
   message?: string;
+  table?: string | null;
 }) {
   console.error("[ops] stage_failure", {
     correlationId: options.correlationId,
@@ -20,6 +21,7 @@ export function logStageFailure(options: {
     stage: options.stage,
     externalService: options.externalService ?? null,
     errorType: options.errorType,
+    table: options.table ?? null,
     message: (options.message || "").slice(0, 240),
   });
 }

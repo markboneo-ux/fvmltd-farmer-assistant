@@ -6,6 +6,21 @@ import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
 import { extractCountryFromText } from "@/lib/research/countries";
 import {
+  ASK_COUNTRY_QUESTION,
+  extractRegionAndCountry,
+  farmerLevelToUserLevel,
+  inferFarmerLevel,
+  inferIrrigation,
+  inferProductionSystem,
+  resolveLocationConfidence,
+  shouldAskCountry,
+  shouldConfirmCountry,
+  userLevelToFarmerLevel,
+  type FarmerLevel,
+  type LocationConfidence,
+  type ProfileCountrySource,
+} from "@/lib/assistant/farmer-context";
+import {
   isBusinessIntent,
   isCalculationIntent,
   type IntentCategory,
@@ -78,11 +93,13 @@ export const WHITEFLY_QUICK_SEQUENCE = [
   "What have you sprayed during the last seven days?",
 ] as const;
 
-export type FarmerScale = "commercial" | "home" | null;
+export type FarmerScale = "commercial" | "home" | "small" | null;
 export type FarmerUserType =
   | "home_gardener"
   | "farmer"
+  | "small_farmer"
   | "commercial_grower"
+  | "technical_user"
   | "agronomist"
   | "extension_officer"
   | null;
@@ -94,16 +111,21 @@ export type KnownFarmerFacts = {
   problemCategory: string | null;
   country: string | null;
   district: string | null;
+  locationConfidence: LocationConfidence;
   distributionHint: string | null;
   productionSystem: string | null;
   farmerScale: FarmerScale;
   userType: FarmerUserType;
+  farmerLevel: FarmerLevel | null;
+  irrigationType: string | null;
   areaPlanted: string | null;
   plantAge: string | null;
   suddenWilt: boolean;
   stuntedWholeField: boolean;
   asksForProducts: boolean;
   asksAboutWeather: boolean;
+  recentFertilizer: boolean;
+  recentPesticide: boolean;
   asksForMarket: boolean;
   asksForPesticideRegistration: boolean;
   asksForRegulation: boolean;
@@ -139,7 +161,12 @@ const PLANT_AGE_QUESTION =
  */
 export function extractKnownFacts(
   text: string,
-  profile?: { country?: string | null; district?: string | null } | null,
+  profile?: {
+    country?: string | null;
+    district?: string | null;
+    countrySource?: ProfileCountrySource;
+    locationConfidence?: LocationConfidence | null;
+  } | null,
 ): KnownFarmerFacts {
   const rawText = text.trim();
   const lower = rawText.toLowerCase();
@@ -181,18 +208,23 @@ export function extractKnownFacts(
             ? "leaf_spot"
             : null;
 
-  let country: string | null = profile?.country?.trim() || null;
-  if (!country) {
-    country = extractCountryFromText(rawText);
-  }
-
-  let district: string | null = profile?.district?.trim() || null;
+  const located = extractRegionAndCountry(rawText);
+  let country: string | null =
+    located.country || extractCountryFromText(rawText) || profile?.country?.trim() || null;
+  let district: string | null = located.region || profile?.district?.trim() || null;
   if (!district) {
     const districtMatch = lower.match(
       /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
     );
     if (districtMatch) district = districtMatch[1];
   }
+  const locationConfidence = resolveLocationConfidence({
+    spokenCountry: located.country,
+    countryFromRegion: located.countryFromRegion,
+    profileCountry: profile?.country,
+    profileSource: profile?.countrySource ?? null,
+    storedConfidence: profile?.locationConfidence ?? null,
+  });
 
   let distributionHint: string | null = null;
   if (/\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower)) {
@@ -203,37 +235,17 @@ export function extractKnownFacts(
     distributionHint = "few plants";
   }
 
-  let productionSystem: string | null = null;
-  if (/\bgreenhouse\b/.test(lower)) productionSystem = "greenhouse";
-  else if (/\bshade\s*house\b/.test(lower)) productionSystem = "shade_house";
-  else if (/\bhydroponic\b/.test(lower)) productionSystem = "hydroponic";
-  else if (/\bopen\s+field\b/.test(lower)) productionSystem = "open_field";
+  const productionSystem = inferProductionSystem(rawText);
 
+  const inferredLevel = inferFarmerLevel(rawText);
+  const farmerLevel = inferredLevel.level;
   let farmerScale: FarmerScale = null;
-  let userType: FarmerUserType = null;
-  if (/\b(agronomist|plant patholog|crop advisor)\b/.test(lower)) {
-    userType = "agronomist";
+  let userType: FarmerUserType = farmerLevelToUserLevel(farmerLevel);
+  if (farmerLevel === "HOME_GARDENER") farmerScale = "home";
+  else if (farmerLevel === "COMMERCIAL_FARMER" || farmerLevel === "AGRONOMIST" || farmerLevel === "TECHNICAL_USER") {
     farmerScale = "commercial";
-  } else if (/\b(extension officer|extension agent)\b/.test(lower)) {
-    userType = "extension_officer";
-    farmerScale = "commercial";
-  } else if (
-    /\bcommercial\s+(farmer|grower|farm|production|field)\b/.test(lower) ||
-    /\bi('m| am)\s+a\s+commercial\b/.test(lower) ||
-    /\b\d+(?:\.\d+)?\s*(acres?|hectares?|ha)\b/.test(lower)
-  ) {
-    farmerScale = "commercial";
-    userType = "commercial_grower";
-  } else if (
-    /\b(home|backyard|kitchen)\s+(garden|gardener|grower|tomato|pepper|crop|plants?)\b/.test(
-      lower,
-    ) ||
-    /\b(home\s+gardener|backyard)\b/.test(lower)
-  ) {
-    farmerScale = "home";
-    userType = "home_gardener";
-  } else if (/\b(farmer|farm)\b/.test(lower)) {
-    userType = "farmer";
+  } else if (farmerLevel === "SMALL_FARMER") {
+    farmerScale = "small";
   }
 
   const areaMatch = lower.match(
@@ -255,10 +267,13 @@ export function extractKnownFacts(
     problemCategory,
     country,
     district,
+    locationConfidence,
     distributionHint,
     productionSystem,
     farmerScale,
     userType,
+    farmerLevel,
+    irrigationType: inferIrrigation(rawText),
     areaPlanted,
     plantAge,
     suddenWilt:
@@ -268,13 +283,21 @@ export function extractKnownFacts(
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
     asksForProducts:
-      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+(to|should i)\s+spray|spray for\b|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
       /\b(weather|forecast|will it rain|is it (going to|gonna) rain|before i spray|spray tomorrow|humidity|humid weather|heat (wave|stress)|could this weather)\b/.test(
         lower,
       ) || /\bwhy am i suddenly seeing more\b/.test(lower),
+    recentFertilizer:
+      /\b(fertilizer|fertiliser|npk|urea|foliar feed).{0,24}(yesterday|today|last\s+(week|few days)|ago|this morning)\b/.test(
+        lower,
+      ) || /\b(applied|put|gave).{0,20}\b(fertilizer|fertiliser|npk|urea)\b/.test(lower),
+    recentPesticide:
+      /\b(pesticide|insecticide|fungicide|herbicide|spray).{0,24}(yesterday|today|last\s+(week|few days)|ago|this morning)\b/.test(
+        lower,
+      ),
     asksForMarket:
       /\b(market price|wholesale price|farmgate|namdevco|current price|what .{0,30}selling for)\b/.test(
         lower,
@@ -315,11 +338,14 @@ export function questionAsksForKnownFact(
     return true;
   }
 
-  if (
-    facts.country &&
-    LOCATION_QUESTION.test(question) &&
-    !/\b(would|materially|change)\b/i.test(question)
-  ) {
+  if (facts.country && LOCATION_QUESTION.test(question)) {
+    if (
+      /just to confirm/i.test(question) &&
+      facts.locationConfidence !== "explicit" &&
+      facts.locationConfidence !== "profile_confirmed"
+    ) {
+      return false;
+    }
     return true;
   }
 
@@ -376,6 +402,7 @@ export function applyCommercialSafetyGuards(
     knownFacts: KnownFarmerFacts;
     intent?: IntentCategory | null;
     askForCrop?: boolean;
+    researchNeed?: string | null;
     askForCountry?: boolean;
     photoAlreadyRequested?: boolean;
     hasImages?: boolean;
@@ -493,13 +520,28 @@ export function applyCommercialSafetyGuards(
     nextQuestion = "";
   }
 
-  // Do not re-ask country when already known. Do ask when local facts require it.
-  if (
-    nextQuestion &&
-    LOCATION_QUESTION.test(nextQuestion) &&
-    options.knownFacts.country
-  ) {
-    nextQuestion = "";
+  // Re-ask or confirm country only when local facts would change the advice.
+  if (nextQuestion && LOCATION_QUESTION.test(nextQuestion)) {
+    const needsCountry = shouldAskCountry({
+      country: options.knownFacts.country,
+      intent: options.intent,
+      asksForProducts: options.knownFacts.asksForProducts,
+      asksAboutWeather: options.knownFacts.asksAboutWeather,
+      researchNeed: options.researchNeed,
+    });
+    const needsConfirm = shouldConfirmCountry({
+      country: options.knownFacts.country,
+      confidence: options.knownFacts.locationConfidence,
+      asksForProducts: options.knownFacts.asksForProducts,
+      researchNeed: options.researchNeed,
+    });
+    if (options.knownFacts.country && !needsCountry && !needsConfirm) {
+      nextQuestion = "";
+    } else if (needsConfirm && options.knownFacts.country) {
+      nextQuestion = `Just to confirm, are you farming in ${options.knownFacts.country}?`;
+    } else if (!options.knownFacts.country && nextQuestion !== ASK_COUNTRY_QUESTION) {
+      nextQuestion = ASK_COUNTRY_QUESTION;
+    }
   }
   if (
     options.askForCountry &&
@@ -565,8 +607,12 @@ export function applyCommercialSafetyGuards(
   }
 
   if (isGuidanceStage(stage) && !skipDiagnosisWorkflow) {
-    if (!preliminaryAssessment.toLowerCase().includes("preliminary")) {
-      preliminaryAssessment = `Preliminary guidance: ${preliminaryAssessment}`;
+    if (
+      (options.knownFacts.suddenWilt || escalationRecommended) &&
+      !preliminaryAssessment.toLowerCase().includes("not a confirmed") &&
+      !preliminaryAssessment.toLowerCase().includes("preliminary")
+    ) {
+      preliminaryAssessment = `${preliminaryAssessment} This is not a confirmed laboratory diagnosis.`.trim();
     }
   }
 
@@ -629,7 +675,6 @@ export function applyCommercialSafetyGuards(
     if (typedReplies.length > 0) {
       quickReplies = typedReplies;
     } else {
-      // Unsupported / open question type — no unrelated buttons.
       quickReplies = [];
     }
   } else if (isGuidanceStage(stage)) {
@@ -645,7 +690,10 @@ export function applyCommercialSafetyGuards(
     quickReplies = [];
   }
 
+  quickReplies = quickReplies.filter((item) => !/\bask about products\b/i.test(item));
+
   return {
+    ...payload,
     mode,
     stage,
     questionId,
@@ -666,6 +714,18 @@ export function applyCommercialSafetyGuards(
     weatherRisks: payload.weatherRisks ?? [],
     verifiedInputOptions: payload.verifiedInputOptions ?? [],
     internalMissingInformation,
+    weatherRelevance: payload.weatherRelevance ?? "omit",
+    weatherBrief: payload.weatherBrief ?? null,
+    webSources: payload.webSources ?? [],
+    likelyCauses: payload.likelyCauses ?? [],
+    diagnosisWhy: payload.diagnosisWhy ?? null,
+    whatWouldChangeDiagnosis: payload.whatWouldChangeDiagnosis ?? [],
+    monitorNext: payload.monitorNext ?? null,
+    farmerLevel: payload.farmerLevel ?? userLevelToFarmerLevel(options.knownFacts.userType),
+    sourceVerificationLine: payload.sourceVerificationLine ?? null,
+    sourcesCollapsed: payload.sourcesCollapsed ?? true,
+    rankedCauses: payload.rankedCauses ?? [],
+    askCountry: payload.askCountry ?? Boolean(options.askForCountry),
   };
 }
 

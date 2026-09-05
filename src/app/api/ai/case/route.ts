@@ -6,6 +6,8 @@ import {
   type CaseImageInput,
 } from "@/lib/agronomy/runCase";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
+import { loadRegisteredFarmerContext } from "@/lib/beta/farmer-profile-context";
+import { mergeCaseProfileContext } from "@/lib/assistant/farmer-context";
 import {
   CasePersistenceError,
   evaluateConversationGate,
@@ -17,7 +19,12 @@ import {
 } from "@/lib/beta/conversation";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import { persistActiveCaseId, readActiveCaseId } from "@/lib/beta/session";
-import { shouldStartNewCase } from "@/lib/assistant/intents";
+import {
+  classifyFarmerIntent,
+  isBusinessIntent,
+  isCalculationIntent,
+  shouldStartNewCase,
+} from "@/lib/assistant/intents";
 import {
   logCasePersistenceBackend,
   logCasePersistenceError,
@@ -271,20 +278,39 @@ export async function POST(request: Request) {
     });
 
     const continuingCase = incomingCaseId ? await getCropCase(incomingCaseId) : null;
-    let topicReset = false;
-    if (
+    const registeredProfile = await loadRegisteredFarmerContext(identity.farmerProfileId);
+    const topicReset = Boolean(
       continuingCase &&
-      shouldStartNewCase({
-        message,
-        activeCrop: continuingCase.crop,
-        activeIntent: continuingCase.conversationIntent,
-      })
-    ) {
+        shouldStartNewCase({
+          message,
+          activeCrop: continuingCase.crop,
+          activeIntent: continuingCase.conversationIntent,
+        }),
+    );
+    if (topicReset) {
       incomingCaseId = null;
       history = [];
       previousResponseId = null;
-      topicReset = true;
     }
+    const storedConfidence = continuingCase?.businessMetadata?.locationConfidence;
+    profile = mergeCaseProfileContext({
+      client: profile,
+      continuing:
+        !topicReset && continuingCase
+          ? {
+              country: continuingCase.country,
+              district: continuingCase.district,
+              locationConfidence:
+                storedConfidence === "explicit" ||
+                storedConfidence === "profile_confirmed" ||
+                storedConfidence === "conversation_inferred" ||
+                storedConfidence === "unknown"
+                  ? storedConfidence
+                  : null,
+            }
+          : null,
+      registered: registeredProfile,
+    });
 
     const persistedHistory = await loadPersistedConversationHistory(
       incomingCaseId,
@@ -340,14 +366,31 @@ export async function POST(request: Request) {
     }
 
     if (!profile.country || !profile.district) {
-      const known = await lastKnownLocationForOwner({
-        userId: identity.authUserId,
-        anonymousSessionId: identity.guestSessionId,
-      });
-      profile = {
-        country: profile.country || known.country,
-        district: profile.district || known.district,
-      };
+      const turnIntent = classifyFarmerIntent(message).intent;
+      const inheritLastKnownCountry =
+        !topicReset ||
+        isBusinessIntent(turnIntent) ||
+        isCalculationIntent(turnIntent);
+      // Same-guest empty profiles still inherit last-known country for
+      // continuation and business follow-ups. A crop/topic switch must not
+      // reuse the previous crop case's country.
+      if (inheritLastKnownCountry) {
+        const known = await lastKnownLocationForOwner({
+          userId: identity.authUserId,
+          anonymousSessionId: identity.guestSessionId,
+        });
+        const country = profile.country || known.country;
+        const district = profile.district || known.district;
+        profile = {
+          ...profile,
+          country,
+          district,
+          locationConfidence:
+            profile.country || !country
+              ? profile.locationConfidence
+              : "conversation_inferred",
+        };
+      }
     }
 
     const result = await runAgronomicCase({
@@ -364,8 +407,9 @@ export async function POST(request: Request) {
               crop: continuingCase.crop,
               conversationIntent: continuingCase.conversationIntent,
               farmerProblemText: continuingCase.farmerProblemText,
-              country: continuingCase.country ?? profile.country,
-              district: continuingCase.district ?? profile.district,
+              country: continuingCase.country,
+              district: continuingCase.district,
+              farmerLevel: continuingCase.userLevel,
             }
           : null,
     });
@@ -395,7 +439,8 @@ export async function POST(request: Request) {
 
     const assistantText = farmerHistoryContent(result.case);
     logCasePersistenceStart();
-    let persistedCaseId: string | null = incomingCaseId;
+    let persistedCaseId: string | null = null;
+    let persistenceFailed = false;
     try {
       const persisted = await persistConversationTurn({
         identity,
@@ -405,52 +450,61 @@ export async function POST(request: Request) {
         payload: result.case,
         imageCount: images.length,
         profile,
+        correlationId,
       });
       persistedCaseId = persisted.caseId;
-      await persistActiveCaseId(persisted.caseId);
-      if (images.length > 0) {
-        await persistPrivateCaseImages({
-          caseId: persisted.caseId,
-          identity,
-          images,
-        });
-      }
     } catch (persistError) {
-      if (persistError instanceof CasePersistenceError) {
-        logCasePersistenceError(persistError, persistError.table);
-        logOps("database_failure", {
-          error: persistError.message,
-          table: persistError.table,
-          route: "ai/case",
-          stage: "persistence",
-          externalService: "supabase",
-          errorType: "CasePersistenceError",
-          correlationId,
-        });
-        logStageFailure({
-          correlationId,
-          route: "ai/case",
-          stage: "persistence",
-          externalService: "supabase",
-          errorType: "CasePersistenceError",
-          message: persistError.message,
-        });
-        return NextResponse.json({
-          case: result.case,
-          responseId: result.responseId,
-          requestCompleted: result.requestCompleted,
-          questionsAsked: result.questionsAsked,
-          caseId: persistedCaseId,
-          similarCaseHint: null,
-          access: identity.access,
-          usage: imageGate.used,
-          persistenceFailed: true,
-          ...(includeDiagnostics
-            ? { model: result.model, diagnosticCode: result.diagnosticCode }
-            : {}),
-        });
+      // AI already succeeded. Never drop the answer for a save failure.
+      persistenceFailed = true;
+      persistedCaseId = null;
+      const table =
+        persistError instanceof CasePersistenceError ? persistError.table : "crop_cases";
+      logCasePersistenceError(persistError, table);
+      logOps("database_failure", {
+        error: persistError instanceof Error ? persistError.message : String(persistError),
+        table,
+        route: "ai/case",
+        stage: "persistence",
+        correlationId,
+      });
+      logStageFailure({
+        correlationId,
+        route: "ai/case",
+        stage: "persistence",
+        externalService: "supabase",
+        errorType: persistError instanceof Error ? persistError.name : "Error",
+        message: persistError instanceof Error ? persistError.message : String(persistError),
+        table,
+      });
+    }
+
+    if (persistedCaseId) {
+      await persistActiveCaseId(persistedCaseId);
+      if (images.length > 0) {
+        try {
+          await persistPrivateCaseImages({
+            caseId: persistedCaseId,
+            identity,
+            images,
+          });
+        } catch (photoError) {
+          logCasePersistenceError(photoError, "case_photos");
+          logStageFailure({
+            correlationId,
+            route: "ai/case",
+            stage: "photo_persist",
+            externalService: "supabase",
+            errorType: photoError instanceof Error ? photoError.name : "Error",
+            message: photoError instanceof Error ? photoError.message : String(photoError),
+            table: "case_photos",
+          });
+        }
       }
-      throw persistError;
+    }
+
+    let hint: string | null = null;
+    if (persistedCaseId) {
+      hint = await similarCaseHint(persistedCaseId);
     }
 
     return NextResponse.json({
@@ -459,13 +513,12 @@ export async function POST(request: Request) {
       requestCompleted: result.requestCompleted,
       questionsAsked: result.questionsAsked,
       caseId: persistedCaseId,
-      similarCaseHint: persistedCaseId
-        ? await similarCaseHint(persistedCaseId)
-        : null,
+      similarCaseHint: hint,
       access: identity.access,
       usage: imageGate.used,
+      persistenceFailed,
       ...(includeDiagnostics
-        ? { model: result.model, diagnosticCode: result.diagnosticCode }
+        ? { model: result.model, diagnosticCode: result.diagnosticCode, correlationId }
         : {}),
     });
   } catch (error) {

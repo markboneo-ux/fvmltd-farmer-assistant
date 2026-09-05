@@ -21,11 +21,11 @@ import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 import { getMainWebsiteUrl, MAIN_WEBSITE_LABEL } from "@/lib/config/urls";
 import {
   FARMER_GENERIC_ERROR,
-  FARMER_PERSISTENCE_DEGRADED,
   GUEST_LIMIT_MESSAGE,
   REGISTERED_LIMIT_HEADING,
   UPGRADE_COMING_SOON,
 } from "@/lib/beta/limits";
+import { farmerPersistenceBanner } from "@/lib/chat/persistence-warning";
 import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
 import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
 
@@ -72,7 +72,7 @@ type FarmerCaseChatProps = {
   showModeToggle?: boolean;
   showDiagnostics?: boolean;
   showTestPrompts?: boolean;
-  defaultCountry?: string;
+  defaultCountry?: string | null;
   defaultDistrict?: string | null;
   title?: string;
   subtitle?: string;
@@ -257,8 +257,8 @@ export function FarmerCaseChat({
       form.append(
         "profile",
         JSON.stringify({
-          country: sessionCountry || defaultCountry || null,
-          district: sessionDistrict || defaultDistrict,
+          country: sessionCountry || defaultCountry || "",
+          district: sessionDistrict || defaultDistrict || "",
         }),
       );
       for (const file of preparedFiles) {
@@ -364,8 +364,9 @@ export function FarmerCaseChat({
         setSessionDistrict(casePayload.regionalContext.district);
       }
 
-      if (payload.persistenceFailed) {
-        setError(FARMER_PERSISTENCE_DEGRADED);
+      const persistBanner = farmerPersistenceBanner(payload);
+      if (persistBanner) {
+        setError(persistBanner);
       }
     } catch (err) {
       clearQuickReplies();

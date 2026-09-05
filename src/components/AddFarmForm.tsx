@@ -6,7 +6,6 @@ import { Button } from "@/components/Button";
 import { FieldError } from "@/components/FieldError";
 import {
   COUNTRY_OPTIONS,
-  DEFAULT_COUNTRY,
   isOtherCountryOption,
 } from "@/data/countries";
 import type { FarmSizeUnit, RegisteredFarmer } from "@/lib/farmers/types";
@@ -36,7 +35,7 @@ function buildInitialFarmForm(farmer: RegisteredFarmer): FarmFormInput {
     ? farmer.country
     : farmer.country
       ? "Other Country"
-      : DEFAULT_COUNTRY;
+      : "";
 
   return {
     farmerId: farmer.id,

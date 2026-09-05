@@ -130,8 +130,12 @@ export type WebCitation = {
 export type WebSourceCitation = {
   name: string;
   url: string | null;
+  organization?: string | null;
+  publishedAt?: string | null;
   category?: SourceCategory;
-  trustLevel?: RegistryTrustLevel;
+  trustLevel?: TrustLevel | RegistryTrustLevel;
+  supported?: string | null;
+  checkedAt?: string | null;
 };
 
 export type PesticideCheck = {
@@ -270,11 +274,15 @@ export type WebResearchResult = {
 };
 
 export const UNVERIFIED_REGISTRATION_TEMPLATE =
-  "I cannot confirm that this product is registered in {country}. Check the local label or regulator before use.";
+  "I can explain the active ingredients normally used against this problem, but I haven't verified registration{crop} in {country}.";
 
-export function unverifiedRegistrationMessage(country: string): string {
+export function unverifiedRegistrationMessage(
+  country: string,
+  crop?: string | null,
+): string {
   const name = country.trim() || "your country";
-  return UNVERIFIED_REGISTRATION_TEMPLATE.replace("{country}", name);
+  const cropBit = crop?.trim() ? ` for ${crop.trim()}` : "";
+  return UNVERIFIED_REGISTRATION_TEMPLATE.replace("{crop}", cropBit).replace("{country}", name);
 }
 
 export const STALE_SOURCE_DAYS = 90;

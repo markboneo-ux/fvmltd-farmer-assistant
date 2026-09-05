@@ -62,7 +62,7 @@ export async function getWeatherDiseaseRisk(
       provider: null,
       alerts: [],
       verified: false,
-      error: "Crop is required for weather disease risk.",
+      error: "Crop is required.",
     };
   }
 

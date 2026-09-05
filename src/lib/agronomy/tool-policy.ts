@@ -36,6 +36,13 @@ export function shouldInvokeWeatherTool(
   });
 }
 
+export function chemicalManagementRelevant(facts: KnownFarmerFacts): boolean {
+  if (facts.asksForProducts) return true;
+  return /\b(what (can|should|do) i spray|spray for (this|it|the)|chemical (control|programme|program|to use))\b/i.test(
+    facts.rawText,
+  );
+}
+
 export function shouldInvokeProductTool(facts: KnownFarmerFacts): boolean {
-  return facts.asksForProducts;
+  return chemicalManagementRelevant(facts);
 }

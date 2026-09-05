@@ -3,6 +3,7 @@ import { emptyRegionalContext } from "@/lib/agronomy/case-schema";
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import {
   buildFarmerVisibleReply,
+  farmerHistoryContent,
   shouldUseDiagnosisLayout,
   stripGuidancePrefix,
 } from "./visible-reply";
@@ -58,6 +59,21 @@ describe("farmer-visible reply", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("does not dump source names into farmer-visible history", () => {
+    const text = farmerHistoryContent(
+      payload({
+        webSources: [
+          {
+            name: "NAMDEVCO NAMIS market data",
+            url: "https://namistt.com/",
+          },
+        ],
+      }),
+    );
+    expect(text.toLowerCase()).not.toContain("namdevco");
+    expect(text).not.toMatch(/^Sources:/m);
   });
 
   it("uses a compact diagnosis layout when checks or guidance exist", () => {

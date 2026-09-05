@@ -17,6 +17,14 @@ describe("weather relevance gate", () => {
     expect(shouldInvokeWeatherTool(facts, intent)).toBe(false);
   });
 
+  it("does not attach weather to celery burning", () => {
+    const message = "Why is my celery burning?";
+    const facts = extractKnownFacts(message);
+    const intent = classifyFarmerIntent(message).intent;
+    expect(assessWeatherRelevance({ message, facts, intent }).level).toBe("omit");
+    expect(shouldInvokeWeatherTool(facts, intent)).toBe(false);
+  });
+
   it("does not attach weather to celery yellowing", () => {
     const message = "My celery leaves are yellowing";
     const facts = extractKnownFacts(message);

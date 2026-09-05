@@ -55,6 +55,14 @@ describe("tomato-protocol rapid triage", () => {
     ).toBe(true);
   });
 
+  it("lets a spoken country override a stored profile country", () => {
+    const facts = extractKnownFacts("Celery burning in Guyana", {
+      country: "Trinidad and Tobago",
+      district: "Chaguanas",
+    });
+    expect(facts.country).toBe("Guyana");
+  });
+
   it("does not treat known facts as askable again", () => {
     const facts = extractKnownFacts("Tomato whiteflies");
     expect(

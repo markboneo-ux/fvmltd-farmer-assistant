@@ -33,4 +33,11 @@ describe("regional tool policy", () => {
     expect(facts.asksForProducts).toBe(true);
     expect(shouldInvokeProductTool(facts)).toBe(true);
   });
+
+  it("treats a spray-for-disease question as chemical management", () => {
+    const facts = extractKnownFacts(
+      "I'm growing sweet pepper in Guyana. What can I spray for Cercospora?",
+    );
+    expect(shouldInvokeProductTool(facts)).toBe(true);
+  });
 });

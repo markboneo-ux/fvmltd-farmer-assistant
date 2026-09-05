@@ -194,11 +194,11 @@ export function classifyFarmerIntent(message: string): ClassifiedIntent {
   }
 
   if (
-    /\b(wilt|stunt|yellow|chloros|leaf spots?|leaves? have spots?|spots? on.{0,40}(leaf|leaves|plants?)|holes? in (the )?leaf|dying plants?|crop (has a )?problem|plants? (are )?(sick|looking bad))/i.test(
+    /\b(wilt|stunt|yellow|chloros|leaf spots?|leaves? have spots?|spots? on.{0,40}(leaf|leaves|plants?)|holes? in (the )?leaf|dying plants?|crop (has a )?problem|plants? (are )?(sick|looking bad)|burn(ing|t)?|scorch|necrosis|tip\s*burn|leaf\s+burn)/i.test(
       lower,
     ) ||
     (Boolean(extractLastCrop(text)) &&
-      /\b(spot|wilt|yellow|hole|curl|mould|mold|sick|problem|stunt)\b/.test(lower))
+      /\b(spot|wilt|yellow|hole|curl|mould|mold|sick|problem|stunt|burn|scorch|necrosis)\b/.test(lower))
   ) {
     return pack("crop_problem");
   }
@@ -278,7 +278,7 @@ function detectCalculationType(lower: string): string {
 }
 
 function isClearlyCropProblem(lower: string): boolean {
-  return /\b(wilt|spots? on|holes? in (the )?leaf|white\s*fl|blight|stunt)\b/.test(
+  return /\b(wilt|spots? on|holes? in (the )?leaf|white\s*fl|blight|stunt|burn(ing|t)?|scorch|necrosis)\b/.test(
     lower,
   );
 }

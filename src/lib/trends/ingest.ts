@@ -4,6 +4,7 @@ import { listCropCases, listOutcomes } from "@/lib/cases/store";
 import { aggregateCluster, canExposeTrend, trendsMatchFarmerQuery } from "./engine";
 import { listCaseTrends, upsertCaseTrend } from "./store";
 import {
+  sameTrendCountry,
   symptomClusterFrom,
   trendClusterKey,
   type CaseTrendRecord,
@@ -67,7 +68,7 @@ export async function ingestCaseForTrends(
     .filter((item) => {
       return (
         (item.crop || "") === (record.crop || "") &&
-        (item.country || "") === (record.country || "") &&
+        sameTrendCountry(item.country, record.country) &&
         (item.district || "") === (record.district || "") &&
         symptomClusterFrom(item.symptoms, item.problemCategory) === cluster
       );
@@ -88,6 +89,7 @@ export async function ingestCaseForTrends(
     existingList.find(
       (item) =>
         (item.crop || "") === (record.crop || "") &&
+        sameTrendCountry(item.country, record.country) &&
         (item.region || "") === (record.district || "") &&
         item.symptomCluster === cluster,
     ) ??

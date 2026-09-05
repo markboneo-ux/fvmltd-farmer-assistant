@@ -73,7 +73,6 @@ export const QUICK_REPLIES_BY_TYPE: Record<QuestionType, string[]> = {
   guidance_followup: [
     "Upload a photo",
     "Start full crop check",
-    "Ask about products",
   ],
   open: [],
 };

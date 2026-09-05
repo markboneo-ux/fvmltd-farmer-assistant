@@ -2,6 +2,7 @@
  * Reusable Caribbean / tropical country list for FVMLTD farmer forms.
  */
 
+/** First option in registration country lists. Not a database or chat default. */
 export const DEFAULT_COUNTRY = "Trinidad and Tobago";
 
 export const OTHER_COUNTRY_OPTIONS = [

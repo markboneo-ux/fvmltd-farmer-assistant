@@ -137,6 +137,20 @@ describe("Supabase case persistence layer", () => {
     expect(fake.db.case_followups).toHaveLength(1);
   });
 
+  it("still saves the chat when follow-up or trend enrichment fails", async () => {
+    fake.failNext.add("case_followups");
+    const persisted = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "My lettuce has brown edges.",
+      assistantText: "Check whether the brown starts at the tips.",
+      payload: payload(),
+    });
+    expect(persisted.createdNewCase).toBe(true);
+    expect(fake.db.crop_cases).toHaveLength(1);
+    expect(fake.db.case_messages).toHaveLength(2);
+    expect(fake.db.case_messages.every((row) => row.case_id === persisted.caseId)).toBe(true);
+  });
+
   it("continues an existing conversation from persisted Supabase rows, not process memory", async () => {
     const first = await persistConversationTurn({
       identity: guest(),

@@ -22,6 +22,7 @@ import {
 } from "./intents";
 import type { KnownFarmerFacts } from "@/lib/agronomy/tomato-protocol";
 import { extractKnownFacts } from "@/lib/agronomy/tomato-protocol";
+import { userLevelToFarmerLevel } from "./farmer-context";
 
 export type ActiveCaseContext = {
   crop: string | null;
@@ -30,6 +31,7 @@ export type ActiveCaseContext = {
   farmerProblemText?: string | null;
   country?: string | null;
   district?: string | null;
+  farmerLevel?: string | null;
 };
 
 export type ResolvedTurnContext = {
@@ -80,7 +82,12 @@ export function sliceHistoryForCurrentIntent(
 export function resolveTurnContext(options: {
   message: string;
   history?: Array<{ role: string; content: string }>;
-  profile?: { country?: string | null; district?: string | null } | null;
+  profile?: {
+    country?: string | null;
+    district?: string | null;
+    countrySource?: "client" | "continuing" | "registered" | null;
+    locationConfidence?: "explicit" | "profile_confirmed" | "conversation_inferred" | "unknown" | null;
+  } | null;
   activeCase?: ActiveCaseContext | null;
 }): ResolvedTurnContext {
   const history = options.history ?? [];
@@ -152,6 +159,36 @@ export function resolveTurnContext(options: {
       crop: currentCrop,
       rawText: options.message,
     };
+  }
+
+  const stableFacts = extractKnownFacts(userHistoryText(history), options.profile);
+  if (options.activeCase?.country && !knownFacts.country) {
+    knownFacts.country = options.activeCase.country;
+    if (knownFacts.locationConfidence === "unknown") {
+      const stored = options.profile?.locationConfidence;
+      knownFacts.locationConfidence =
+        stored === "explicit" || stored === "profile_confirmed"
+          ? stored
+          : "conversation_inferred";
+    }
+  }
+  if (options.activeCase?.district && !knownFacts.district) {
+    knownFacts.district = options.activeCase.district;
+  }
+  if (!knownFacts.country && stableFacts.country) {
+    knownFacts.country = stableFacts.country;
+    knownFacts.locationConfidence = stableFacts.locationConfidence;
+  }
+  if (!knownFacts.district && stableFacts.district) knownFacts.district = stableFacts.district;
+  if (!knownFacts.farmerLevel && stableFacts.farmerLevel) {
+    knownFacts.farmerLevel = stableFacts.farmerLevel;
+    knownFacts.userType = stableFacts.userType;
+    knownFacts.farmerScale = stableFacts.farmerScale;
+  }
+  if (options.activeCase?.farmerLevel && !knownFacts.farmerLevel) {
+    knownFacts.farmerLevel =
+      userLevelToFarmerLevel(options.activeCase.farmerLevel) ??
+      (options.activeCase.farmerLevel as KnownFarmerFacts["farmerLevel"]);
   }
 
   if (!carryCrop) {

@@ -5,6 +5,7 @@ type Row = Record<string, unknown>;
 export type FakeCaseSupabase = CaseStoreAdminClient & {
   db: Record<string, Row[]>;
   failNext: Set<string>;
+  failNextInsert: Set<string>;
   reset(): void;
 };
 
@@ -15,6 +16,7 @@ function clone<T>(value: T): T {
 export function createFakeCaseSupabase(): FakeCaseSupabase {
   const db: Record<string, Row[]> = emptyDb();
   const failNext = new Set<string>();
+  const failNextInsert = new Set<string>();
 
   function emptyDb(): Record<string, Row[]> {
     return {
@@ -70,6 +72,10 @@ export function createFakeCaseSupabase(): FakeCaseSupabase {
       if (failNext.has(table) || failNext.has("*")) {
         failNext.delete(table);
         failNext.delete("*");
+        return { data: null, error: { message: `forced failure for ${table}` } };
+      }
+      if (pendingInsert && failNextInsert.has(table)) {
+        failNextInsert.delete(table);
         return { data: null, error: { message: `forced failure for ${table}` } };
       }
 
@@ -166,11 +172,13 @@ export function createFakeCaseSupabase(): FakeCaseSupabase {
     from,
     db,
     failNext,
+    failNextInsert,
     reset() {
       const empty = emptyDb();
       for (const key of Object.keys(db)) delete db[key];
       Object.assign(db, empty);
       failNext.clear();
+      failNextInsert.clear();
     },
   };
 }

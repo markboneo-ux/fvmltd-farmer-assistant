@@ -12,6 +12,7 @@ import { researchUsageStats } from "@/lib/research/log";
 import { loadWebResearchDashboardStats } from "@/lib/research/persist";
 import { canExposeTrend } from "@/lib/trends/engine";
 import { listCaseTrends } from "@/lib/trends/store";
+import { trendCountryKey } from "@/lib/trends/types";
 
 export type InsightsFilters = {
   from?: string | null;
@@ -41,6 +42,14 @@ function inRange(iso: string, filters: InsightsFilters): boolean {
   }
   if (filters.to && iso.slice(0, 10) > filters.to) return false;
   return true;
+}
+
+function matchesCountry(
+  value: string | null | undefined,
+  needle: string | null | undefined,
+): boolean {
+  if (!needle) return true;
+  return trendCountryKey(value) === trendCountryKey(needle === "Unknown" ? "unknown" : needle);
 }
 
 function matches(value: string | null | undefined, needle: string | null | undefined): boolean {
@@ -92,7 +101,7 @@ function isGuestCase(item: CropCaseRecord): boolean {
 
 function matchesFilters(item: CropCaseRecord, filters: InsightsFilters): boolean {
   if (!inRange(item.createdAt, filters)) return false;
-  if (!matches(item.country, filters.country)) return false;
+  if (!matchesCountry(item.country, filters.country)) return false;
   if (!matches(item.district, filters.district ?? filters.region)) return false;
   if (!matches(item.crop, filters.crop)) return false;
   if (!matches(item.variety, filters.variety)) return false;
@@ -181,6 +190,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const byCaseType = new Map<string, number>();
   const byCalculation = new Map<string, number>();
   const byQuestionType = new Map<string, number>();
+  const byFarmerLevel = new Map<string, number>();
   let unresolved = 0;
   let escalations = 0;
   let nutrient = 0;
@@ -193,7 +203,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
 
   for (const item of allCases) {
     increment(byCrop, item.crop);
-    increment(byCountry, item.country);
+    increment(byCountry, trendCountryKey(item.country) === "unknown" ? "Unknown" : item.country);
     increment(byDistrict, item.district);
     increment(byVariety, item.variety);
     increment(byProblem, item.problemCategory);
@@ -202,6 +212,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     increment(byIntent, item.conversationIntent);
     increment(byCaseType, item.caseType);
     increment(byQuestionType, questionBucket(item.questionCategory ?? item.conversationIntent));
+    increment(byFarmerLevel, item.userLevel);
     if (item.calculationType) increment(byCalculation, item.calculationType);
     for (const symptom of item.symptoms) increment(bySymptom, symptom);
     if (item.humanEscalation || item.caseStatus === "human_review") escalations += 1;
@@ -421,9 +432,12 @@ export async function buildInsights(filters: InsightsFilters = {}) {
           item.label !== "unknown",
       ),
       casesByType: topEntries(byCaseType),
+      casesByFarmerLevel: topEntries(byFarmerLevel),
       resolvedCount: resolved,
       emergingTrends: trends.map((item) => ({
-        label: [item.crop, item.region, item.symptomCluster].filter(Boolean).join(" · "),
+        label: [item.crop, item.country || "Unknown", item.region, item.symptomCluster]
+          .filter(Boolean)
+          .join(" · "),
         count: item.uniqueSessionCount,
         status: item.trendStatus,
         firstSeen: item.firstSeenAt,
