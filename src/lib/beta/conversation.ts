@@ -24,6 +24,7 @@ import {
 } from "@/lib/cases/store";
 import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
 import { persistCaseWebCitations } from "@/lib/research/persist";
+import { ingestCaseForTrends, relevantTrendHint } from "@/lib/trends/ingest";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
 import { countUsage, recordUsageEvent } from "./usage-store";

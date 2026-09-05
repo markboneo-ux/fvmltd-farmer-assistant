@@ -538,8 +538,8 @@ async function enrichWithRegionalTools(
     }
   }
 
-  if (research?.marketNotes[0]?.priceText) {
-    const market = research.marketNotes[0];
+  const market = research?.marketNotes[0];
+  if (market?.priceText) {
     const marketLine = `${market.sourceName} reports a ${market.priceType} figure of ${market.priceText}. This is not assumed to be a farmgate price.`;
     if (!payload.preliminaryAssessment.includes(market.priceText)) {
       payload = {

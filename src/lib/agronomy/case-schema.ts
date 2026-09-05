@@ -5,6 +5,7 @@
 
 import type { RankedCause } from "./causes";
 import type { PesticideCheck, WebCitation } from "@/lib/research/types";
+import { isQuestionType, type QuestionType } from "./question-types";
 
 export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
 export type CaseMode = (typeof CASE_MODES)[number];
