@@ -66,13 +66,14 @@ PGRST205 Could not find the table 'public.crop_cases' in the schema cache
 
 Those tables, and later columns such as `business_metadata`, have now been created on `qzycpoivwwecooscnnju`.
 
-The live nxmi Preview still pointed at `gcojtfrdjczrvzieynzj`. That project **has** `crop_cases`, but it is missing later columns from `20260904120000_general_assistant_trends.sql`. The exact Preview insert error was:
+The live nxmi Preview still pointed at `gcojtfrdjczrvzieynzj`. That project **has** `crop_cases`, but it is missing later columns from `20260904120000_general_assistant_trends.sql`. Exact Preview insert errors, in order:
 
 ```
 PGRST204 Could not find the 'business_metadata' column of 'crop_cases' in the schema cache
+PGRST204 Could not find the 'reviewed_at' column of 'crop_cases' in the schema cache
 ```
 
-The app now retries `crop_cases` inserts/updates by dropping unknown optional columns so a Preview schema that is only one migration behind can still return a `caseId`. Required columns (`id`, `farmer_problem_text`, `case_id`, `role`, `content`) are never dropped.
+`gcojtfrdjczrvzieynzj` is missing later additive columns from `20260904120000_general_assistant_trends.sql` and `20260904180000_research_admin_review.sql`. PostgREST reports one missing column at a time. The app now retries `crop_cases` inserts/updates by dropping unknown optional columns (up to 48) so that schema can still return a `caseId`. Required columns (`id`, `farmer_problem_text`, `case_id`, `role`, `content`) are never dropped.
 
 This is a compatibility shim, not a substitute for aligning Preview env:
 

@@ -351,12 +351,24 @@ describe("POST /api/ai/case persistence", () => {
   });
 
   it("returns a caseId when Preview crop_cases is missing later columns such as business_metadata", async () => {
-    fake.schemaMissingColumns.add("business_metadata");
-    fake.schemaMissingColumns.add("conversation_intent");
-    fake.schemaMissingColumns.add("question_category");
-    fake.schemaMissingColumns.add("calculation_type");
-    fake.schemaMissingColumns.add("case_type");
-    fake.schemaMissingColumns.add("knowledge_state");
+    for (const column of [
+      "business_metadata",
+      "conversation_intent",
+      "question_category",
+      "calculation_type",
+      "case_type",
+      "knowledge_state",
+      "diagnosis_incorrect",
+      "needs_review",
+      "useful_for_trend",
+      "exclude_from_learning",
+      "review_notes",
+      "reviewed_at",
+      "reviewed_by",
+      "include_in_trend_learning",
+    ]) {
+      fake.schemaMissingColumns.add(column);
+    }
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const { POST } = await import("./route");
@@ -383,6 +395,7 @@ describe("POST /api/ai/case persistence", () => {
     expect(fake.db.crop_cases).toHaveLength(1);
     expect(fake.db.case_messages).toHaveLength(2);
     expect(fake.db.crop_cases[0]).not.toHaveProperty("business_metadata");
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("reviewed_at");
     expect(
       farmerPersistenceBanner({
         persistenceFailed: body.persistenceFailed,

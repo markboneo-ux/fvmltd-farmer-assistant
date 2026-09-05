@@ -217,12 +217,24 @@ describe("Supabase case persistence layer", () => {
   });
 
   it("retries crop_cases writes when Preview schema is missing later columns", async () => {
-    fake.schemaMissingColumns.add("business_metadata");
-    fake.schemaMissingColumns.add("conversation_intent");
-    fake.schemaMissingColumns.add("question_category");
-    fake.schemaMissingColumns.add("calculation_type");
-    fake.schemaMissingColumns.add("case_type");
-    fake.schemaMissingColumns.add("knowledge_state");
+    for (const column of [
+      "business_metadata",
+      "conversation_intent",
+      "question_category",
+      "calculation_type",
+      "case_type",
+      "knowledge_state",
+      "diagnosis_incorrect",
+      "needs_review",
+      "useful_for_trend",
+      "exclude_from_learning",
+      "review_notes",
+      "reviewed_at",
+      "reviewed_by",
+      "include_in_trend_learning",
+    ]) {
+      fake.schemaMissingColumns.add(column);
+    }
     const warns: string[] = [];
     const warnSpy = vi.spyOn(console, "warn").mockImplementation((message?: unknown) => {
       if (typeof message === "string") warns.push(message);
@@ -243,6 +255,7 @@ describe("Supabase case persistence layer", () => {
     expect(fake.db.case_messages).toHaveLength(2);
     expect(fake.db.crop_cases[0]).not.toHaveProperty("business_metadata");
     expect(fake.db.crop_cases[0]).not.toHaveProperty("conversation_intent");
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("reviewed_at");
     expect(warns.some((line) => line.includes("CASE_PERSISTENCE_DROP_COLUMN") && line.includes("business_metadata"))).toBe(
       true,
     );

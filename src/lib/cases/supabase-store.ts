@@ -144,6 +144,8 @@ function writeErrorText(error: QueryError, fallback: string): string {
   return text || fallback;
 }
 
+const MAX_OPTIONAL_COLUMN_DROPS = 48;
+
 async function insertRow<T>(
   table: string,
   row: Record<string, unknown>,
@@ -151,7 +153,7 @@ async function insertRow<T>(
 ): Promise<T> {
   const payload = { ...row };
   let lastError: QueryError = { message: "insert failed" };
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < MAX_OPTIONAL_COLUMN_DROPS; attempt++) {
     const { data, error } = await adminClient()
       .from(table)
       .insert(payload)
@@ -177,7 +179,7 @@ async function updateRow<T>(
 ): Promise<T> {
   const payload = { ...patch };
   let lastError: QueryError = { message: "update failed" };
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < MAX_OPTIONAL_COLUMN_DROPS; attempt++) {
     const { data, error } = await adminClient()
       .from(table)
       .update(payload)
