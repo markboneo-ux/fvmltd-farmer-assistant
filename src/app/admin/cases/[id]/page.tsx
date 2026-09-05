@@ -1,7 +1,6 @@
 import { AdminCaseReviewView } from "@/components/admin/AdminCaseReviewView";
 import { getStaffSession } from "@/lib/staff/auth";
-import { getCropCase, listCaseMessages } from "@/lib/cases/store";
-import { redirect, notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 
 export default async function AdminCaseDetailPage({
   params,
@@ -13,8 +12,5 @@ export default async function AdminCaseDetailPage({
     redirect("/staff/login?next=/admin/cases");
   }
   const { id } = await params;
-  const cropCase = await getCropCase(id);
-  if (!cropCase) notFound();
-  const messages = await listCaseMessages(id);
-  return <AdminCaseReviewView cropCase={cropCase} messages={messages} />;
+  return <AdminCaseReviewView caseId={id} />;
 }

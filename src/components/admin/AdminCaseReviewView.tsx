@@ -58,8 +58,23 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
   }
 
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    async function loadCase() {
+      const response = await fetch(`/api/admin/cases/${caseId}`);
+      const payload = (await response.json()) as CaseDetail;
+      if (cancelled) return;
+      if (!response.ok) {
+        setError(payload.error || "Could not load case.");
+        return;
+      }
+      setError(null);
+      setData(payload);
+      setNotes(payload.case?.reviewNotes ?? "");
+    }
+    void loadCase();
+    return () => {
+      cancelled = true;
+    };
   }, [caseId]);
 
   async function mark(body: Record<string, unknown>) {

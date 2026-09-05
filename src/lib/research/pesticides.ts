@@ -133,7 +133,6 @@ function extractRei(text: string): string | null {
 }
 
 export function formatPesticideBlock(check: PesticideCheck): string {
-  const country = check.country || "the country you are farming in";
   return [
     `Possible active ingredient: ${check.activeIngredient || "not identified yet"}`,
     `Use: ${check.use || "the pest or disease you asked about"}`,

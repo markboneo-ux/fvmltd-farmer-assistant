@@ -130,7 +130,7 @@ export function extractStructuredFacts(
 
   const userLevel = inferUserLevel(text);
   const district = extractDistrict(text) || profile?.district?.trim() || null;
-  let country = profile?.country?.trim() || extractCountryFromText(text);
+  const country = profile?.country?.trim() || extractCountryFromText(text);
 
   const areaMatch = lower.match(/\b(\d+(?:\.\d+)?)\s*(acres?|hectares?|ha)\b/);
   const ageMatch =

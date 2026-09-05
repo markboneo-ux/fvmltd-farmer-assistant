@@ -266,15 +266,13 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   );
   const web = researchUsageStats();
   const persistedWeb = await loadWebResearchDashboardStats();
-  const startOfToday = new Date();
-  startOfToday.setUTCHours(0, 0, 0, 0);
-  const weekAgo = new Date(startOfToday.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const startOfToday = `${today}T00:00:00.000Z`;
   const usageMessageEvents = usage.filter((event) => event.kind === "message");
   const messagesToday = usageMessageEvents.filter(
-    (event) => event.createdAt >= startOfToday.toISOString(),
+    (event) => event.createdAt >= startOfToday,
   ).length;
   const messagesWeek = usageMessageEvents.filter(
-    (event) => event.createdAt >= weekAgo.toISOString(),
+    (event) => event.createdAt >= weekAgo,
   ).length;
   const daysByUser = new Map<string, Set<string>>();
   for (const event of usage) {

@@ -409,9 +409,10 @@ describe("U12–U14 trends", () => {
     const trend = aggregateCluster([
       member({ caseId: "c1", sessionKey: "a" }),
       member({ caseId: "c2", sessionKey: "b", createdAt: "2026-09-02T00:00:00.000Z" }),
+      member({ caseId: "c3", sessionKey: "c", createdAt: "2026-09-03T00:00:00.000Z" }),
     ]);
     expect(trend?.trendStatus).toBe("emerging");
-    expect(trend?.uniqueSessionCount).toBe(2);
+    expect(trend?.uniqueSessionCount).toBe(3);
   });
 
   it("staff-rejected case does not improve trend confidence", () => {

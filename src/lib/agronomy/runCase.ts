@@ -481,7 +481,7 @@ async function enrichWithRegionalTools(
   if (shouldFetchWeather) {
     try {
       const forecast = await getForecast({
-        country,
+        country: country || "Trinidad and Tobago",
         district: facts.district,
       });
       weatherDataAsOf = forecast.retrievedAt;
@@ -571,6 +571,25 @@ async function enrichWithRegionalTools(
         preliminaryAssessment: `${payload.preliminaryAssessment}\n\n${note}`,
       };
     }
+  } else if (research?.pesticideChecks[0] && !research.pesticideChecks[0].verified) {
+    payload = {
+      ...payload,
+      preliminaryAssessment: sanitizeUnverifiedPesticideClaims(
+        payload.preliminaryAssessment,
+        {
+          country: research.pesticideChecks[0].country || country || "your country",
+          activeIngredient: research.pesticideChecks[0].activeIngredient,
+          tradeName: research.pesticideChecks[0].tradeName,
+          verified: false,
+          status: "unverified",
+          localTradeNames: [],
+          sourceName: research.pesticideChecks[0].sourceName,
+          sourceUrl: research.pesticideChecks[0].sourceUrl,
+          lastVerifiedAt: null,
+          farmerMessage: research.pesticideChecks[0].farmerNote,
+        },
+      ),
+    };
   }
 
   const market = research?.marketNotes[0];
