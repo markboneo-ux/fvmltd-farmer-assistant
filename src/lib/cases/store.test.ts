@@ -216,6 +216,49 @@ describe("Supabase case persistence layer", () => {
     expect(fake.db.crop_cases[0]?.anonymous_session_id).toBe(GUEST_ID);
   });
 
+  it("retries crop_cases writes when Preview schema is missing later columns", async () => {
+    fake.schemaMissingColumns.add("business_metadata");
+    fake.schemaMissingColumns.add("conversation_intent");
+    fake.schemaMissingColumns.add("question_category");
+    fake.schemaMissingColumns.add("calculation_type");
+    fake.schemaMissingColumns.add("case_type");
+    fake.schemaMissingColumns.add("knowledge_state");
+    const warns: string[] = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation((message?: unknown) => {
+      if (typeof message === "string") warns.push(message);
+    });
+
+    const persisted = await persistConversationTurn({
+      identity: guest(),
+      userMessage: "What pesticides are available in Trinidad and Tobago",
+      assistantText:
+        "Trinidad and Tobago's Chemistry, Food and Drugs Division maintains the pesticide registration records.",
+      payload: payload(),
+    });
+
+    warnSpy.mockRestore();
+    expect(persisted.caseId).toBeTruthy();
+    expect(persisted.createdNewCase).toBe(true);
+    expect(fake.db.crop_cases).toHaveLength(1);
+    expect(fake.db.case_messages).toHaveLength(2);
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("business_metadata");
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("conversation_intent");
+    expect(warns.some((line) => line.includes("CASE_PERSISTENCE_DROP_COLUMN") && line.includes("business_metadata"))).toBe(
+      true,
+    );
+  });
+
+  it("still fails loudly when a required crop_cases column is missing", async () => {
+    fake.schemaMissingColumns.add("farmer_problem_text");
+    await expect(
+      createCropCase({
+        anonymousSessionId: GUEST_ID,
+        message: "Tomato wilt",
+      }),
+    ).rejects.toBeInstanceOf(CasePersistenceError);
+    expect(fake.db.crop_cases).toHaveLength(0);
+  });
+
   it("does not silently fall back to memory when Supabase writes fail", async () => {
     fake.failNext.add("crop_cases");
     await expect(

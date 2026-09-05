@@ -535,5 +535,8 @@ describe("preview deployment documentation", () => {
     expect(doc).toMatch(/git-main/);
     expect(doc).toMatch(/PR #32/);
     expect(doc).toMatch(/Do \*\*not\*\* treat a `git-main` chat result/);
+    expect(doc).toMatch(/PGRST204 Could not find the 'business_metadata' column/);
+    expect(doc).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(doc).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
   });
 });

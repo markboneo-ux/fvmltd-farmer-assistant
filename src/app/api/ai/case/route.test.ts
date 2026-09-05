@@ -350,6 +350,47 @@ describe("POST /api/ai/case persistence", () => {
     ).toBeNull();
   });
 
+  it("returns a caseId when Preview crop_cases is missing later columns such as business_metadata", async () => {
+    fake.schemaMissingColumns.add("business_metadata");
+    fake.schemaMissingColumns.add("conversation_intent");
+    fake.schemaMissingColumns.add("question_category");
+    fake.schemaMissingColumns.add("calculation_type");
+    fake.schemaMissingColumns.add("case_type");
+    fake.schemaMissingColumns.add("knowledge_state");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-fvm-debug": "1" },
+        body: JSON.stringify({
+          message: "What pesticides are available in Trinidad and Tobago",
+          profile: { country: "Trinidad and Tobago" },
+        }),
+      }),
+    );
+    warnSpy.mockRestore();
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      caseId?: string | null;
+      persistenceFailed?: boolean;
+      persistenceError?: string | null;
+    };
+    expect(body.caseId).toBeTruthy();
+    expect(body.persistenceFailed).toBe(false);
+    expect(fake.db.crop_cases).toHaveLength(1);
+    expect(fake.db.case_messages).toHaveLength(2);
+    expect(fake.db.crop_cases[0]).not.toHaveProperty("business_metadata");
+    expect(
+      farmerPersistenceBanner({
+        persistenceFailed: body.persistenceFailed,
+        caseId: body.caseId,
+      }),
+    ).toBeNull();
+  });
+
   it("uses the registered farmer country on a new session without assuming Trinidad", async () => {
     vi.mocked(resolveIdentityFromRequest).mockResolvedValue({
       kind: "registered",

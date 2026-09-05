@@ -6,6 +6,7 @@ export type FakeCaseSupabase = CaseStoreAdminClient & {
   db: Record<string, Row[]>;
   failNext: Set<string>;
   failNextInsert: Set<string>;
+  schemaMissingColumns: Set<string>;
   reset(): void;
 };
 
@@ -17,6 +18,7 @@ export function createFakeCaseSupabase(): FakeCaseSupabase {
   const db: Record<string, Row[]> = emptyDb();
   const failNext = new Set<string>();
   const failNextInsert = new Set<string>();
+  const schemaMissingColumns = new Set<string>();
 
   function emptyDb(): Record<string, Row[]> {
     return {
@@ -67,12 +69,36 @@ export function createFakeCaseSupabase(): FakeCaseSupabase {
       return true;
     };
 
+    function missingColumnError(rows: Row[] | Row | null) {
+      const candidates = rows ? (Array.isArray(rows) ? rows : [rows]) : [];
+      for (const col of schemaMissingColumns) {
+        if (candidates.some((row) => Object.prototype.hasOwnProperty.call(row, col))) {
+          return {
+            data: null,
+            error: {
+              code: "PGRST204",
+              message: `Could not find the '${col}' column of '${table}' in the schema cache`,
+            },
+          };
+        }
+      }
+      return null;
+    }
+
     const execute = async () => {
       if (!db[table]) db[table] = [];
       if (failNext.has(table) || failNext.has("*")) {
         failNext.delete(table);
         failNext.delete("*");
         return { data: null, error: { message: `forced failure for ${table}` } };
+      }
+      if (pendingInsert) {
+        const missing = missingColumnError(pendingInsert);
+        if (missing) return missing;
+      }
+      if (pendingUpdate) {
+        const missing = missingColumnError(pendingUpdate);
+        if (missing) return missing;
       }
       if (pendingInsert && failNextInsert.has(table)) {
         failNextInsert.delete(table);
@@ -173,12 +199,14 @@ export function createFakeCaseSupabase(): FakeCaseSupabase {
     db,
     failNext,
     failNextInsert,
+    schemaMissingColumns,
     reset() {
       const empty = emptyDb();
       for (const key of Object.keys(db)) delete db[key];
       Object.assign(db, empty);
       failNext.clear();
       failNextInsert.clear();
+      schemaMissingColumns.clear();
     },
   };
 }

@@ -64,7 +64,23 @@ A core save writes `crop_cases` then `case_messages`. On `qzycpoivwwecooscnnju` 
 PGRST205 Could not find the table 'public.crop_cases' in the schema cache
 ```
 
-Those tables have now been created on `qzycpoivwwecooscnnju`. Preview will keep failing until its `NEXT_PUBLIC_SUPABASE_URL` points at a database that has them.
+Those tables, and later columns such as `business_metadata`, have now been created on `qzycpoivwwecooscnnju`.
+
+The live nxmi Preview still pointed at `gcojtfrdjczrvzieynzj`. That project **has** `crop_cases`, but it is missing later columns from `20260904120000_general_assistant_trends.sql`. The exact Preview insert error was:
+
+```
+PGRST204 Could not find the 'business_metadata' column of 'crop_cases' in the schema cache
+```
+
+The app now retries `crop_cases` inserts/updates by dropping unknown optional columns so a Preview schema that is only one migration behind can still return a `caseId`. Required columns (`id`, `farmer_problem_text`, `case_id`, `role`, `content`) are never dropped.
+
+This is a compatibility shim, not a substitute for aligning Preview env:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+must be enabled for **Preview** and should match Production (`qzycpoivwwecooscnnju`) or a Preview database that has the conversational schema and later columns.
 
 GitHub **Supabase Preview** is skipped / `main` branching status is `MIGRATIONS_FAILED`, which is consistent with Preview using a stale or inaccessible branch project.
 
