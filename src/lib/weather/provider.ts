@@ -78,6 +78,25 @@ export const TT_DISTRICT_COORDINATES: Record<string, WeatherCoordinates> = {
   default: { latitude: 10.6918, longitude: -61.2225 },
 };
 
+/** Country centroids for Caribbean weather. Never use Trinidad when another country is named. */
+export const CARIBBEAN_COUNTRY_COORDINATES: Record<string, WeatherCoordinates> = {
+  "trinidad and tobago": { latitude: 10.6918, longitude: -61.2225 },
+  guyana: { latitude: 6.8013, longitude: -58.1551 },
+  jamaica: { latitude: 18.1096, longitude: -77.2975 },
+  barbados: { latitude: 13.1939, longitude: -59.5432 },
+  grenada: { latitude: 12.1165, longitude: -61.679 },
+  "saint lucia": { latitude: 13.9094, longitude: -60.9789 },
+  "saint vincent and the grenadines": { latitude: 13.2528, longitude: -61.1971 },
+  "antigua and barbuda": { latitude: 17.0608, longitude: -61.7964 },
+  dominica: { latitude: 15.415, longitude: -61.371 },
+  "saint kitts and nevis": { latitude: 17.3578, longitude: -62.783 },
+  belize: { latitude: 17.1899, longitude: -88.4976 },
+  bahamas: { latitude: 25.0343, longitude: -77.3963 },
+  suriname: { latitude: 5.852, longitude: -55.2038 },
+  anguilla: { latitude: 18.2206, longitude: -63.0686 },
+  "british virgin islands": { latitude: 18.4207, longitude: -64.64 },
+};
+
 export function resolveCoordinates(
   location: WeatherLocationRef,
 ): WeatherCoordinates {
@@ -89,15 +108,29 @@ export function resolveCoordinates(
     return location.coordinates;
   }
 
+  const country = location.country.trim().toLowerCase();
   const district = (location.district || "").trim().toLowerCase();
-  if (district && TT_DISTRICT_COORDINATES[district]) {
+  if (
+    (country.includes("trinidad") || country.includes("tobago")) &&
+    district &&
+    TT_DISTRICT_COORDINATES[district]
+  ) {
     return TT_DISTRICT_COORDINATES[district];
   }
 
-  const country = location.country.trim().toLowerCase();
-  if (country.includes("tobago")) {
+  if (country.includes("tobago") && !country.includes("trinidad")) {
     return TT_DISTRICT_COORDINATES.tobago;
   }
 
-  return TT_DISTRICT_COORDINATES.default;
+  for (const [name, coords] of Object.entries(CARIBBEAN_COUNTRY_COORDINATES)) {
+    if (country.includes(name) || name.includes(country)) {
+      return coords;
+    }
+  }
+
+  if (country.includes("trinidad") || country.includes("tobago")) {
+    return TT_DISTRICT_COORDINATES.default;
+  }
+
+  throw new Error(`No weather coordinates configured for country: ${location.country}`);
 }

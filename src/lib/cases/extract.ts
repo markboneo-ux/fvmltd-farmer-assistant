@@ -1,4 +1,5 @@
 import { extractLastCrop } from "@/lib/assistant/crops";
+import { extractCountryFromText } from "@/lib/research/countries";
 import type { UserLevel } from "@/lib/beta/identity";
 import type { HomeOrCommercial, StructuredCaseFacts } from "./types";
 
@@ -114,6 +115,7 @@ export function extractSymptoms(text: string): string[] {
     [/\bcurl/, "leaf curl"],
   ];
   for (const [pattern, label] of checks) {
+    if (label === "leaf spot" && /\bno spots?\b/.test(lower)) continue;
     if (pattern.test(lower)) found.push(label);
   }
   return found;
@@ -128,14 +130,7 @@ export function extractStructuredFacts(
 
   const userLevel = inferUserLevel(text);
   const district = extractDistrict(text) || profile?.district?.trim() || null;
-  let country = profile?.country?.trim() || null;
-  if (!country) {
-    if (/\btrinidad\b/.test(lower) || /\btobago\b/.test(lower) || district) {
-      country = "Trinidad and Tobago";
-    } else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
-    else if (/\bbarbados\b/.test(lower)) country = "Barbados";
-    else if (/\bguyana\b/.test(lower)) country = "Guyana";
-  }
+  let country = profile?.country?.trim() || extractCountryFromText(text);
 
   const areaMatch = lower.match(/\b(\d+(?:\.\d+)?)\s*(acres?|hectares?|ha)\b/);
   const ageMatch =

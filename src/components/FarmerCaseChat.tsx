@@ -20,6 +20,8 @@ import {
 import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 import { getMainWebsiteUrl, MAIN_WEBSITE_LABEL } from "@/lib/config/urls";
 import {
+  FARMER_GENERIC_ERROR,
+  FARMER_PERSISTENCE_DEGRADED,
   GUEST_LIMIT_MESSAGE,
   REGISTERED_LIMIT_HEADING,
   UPGRADE_COMING_SOON,
@@ -62,6 +64,7 @@ type CaseApiPayload = {
   usage?: { messages?: number; cases?: number; imageAnalyses?: number };
   limitReached?: boolean;
   reason?: string;
+  persistenceFailed?: boolean;
 };
 
 type FarmerCaseChatProps = {
@@ -92,7 +95,7 @@ export function FarmerCaseChat({
   showModeToggle = false,
   showDiagnostics = false,
   showTestPrompts = false,
-  defaultCountry = "Trinidad and Tobago",
+  defaultCountry = "",
   defaultDistrict = null,
   title = PRODUCT_NAME,
   subtitle = PRODUCT_SUBTITLE,
@@ -249,7 +252,7 @@ export function FarmerCaseChat({
       form.append(
         "profile",
         JSON.stringify({
-          country: defaultCountry,
+          country: defaultCountry || null,
           district: defaultDistrict,
         }),
       );
@@ -314,13 +317,13 @@ export function FarmerCaseChat({
           return;
         }
         if (/openai_api_key|openai is not configured/i.test(rawError)) {
-          setError("I’m having trouble with that right now. Please try again.");
+          setError(FARMER_GENERIC_ERROR);
         } else if (response.status === 413) {
           setError(rawError || FARMER_PHOTO_TOO_LARGE);
         } else if (imagesSnapshot.length > 0) {
           setError(rawError || FARMER_PHOTO_UPLOAD_FAILED);
         } else {
-          setError(rawError || "I’m having trouble with that right now. Please try again.");
+          setError(rawError || FARMER_GENERIC_ERROR);
         }
         return;
       }
@@ -347,6 +350,10 @@ export function FarmerCaseChat({
               : undefined,
         },
       ]);
+
+      if (payload.persistenceFailed) {
+        setError(FARMER_PERSISTENCE_DEGRADED);
+      }
 
       if (payload.similarCaseHint) {
         setMessages((prev) => [

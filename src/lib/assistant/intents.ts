@@ -18,6 +18,7 @@ export const INTENT_CATEGORIES = [
   "production_planning",
   "harvest",
   "postharvest",
+  "market",
   "farm_business",
   "cashflow",
   "costing",
@@ -121,6 +122,14 @@ export function classifyFarmerIntent(message: string): ClassifiedIntent {
     )
   ) {
     return pack("cashflow");
+  }
+
+  if (
+    /\b(market price|wholesale price|farmgate|namdevco|namis|jamis|current price|what (is|are) .{0,40}selling for)\b/i.test(
+      lower,
+    )
+  ) {
+    return pack("market");
   }
 
   if (

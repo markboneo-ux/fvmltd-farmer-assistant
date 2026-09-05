@@ -1,6 +1,7 @@
 import { funnelStats, listUsageEvents } from "@/lib/beta/usage-store";
 import { listCropCases, listFollowups, listOutcomes, logCasePersistenceBackend } from "@/lib/cases/store";
 import type { TrendClass } from "@/lib/cases/types";
+import { loadWebResearchDashboardStats } from "@/lib/research/persist";
 import { canExposeTrend } from "@/lib/trends/engine";
 import { listCaseTrends } from "@/lib/trends/store";
 
@@ -128,8 +129,28 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const averageFollowupCompletion =
     caseFollowups.length === 0 ? 0 : Math.round((followupWithOutcome / caseFollowups.length) * 100);
 
-  const messages = usage.filter((event) => event.kind === "message").length;
-  const imageAnalyses = usage.filter((event) => event.kind === "image_analysis").length;
+  const messages = usage.filter((event) => event.kind === "message");
+  const imageAnalyses = usage.filter((event) => event.kind === "image_analysis");
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const weekAgo = new Date(startOfToday.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const messagesToday = messages.filter((event) => event.createdAt >= startOfToday.toISOString()).length;
+  const messagesWeek = messages.filter((event) => event.createdAt >= weekAgo.toISOString()).length;
+
+  const daysByUser = new Map<string, Set<string>>();
+  for (const event of usage) {
+    const key = event.authUserId || event.guestSessionId;
+    if (!key) continue;
+    const day = event.createdAt.slice(0, 10);
+    const set = daysByUser.get(key) ?? new Set<string>();
+    set.add(day);
+    daysByUser.set(key, set);
+  }
+  let returningUsers = 0;
+  for (const days of daysByUser.values()) {
+    if (days.size > 1) returningUsers += 1;
+  }
+
   const funnel = funnelStats();
   const trends = (await listCaseTrends()).filter(canExposeTrend);
   const emergingTrends = trends.filter((item) => item.trendStatus === "emerging");
@@ -137,6 +158,10 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const nonDiagnostic = allCases.filter(
     (item) => item.caseType && item.caseType !== "crop_problem",
   );
+  const web = await loadWebResearchDashboardStats();
+  const resolved = allCases.filter(
+    (item) => item.caseStatus === "resolved" || item.caseStatus === "closed",
+  ).length;
 
   return {
     users: {
@@ -144,13 +169,31 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       guests: guests.size,
       registered: registered.size,
       active: guests.size + registered.size,
+      returningUsers,
+      uniqueGuestSessions: guests.size,
     },
     activity: {
-      messages,
-      imageAnalyses,
+      messages: messages.length,
+      messagesToday,
+      messagesThisWeek: messagesWeek,
+      totalMessages: messages.length,
+      imageAnalyses: imageAnalyses.length,
+      photosUploaded: imageAnalyses.length,
       cases: allCases.length,
+      totalCropCases: allCases.length,
       ...funnel,
     },
+    overview: {
+      messagesToday,
+      messagesThisWeek: messagesWeek,
+      totalMessages: messages.length,
+      totalCropCases: allCases.length,
+      uniqueGuestSessions: guests.size,
+      registeredUsers: registered.size,
+      returningUsers,
+      photosUploaded: imageAnalyses.length,
+    },
+    web,
     agronomy: {
       problemsByCrop: topEntries(byCrop),
       problemsByCountry: topEntries(byCountry),
@@ -182,7 +225,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       agronomistReviewed,
       solvedCount: solved,
       unresolvedCount: unresolved,
-      photoUsage: imageAnalyses,
+      photoUsage: imageAnalyses.length,
       averageFollowupCompletionPercent: averageFollowupCompletion,
       followupAsked,
       followupPending,
@@ -197,11 +240,25 @@ export async function buildInsights(filters: InsightsFilters = {}) {
           item.label !== "pest_disease" &&
           item.label !== "unknown",
       ),
+      questionTypes: topEntries(byIntent, 16),
       casesByType: topEntries(byCaseType),
+      resolvedCount: resolved,
       emergingTrends: emergingTrends.map((item) => ({
         label: [item.crop, item.region, item.symptomCluster].filter(Boolean).join(" · "),
         count: item.caseCount,
         status: item.trendStatus,
+      })),
+      trendRows: trends.map((item) => ({
+        emergingIssue: item.suspectedIssue || item.symptomCluster,
+        crop: item.crop,
+        country: item.country,
+        region: item.region,
+        uniqueUsers: item.uniqueSessionCount,
+        caseCount: item.caseCount,
+        firstSeen: item.firstSeenAt,
+        lastSeen: item.lastSeenAt,
+        confidence: item.confidenceScore,
+        reviewStatus: item.trendStatus,
       })),
       nonDiagnosticCaseCount: nonDiagnostic.length,
     },

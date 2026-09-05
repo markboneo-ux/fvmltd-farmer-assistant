@@ -3,6 +3,11 @@ import { extractKnownFacts } from "./tomato-protocol";
 import { shouldInvokeProductTool, shouldInvokeWeatherTool } from "./tool-policy";
 
 describe("regional tool policy", () => {
+  it("does not invoke weather for yellowing without spots", () => {
+    const facts = extractKnownFacts("My celery leaves are yellow but there are no spots.");
+    expect(shouldInvokeWeatherTool(facts)).toBe(false);
+  });
+
   it("does not invoke weather or products for a generic stunt report", () => {
     const facts = extractKnownFacts("Tomatoes stunted");
     expect(shouldInvokeWeatherTool(facts)).toBe(false);

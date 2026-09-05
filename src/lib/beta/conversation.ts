@@ -23,7 +23,7 @@ import {
   updateCaseFromConversation,
 } from "@/lib/cases/store";
 import { addCaseFollowupSafe } from "@/lib/cases/followup-helpers";
-import { ingestCaseForTrends, relevantTrendHint } from "@/lib/trends/ingest";
+import { persistCaseWebCitations } from "@/lib/research/persist";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
 import { countUsage, recordUsageEvent } from "./usage-store";
@@ -149,28 +149,34 @@ export async function persistConversationTurn(options: {
       kind: "case",
       caseId: record.id,
     });
-  } else {
-    await updateCaseFromConversation(record.id, options.userMessage, {
-      productsRequested:
-        record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
-      verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
-        (item) => item.activeIngredientOrNutrient,
-      ),
-      humanEscalation: Boolean(options.payload?.escalationRecommended),
-      severity: options.payload?.severity ?? record.severity,
-      possibleCauses: options.payload?.checksToday ?? record.possibleCauses,
-      recommendedActions: options.payload?.safeActionsNow ?? record.recommendedActions,
-      caseStatus: options.payload?.escalationRecommended
-        ? "human_review"
-        : options.payload?.stage === "resolved"
-          ? "resolved"
-          : "in_progress",
-      conversationIntent: classified.intent,
-      questionCategory: classified.questionCategory,
-      calculationType: classified.calculationType,
-      caseType: classified.caseType,
-    });
   }
+
+  await updateCaseFromConversation(record.id, options.userMessage, {
+    country:
+      options.payload?.regionalContext?.country || options.profile?.country || undefined,
+    district:
+      options.payload?.regionalContext?.district || options.profile?.district || undefined,
+    productsRequested:
+      record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
+    verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
+      (item) => item.activeIngredientOrNutrient,
+    ),
+    humanEscalation: Boolean(options.payload?.escalationRecommended),
+    severity: options.payload?.severity ?? record.severity,
+    possibleCauses: options.payload?.checksToday ?? record.possibleCauses,
+    recommendedActions: options.payload?.safeActionsNow ?? record.recommendedActions,
+    caseStatus: options.payload?.escalationRecommended
+      ? "human_review"
+      : options.payload?.stage === "resolved"
+        ? "resolved"
+        : createdNewCase
+          ? "open"
+          : "in_progress",
+    conversationIntent: classified.intent,
+    questionCategory: classified.questionCategory,
+    calculationType: classified.calculationType,
+    caseType: classified.caseType,
+  });
 
   await appendCaseMessage({
     caseId: record.id,
@@ -230,6 +236,9 @@ export async function persistConversationTurn(options: {
   }
   if (latest) {
     await ingestCaseForTrends(latest);
+    if (options.payload?.webCitations?.length) {
+      await persistCaseWebCitations(latest.id, options.payload.webCitations);
+    }
   }
 
   return { caseId: record.id, createdNewCase };

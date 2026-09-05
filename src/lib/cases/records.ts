@@ -19,6 +19,9 @@ export type CaseUpdateExtras = Partial<StructuredCaseFacts> & {
   caseStatus?: CropCaseRecord["caseStatus"];
   agronomistReviewed?: boolean;
   diagnosisConfirmed?: boolean;
+  diagnosisIncorrect?: boolean;
+  needsReview?: boolean;
+  includeInTrendLearning?: boolean;
   conversationIntent?: CropCaseRecord["conversationIntent"];
   questionCategory?: CropCaseRecord["questionCategory"];
   calculationType?: string | null;
@@ -113,6 +116,9 @@ export function buildNewCropCase(input: {
     humanEscalation: facts.humanEscalation,
     agronomistReviewed: false,
     diagnosisConfirmed: false,
+    diagnosisIncorrect: false,
+    needsReview: false,
+    includeInTrendLearning: true,
     caseStatus: "open",
     conversationIntent: classified.intent,
     questionCategory: classified.questionCategory,
@@ -159,6 +165,10 @@ export function mergeUpdatedCase(
     caseStatus: extras?.caseStatus ?? current.caseStatus,
     agronomistReviewed: extras?.agronomistReviewed ?? current.agronomistReviewed,
     diagnosisConfirmed: extras?.diagnosisConfirmed ?? current.diagnosisConfirmed,
+    diagnosisIncorrect: extras?.diagnosisIncorrect ?? current.diagnosisIncorrect,
+    needsReview: extras?.needsReview ?? current.needsReview,
+    includeInTrendLearning:
+      extras?.includeInTrendLearning ?? current.includeInTrendLearning,
     conversationIntent: extras?.conversationIntent ?? current.conversationIntent,
     questionCategory: extras?.questionCategory ?? current.questionCategory,
     calculationType: extras?.calculationType ?? current.calculationType,

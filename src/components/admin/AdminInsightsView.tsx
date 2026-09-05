@@ -6,9 +6,34 @@ type CountRow = { label: string; count: number; status?: string };
 
 type InsightsPayload = {
   insights?: {
-    users: { total: number; guests: number; registered: number; active: number };
+    users: {
+      total: number;
+      guests: number;
+      registered: number;
+      active: number;
+      returningUsers?: number;
+      uniqueGuestSessions?: number;
+    };
+    overview?: {
+      messagesToday: number;
+      messagesThisWeek: number;
+      totalMessages: number;
+      totalCropCases: number;
+      uniqueGuestSessions: number;
+      registeredUsers: number;
+      returningUsers: number;
+      photosUploaded: number;
+    };
+    web?: {
+      answersThatUsedWebResearch: number;
+      sourceFailures: number;
+      staleSourceWarnings: number;
+      topSources: CountRow[];
+    };
     activity: {
       messages: number;
+      messagesToday?: number;
+      messagesThisWeek?: number;
       imageAnalyses: number;
       cases: number;
       usageLimitEvents: number;
@@ -54,6 +79,20 @@ type InsightsPayload = {
       mostCommonNonDiagnosticNeeds?: CountRow[];
       casesByType?: CountRow[];
       emergingTrends?: CountRow[];
+      questionTypes?: CountRow[];
+      resolvedCount?: number;
+      trendRows?: Array<{
+        emergingIssue: string | null;
+        crop: string | null;
+        country: string | null;
+        region: string | null;
+        uniqueUsers: number;
+        caseCount: number;
+        firstSeen: string;
+        lastSeen: string;
+        confidence: number;
+        reviewStatus: string;
+      }>;
       nonDiagnosticCaseCount?: number;
     };
   };
@@ -199,19 +238,23 @@ export function AdminInsightsView() {
       {insights && agronomy ? (
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-            <h2 className="font-semibold">User metrics</h2>
+            <h2 className="font-semibold">Overview</h2>
             <ul className="mt-2 space-y-1 text-sm">
-              <li>Total unique farmers/sessions: {insights.users.total}</li>
-              <li>Guest sessions: {insights.users.guests}</li>
-              <li>Registered farmers: {insights.users.registered}</li>
-              <li>Active users: {insights.users.active}</li>
-              <li>Messages: {insights.activity.messages}</li>
-              <li>Photo analyses: {insights.activity.imageAnalyses}</li>
-              <li>Total crop cases: {insights.activity.cases}</li>
+              <li>Messages today: {insights.overview?.messagesToday ?? 0}</li>
+              <li>Messages this week: {insights.overview?.messagesThisWeek ?? 0}</li>
+              <li>Total messages: {insights.overview?.totalMessages ?? insights.activity.messages}</li>
+              <li>Total crop cases: {insights.overview?.totalCropCases ?? insights.activity.cases}</li>
+              <li>Unique guest sessions: {insights.overview?.uniqueGuestSessions ?? insights.users.guests}</li>
+              <li>Registered users: {insights.overview?.registeredUsers ?? insights.users.registered}</li>
+              <li>Returning users: {insights.overview?.returningUsers ?? 0}</li>
+              <li>Photos uploaded: {insights.overview?.photosUploaded ?? insights.activity.imageAnalyses}</li>
               <li>Usage-limit events: {insights.activity.usageLimitEvents}</li>
-              <li>Upgrade clicks: {insights.activity.upgradeClicks}</li>
-              <li>Promo redemptions: {insights.activity.promoSuccesses}</li>
             </ul>
+            <p className="mt-3 text-sm">
+              <a className="text-canopy underline" href="/admin/cases">
+                Open case review
+              </a>
+            </p>
           </section>
           <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
             <h2 className="font-semibold">Outcomes and follow-up</h2>
@@ -280,6 +323,49 @@ export function AdminInsightsView() {
             <p className="mt-3 text-xs text-muted">
               A verified outbreak is never declared from AI reports alone. One case is not a trend.
             </p>
+            {(agronomy.trendRows ?? []).length > 0 ? (
+              <div className="mt-4 overflow-x-auto text-xs">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr>
+                      <th>Issue</th>
+                      <th>Crop</th>
+                      <th>Country</th>
+                      <th>Users</th>
+                      <th>Cases</th>
+                      <th>Confidence</th>
+                      <th>Review</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agronomy.trendRows?.map((row) => (
+                      <tr key={`${row.crop}-${row.emergingIssue}-${row.firstSeen}`}>
+                        <td>{row.emergingIssue}</td>
+                        <td>{row.crop}</td>
+                        <td>{row.country}</td>
+                        <td>{row.uniqueUsers}</td>
+                        <td>{row.caseCount}</td>
+                        <td>{row.confidence}</td>
+                        <td>{row.reviewStatus}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Question types</h2>
+            <Bars rows={agronomy.questionTypes ?? agronomy.casesByType ?? []} />
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Web research</h2>
+            <ul className="mt-2 space-y-1 text-sm">
+              <li>Answers that used web research: {insights.web?.answersThatUsedWebResearch ?? 0}</li>
+              <li>Source failures: {insights.web?.sourceFailures ?? 0}</li>
+              <li>Stale-source warnings: {insights.web?.staleSourceWarnings ?? 0}</li>
+            </ul>
+            <Bars rows={insights.web?.topSources ?? []} />
           </section>
         </div>
       ) : null}

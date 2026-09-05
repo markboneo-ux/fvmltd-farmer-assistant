@@ -4,6 +4,7 @@
 
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
+import { extractCountryFromText } from "@/lib/research/countries";
 import {
   isBusinessIntent,
   isCalculationIntent,
@@ -103,6 +104,9 @@ export type KnownFarmerFacts = {
   stuntedWholeField: boolean;
   asksForProducts: boolean;
   asksAboutWeather: boolean;
+  asksForMarket: boolean;
+  asksForPesticideRegistration: boolean;
+  asksForRegulation: boolean;
   rawText: string;
 };
 
@@ -179,11 +183,7 @@ export function extractKnownFacts(
 
   let country: string | null = profile?.country?.trim() || null;
   if (!country) {
-    if (/\btrinidad\b/.test(lower) || /\btobago\b/.test(lower)) {
-      country = "Trinidad and Tobago";
-    } else if (/\bjamaica\b/.test(lower)) country = "Jamaica";
-    else if (/\bbarbados\b/.test(lower)) country = "Barbados";
-    else if (/\bguyana\b/.test(lower)) country = "Guyana";
+    country = extractCountryFromText(rawText);
   }
 
   let district: string | null = profile?.district?.trim() || null;
@@ -272,9 +272,20 @@ export function extractKnownFacts(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
-      /\b(weather|forecast|humidity|humid|dew\b|leaf\s+disease|disease\s+pressure|heavy\s+rain|rainfall|rainy|could this weather)\b/.test(
+      /\b(weather|forecast|could this weather)\b/.test(lower) ||
+      /\bwhy am i suddenly seeing more\b/.test(lower),
+    asksForMarket:
+      /\b(market price|wholesale price|farmgate|namdevco|current price|what .{0,30}selling for)\b/.test(
         lower,
-      ) || /\bwhy am i suddenly seeing more\b/.test(lower),
+      ),
+    asksForPesticideRegistration:
+      /\b(registered|registration|approved (for|in)|pesticide register|is .{0,40} legal to (use|spray))\b/.test(
+        lower,
+      ),
+    asksForRegulation:
+      /\b(regulation|banned (pesticide|chemical)|restricted pesticide|import (permit|licence|license))\b/.test(
+        lower,
+      ),
     rawText,
   };
 }
@@ -350,6 +361,7 @@ export function applyCommercialSafetyGuards(
     knownFacts: KnownFarmerFacts;
     intent?: IntentCategory | null;
     askForCrop?: boolean;
+    askForCountry?: boolean;
   },
 ): AgronomicCasePayload {
   const mode = options.mode;
@@ -369,7 +381,8 @@ export function applyCommercialSafetyGuards(
 
   const skipDiagnosisWorkflow =
     isCalculationIntent((options.intent ?? "crop_problem") as IntentCategory) ||
-    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory);
+    isBusinessIntent((options.intent ?? "crop_problem") as IntentCategory) ||
+    options.intent === "market";
 
   if (skipDiagnosisWorkflow) {
     return {
@@ -463,13 +476,21 @@ export function applyCommercialSafetyGuards(
     nextQuestion = "";
   }
 
-  // Do not automatically ask country when already known, or first in Quick Help.
+  // Do not re-ask country when already known. Do ask when local facts require it.
   if (
     nextQuestion &&
     LOCATION_QUESTION.test(nextQuestion) &&
-    (options.knownFacts.country || mode === "quick_help")
+    options.knownFacts.country
   ) {
     nextQuestion = "";
+  }
+  if (
+    options.askForCountry &&
+    !options.knownFacts.country &&
+    !LOCATION_QUESTION.test(nextQuestion)
+  ) {
+    nextQuestion = "What country are you farming in?";
+    stage = isGuidanceStage(stage) ? stage : "assessment";
   }
 
   const questionsIncludingThis =

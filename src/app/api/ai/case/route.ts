@@ -47,6 +47,7 @@ import {
   RATE_LIMITS,
 } from "@/lib/security/rate-limit";
 import { logOps } from "@/lib/security/ops-log";
+import { logStageFailure, newCorrelationId } from "@/lib/errors/correlation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -134,6 +135,7 @@ function jsonError(
 export async function POST(request: Request) {
   await connection();
   logCasePersistenceBackend();
+  const correlationId = newCorrelationId();
 
   const apiKey = process.env.OPENAI_API_KEY;
   const model = getOpenAIModel();
@@ -350,12 +352,21 @@ export async function POST(request: Request) {
               crop: continuingCase.crop,
               conversationIntent: continuingCase.conversationIntent,
               farmerProblemText: continuingCase.farmerProblemText,
+              country: continuingCase.country ?? profile.country,
+              district: continuingCase.district ?? profile.district,
             }
           : null,
     });
 
     if (!result.ok) {
-      logOps("openai_failure", { diagnosticCode: result.diagnosticCode });
+      logOps("openai_failure", {
+        diagnosticCode: result.diagnosticCode,
+        route: "ai/case",
+        stage: "openai",
+        externalService: "openai",
+        errorType: result.diagnosticCode,
+        correlationId,
+      });
       return NextResponse.json(
         {
           case: null,
@@ -372,22 +383,62 @@ export async function POST(request: Request) {
 
     const assistantText = farmerHistoryContent(result.case);
     logCasePersistenceStart();
-    const persisted = await persistConversationTurn({
-      identity,
-      caseId: incomingCaseId,
-      userMessage: message,
-      assistantText,
-      payload: result.case,
-      imageCount: images.length,
-      profile,
-    });
-    await persistActiveCaseId(persisted.caseId);
-    if (images.length > 0) {
-      await persistPrivateCaseImages({
-        caseId: persisted.caseId,
+    let persistedCaseId: string | null = incomingCaseId;
+    try {
+      const persisted = await persistConversationTurn({
         identity,
-        images,
+        caseId: incomingCaseId,
+        userMessage: message,
+        assistantText,
+        payload: result.case,
+        imageCount: images.length,
+        profile,
       });
+      persistedCaseId = persisted.caseId;
+      await persistActiveCaseId(persisted.caseId);
+      if (images.length > 0) {
+        await persistPrivateCaseImages({
+          caseId: persisted.caseId,
+          identity,
+          images,
+        });
+      }
+    } catch (persistError) {
+      if (persistError instanceof CasePersistenceError) {
+        logCasePersistenceError(persistError, persistError.table);
+        logOps("database_failure", {
+          error: persistError.message,
+          table: persistError.table,
+          route: "ai/case",
+          stage: "persistence",
+          externalService: "supabase",
+          errorType: "CasePersistenceError",
+          correlationId,
+        });
+        logStageFailure({
+          correlationId,
+          route: "ai/case",
+          stage: "persistence",
+          externalService: "supabase",
+          errorType: "CasePersistenceError",
+          message: persistError.message,
+        });
+        return NextResponse.json({
+          case: result.case,
+          responseId: result.responseId,
+          requestCompleted: result.requestCompleted,
+          questionsAsked: result.questionsAsked,
+          caseId: persistedCaseId,
+          similarCaseHint: null,
+          access: identity.access,
+          usage: imageGate.used,
+          persistenceFailed: true,
+          ...(includeDiagnostics
+            ? { model: result.model, diagnosticCode: result.diagnosticCode }
+            : {}),
+        });
+      }
+      throw persistError;
     }
 
     return NextResponse.json({
@@ -395,8 +446,10 @@ export async function POST(request: Request) {
       responseId: result.responseId,
       requestCompleted: result.requestCompleted,
       questionsAsked: result.questionsAsked,
-      caseId: persisted.caseId,
-      similarCaseHint: await similarCaseHint(persisted.caseId),
+      caseId: persistedCaseId,
+      similarCaseHint: persistedCaseId
+        ? await similarCaseHint(persistedCaseId)
+        : null,
       access: identity.access,
       usage: imageGate.used,
       ...(includeDiagnostics
@@ -425,6 +478,9 @@ export async function POST(request: Request) {
     }
     logOps("openai_failure", {
       error: error instanceof Error ? error.message : String(error),
+      route: "ai/case",
+      stage: "unhandled",
+      correlationId,
     });
     const messageText = error instanceof Error ? error.message : String(error);
     const farmerError =

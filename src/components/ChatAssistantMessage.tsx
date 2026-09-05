@@ -74,6 +74,20 @@ export function ChatAssistantMessage({
             </h3>
             <p className="mt-1 whitespace-pre-wrap">{assessment}</p>
           </section>
+          {payload.rankedCauses && payload.rankedCauses.length > 0 ? (
+            <section>
+              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                Possible causes, ranked
+              </h3>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">
+                {payload.rankedCauses.slice(0, 5).map((cause) => (
+                  <li key={cause.category}>
+                    {cause.label}. More likely if {cause.increasesIf.toLowerCase()}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
           {payload.checksToday.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
@@ -161,6 +175,31 @@ export function ChatAssistantMessage({
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+
+      {payload.webCitations && payload.webCitations.length > 0 ? (
+        <div className="text-sm">
+          <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
+            Sources
+          </p>
+          <ul className="mt-1 space-y-1">
+            {payload.webCitations.slice(0, 6).map((item) => (
+              <li key={item.url}>
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-canopy underline underline-offset-2"
+                >
+                  {item.sourceName}
+                </a>
+                {item.sourceType === "market_data" ? " — market information" : ""}
+                {item.sourceType === "government" ? " — crop guidance" : ""}
+                {item.sourceType === "regulator" ? " — official register" : ""}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
