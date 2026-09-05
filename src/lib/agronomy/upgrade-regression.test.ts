@@ -6,7 +6,12 @@ import { shouldInvokeWeatherTool } from "./tool-policy";
 import { extractKnownFacts } from "./tomato-protocol";
 import { mentionsTomato } from "@/lib/assistant/crops";
 import { classifyFarmerIntent, shouldStartNewCase } from "@/lib/assistant/intents";
-import { persistConversationTurn } from "@/lib/beta/conversation";
+import {
+  lastKnownLocationForOwner,
+  persistConversationTurn,
+  similarCaseHint,
+} from "@/lib/beta/conversation";
+import { getSimilarCases } from "@/lib/cases/similar";
 import type { AppIdentity } from "@/lib/beta/identity";
 import { resetUsageStore } from "@/lib/beta/usage-store";
 import {
@@ -470,6 +475,148 @@ describe("U15–U17 persistence, guest mode, photos", () => {
     });
     const photos = await listCasePhotos(record.id);
     expect(photos).toHaveLength(1);
+  });
+});
+
+describe("country persists across guest cases", () => {
+  it("keeps Guyana on a later new-topic case for the same guest", async () => {
+    const identity = guest("33333333-3333-4333-8333-333333333333");
+    await persistConversationTurn({
+      identity,
+      userMessage: "My celery leaves are yellow in Guyana.",
+      assistantText: "Check whether the yellowing starts on older or younger leaves.",
+      payload: mockCase({
+        preliminaryAssessment: "Check older versus younger celery leaves.",
+        regionalContext: emptyRegionalContext({
+          country: "Guyana",
+          district: "Berbice",
+        }),
+      }),
+      profile: { country: "Guyana", district: "Berbice" },
+    });
+
+    const known = await lastKnownLocationForOwner({
+      anonymousSessionId: identity.guestSessionId,
+    });
+    expect(known.country).toBe("Guyana");
+    expect(known.district).toBe("Berbice");
+
+    const second = await persistConversationTurn({
+      identity,
+      userMessage: "Help me prepare a cashflow for the bank",
+      assistantText: "What crop or enterprise is this cashflow for?",
+      payload: mockCase({
+        intent: "cashflow",
+        preliminaryAssessment: "What crop or enterprise is this cashflow for?",
+        checksToday: [],
+        safeActionsNow: [],
+      }),
+    });
+    const later = await getCropCase(second.caseId);
+    expect(second.createdNewCase).toBe(true);
+    expect(later?.country).toBe("Guyana");
+    expect(later?.district).toBe("Berbice");
+    expect(await similarCaseHint(second.caseId)).toBeNull();
+  });
+
+  it("puts known country on a cashflow payload so the session can keep it", async () => {
+    const result = await runAgronomicCase({
+      message: "Help me prepare a cashflow for the bank",
+      profile: { country: "Guyana", district: "Berbice" },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.intent).toBe("cashflow");
+    expect(result.case.regionalContext.country).toBe("Guyana");
+    expect(result.case.checksToday).toEqual([]);
+  });
+});
+
+describe("similar cases do not hijack the answer", () => {
+  it("does not mention wet soil or fertilizer for celery yellowing", async () => {
+    const tomato = await createCropCase({
+      anonymousSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      message: "Tomato wilt in Couva after rain with wet soil",
+      profile: { country: "Trinidad and Tobago", district: "Couva" },
+    });
+    await updateCaseFromConversation(tomato.id, "reviewed", {
+      agronomistReviewed: true,
+      diagnosisConfirmed: true,
+      knowledgeState: "validated",
+      drainage: "waterlogged",
+      weatherRisk: "wet",
+    });
+    const celery = await createCropCase({
+      anonymousSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      message: "Celery leaves yellow with no spots in Couva",
+      profile: { country: "Trinidad and Tobago", district: "Couva" },
+    });
+    await updateCaseFromConversation(celery.id, "reviewed", {
+      agronomistReviewed: true,
+      diagnosisConfirmed: true,
+      knowledgeState: "validated",
+      drainage: "waterlogged",
+      weatherRisk: "wet",
+    });
+
+    const ranked = await getSimilarCases({
+      country: "Trinidad and Tobago",
+      district: "Couva",
+      crop: "celery",
+      symptoms: ["yellowing"],
+      problemCategory: "yellowing",
+      weatherContext: "wet",
+    });
+    expect(ranked.some((item) => item.caseId === tomato.id)).toBe(false);
+    expect(ranked.every((item) => !/wet soil|fertilizer/i.test(item.farmerFacingSummary))).toBe(
+      true,
+    );
+  });
+
+  it("does not attach a similar-case diagnosis to cashflow", async () => {
+    const identity = guest("44444444-4444-4444-8444-444444444444");
+    const cash = await persistConversationTurn({
+      identity,
+      userMessage: "Help me prepare a cashflow for the bank",
+      assistantText: "What crop or enterprise is this cashflow for?",
+      payload: mockCase({
+        intent: "cashflow",
+        preliminaryAssessment: "What crop or enterprise is this cashflow for?",
+      }),
+    });
+    expect(await similarCaseHint(cash.caseId)).toBeNull();
+  });
+});
+
+describe("photo follow-up is not repeated", () => {
+  it("suppresses a second generic photo ask unless a specific view is needed", async () => {
+    const result = await runAgronomicCase({
+      message: "The yellowing is still on the older celery leaves.",
+      history: [
+        { role: "user", content: "My celery leaves are yellow but there are no spots." },
+        {
+          role: "assistant",
+          content: "Can you upload a clear photo of the damage?",
+        },
+      ],
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "photo",
+        output_text: JSON.stringify(
+          mockCase({
+            stage: "assessment",
+            preliminaryAssessment:
+              "Yellowing on older celery leaves still fits nutrition, water, or roots more than a leaf-spot disease.",
+            nextQuestion: "Can you upload a clear photo of the damage?",
+            photoRecommended: true,
+          }),
+        ),
+      }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.photoRecommended).toBe(false);
+    expect(result.case.nextQuestion).not.toMatch(/upload a clear photo/i);
   });
 });
 

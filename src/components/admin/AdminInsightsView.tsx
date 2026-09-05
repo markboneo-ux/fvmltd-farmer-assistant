@@ -331,8 +331,11 @@ export function AdminInsightsView() {
                       <th>Issue</th>
                       <th>Crop</th>
                       <th>Country</th>
+                      <th>Region</th>
                       <th>Users</th>
                       <th>Cases</th>
+                      <th>First seen</th>
+                      <th>Last seen</th>
                       <th>Confidence</th>
                       <th>Review</th>
                     </tr>
@@ -343,8 +346,11 @@ export function AdminInsightsView() {
                         <td>{row.emergingIssue}</td>
                         <td>{row.crop}</td>
                         <td>{row.country}</td>
+                        <td>{row.region}</td>
                         <td>{row.uniqueUsers}</td>
                         <td>{row.caseCount}</td>
+                        <td>{row.firstSeen?.slice(0, 10)}</td>
+                        <td>{row.lastSeen?.slice(0, 10)}</td>
                         <td>{row.confidence}</td>
                         <td>{row.reviewStatus}</td>
                       </tr>

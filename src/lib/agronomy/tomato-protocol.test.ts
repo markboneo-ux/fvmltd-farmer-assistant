@@ -4,6 +4,7 @@ import { emptyRegionalContext, isGuidanceStage } from "./case-schema";
 import {
   applyCommercialSafetyGuards,
   extractKnownFacts,
+  historyAlreadyRequestedPhoto,
   mentionsPrematureFertilizer,
   mentionsSandOrGravel,
   questionAsksForKnownFact,
@@ -213,5 +214,61 @@ describe("tomato-protocol rapid triage", () => {
     expect(
       guarded.safeActionsNow.join(" ").toLowerCase(),
     ).not.toMatch(/imidacloprid|insecticide/);
+  });
+
+  it("does not re-ask for a generic photo after one was already requested", () => {
+    expect(
+      historyAlreadyRequestedPhoto([
+        {
+          role: "assistant",
+          content: "Can you upload a clear photo of the damage?",
+        },
+      ]),
+    ).toBe(true);
+
+    const guarded = applyCommercialSafetyGuards(
+      basePayload({
+        stage: "assessment",
+        preliminaryAssessment:
+          "Yellowing without spots is more likely nutrition, water, or roots than a leaf-spot disease.",
+        nextQuestion: "Can you upload a clear photo of the damage?",
+        photoRecommended: true,
+        quickReplies: ["Upload a photo", "Start full crop check"],
+      }),
+      {
+        mode: "quick_help",
+        questionsAskedBeforeThisTurn: 1,
+        knownFacts: extractKnownFacts("My celery leaves are yellow but there are no spots."),
+        photoAlreadyRequested: true,
+        hasImages: false,
+      },
+    );
+
+    expect(guarded.photoRecommended).toBe(false);
+    expect(guarded.nextQuestion).toBe("");
+    expect(guarded.quickReplies.some((item) => /upload a photo/i.test(item))).toBe(
+      false,
+    );
+  });
+
+  it("still allows a specific extra photo view after a generic photo was requested", () => {
+    const guarded = applyCommercialSafetyGuards(
+      basePayload({
+        stage: "assessment",
+        preliminaryAssessment: "The first photo is too distant to judge the leaf underside.",
+        nextQuestion: "Can you photograph the underside of a few yellow leaves?",
+        photoRecommended: true,
+      }),
+      {
+        mode: "quick_help",
+        questionsAskedBeforeThisTurn: 1,
+        knownFacts: extractKnownFacts("My celery leaves are yellow but there are no spots."),
+        photoAlreadyRequested: true,
+        hasImages: false,
+      },
+    );
+
+    expect(guarded.photoRecommended).toBe(true);
+    expect(guarded.nextQuestion).toMatch(/underside/i);
   });
 });

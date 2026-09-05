@@ -14,6 +14,7 @@ type ChatAssistantMessageProps = {
   onUploadPhoto?: () => void;
   quickRepliesDisabled?: boolean;
   showQuickReplies?: boolean;
+  similarCaseNote?: string;
 };
 
 function BulletList({ items }: { items: string[] }) {
@@ -36,6 +37,7 @@ export function ChatAssistantMessage({
   onUploadPhoto,
   quickRepliesDisabled = false,
   showQuickReplies = false,
+  similarCaseNote,
 }: ChatAssistantMessageProps) {
   if (!payload) {
     return <p className="whitespace-pre-wrap">{text}</p>;
@@ -201,6 +203,12 @@ export function ChatAssistantMessage({
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {similarCaseNote ? (
+        <p className="text-xs text-muted">
+          Supporting note only — not the diagnosis: {similarCaseNote}
+        </p>
       ) : null}
 
       {showReplies ? (

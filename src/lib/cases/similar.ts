@@ -63,6 +63,13 @@ export async function getSimilarCases(
         score += 8;
         reasons.push("same country");
       }
+      if (
+        query.crop &&
+        item.crop &&
+        query.crop.toLowerCase() !== item.crop.toLowerCase()
+      ) {
+        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
+      }
       if (query.crop && item.crop && query.crop.toLowerCase() === item.crop.toLowerCase()) {
         score += 16;
         reasons.push("same crop");
@@ -104,6 +111,11 @@ export async function getSimilarCases(
         reasons.push("similar weather");
       }
 
+      const sameCrop = reasons.includes("same crop");
+      if (!sameCrop && symptomHits === 0) {
+        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
+      }
+
       const farmerFacingSummary = buildFarmerFacingSimilarSummary(item, reasons);
       return { caseId: item.id, score, reasons, farmerFacingSummary };
     })
@@ -114,12 +126,10 @@ export async function getSimilarCases(
 }
 
 function buildFarmerFacingSimilarSummary(
-  item: { district: string | null; crop: string | null; drainage: string | null; weatherRisk: string | null },
-  reasons: string[],
+  item: { district: string | null; crop: string | null },
+  _reasons: string[],
 ): string {
   const area = item.district ? " in your area" : "";
-  if (item.drainage || /wet/i.test(item.weatherRisk ?? "") || reasons.includes("similar weather")) {
-    return `We have seen similar reports recently${area}, so this is worth checking. Check whether the soil is staying wet too long before adding more fertilizer.`;
-  }
-  return `We have seen similar reports recently${area}, so this is worth checking. Look at the plants closely before making a big change.`;
+  const cropBit = item.crop ? ` on ${item.crop}` : "";
+  return `We have seen similar reports recently${area}${cropBit}. Use that only as a check, not as a diagnosis of your plants.`;
 }

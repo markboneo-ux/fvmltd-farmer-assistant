@@ -350,6 +350,20 @@ export function countPriorAssistantQuestions(
   }).length;
 }
 
+const SPECIFIC_PHOTO_VIEW =
+  /\b(underside|root|stem base|whole plant|neighbouring|neighboring)\b/i;
+const GENERIC_PHOTO_ASK =
+  /\b(upload|send|take|attach)\b.{0,40}\b(photo|picture|image)\b/i;
+
+export function historyAlreadyRequestedPhoto(
+  history: Array<{ role: string; content: string }>,
+): boolean {
+  return history.some(
+    (item) =>
+      item.role === "assistant" && /\b(photo|picture)\b/i.test(item.content),
+  );
+}
+
 /**
  * Server-side rapid-triage + commercial safety net.
  */
@@ -362,6 +376,8 @@ export function applyCommercialSafetyGuards(
     intent?: IntentCategory | null;
     askForCrop?: boolean;
     askForCountry?: boolean;
+    photoAlreadyRequested?: boolean;
+    hasImages?: boolean;
   },
 ): AgronomicCasePayload {
   const mode = options.mode;
@@ -560,6 +576,27 @@ export function applyCommercialSafetyGuards(
     escalationRecommended = true;
     if (stage === "assessment" || stage === "action_plan") {
       stage = "human_review";
+    }
+  }
+
+  const specificExtraView = SPECIFIC_PHOTO_VIEW.test(nextQuestion);
+  if (options.photoAlreadyRequested && !options.hasImages && !specificExtraView) {
+    photoRecommended = false;
+    if (GENERIC_PHOTO_ASK.test(nextQuestion)) {
+      nextQuestion = "";
+    }
+  }
+
+  if (mode === "quick_help" && isInterviewStage(stage) && !nextQuestion) {
+    const usefulAfterPhotoGuard =
+      hasUsefulGuidance({
+        ...payload,
+        preliminaryAssessment,
+        checksToday,
+        safeActionsNow,
+      }) || preliminaryAssessment.length > 80;
+    if (usefulAfterPhotoGuard) {
+      stage = options.knownFacts.suddenWilt ? "human_review" : "assessment";
     }
   }
 

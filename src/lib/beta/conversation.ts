@@ -17,6 +17,7 @@ import {
   findActiveCropCaseForOwner,
   getCropCase,
   hasActiveCase,
+  casesForOwner,
   listCaseMessages,
   logCasePersistenceBackend,
   logCasePersistenceStart,
@@ -79,6 +80,23 @@ export async function loadPersistedConversationHistory(
   return history;
 }
 
+export async function lastKnownLocationForOwner(owner: {
+  userId?: string | null;
+  anonymousSessionId?: string | null;
+}): Promise<{ country: string | null; district: string | null }> {
+  const owned = await casesForOwner(owner);
+  const latest = [...owned].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const withCountry = latest.find((item) => item.country);
+  if (!withCountry) {
+    const withDistrict = latest.find((item) => item.district);
+    return { country: null, district: withDistrict?.district ?? null };
+  }
+  return {
+    country: withCountry.country,
+    district: withCountry.district,
+  };
+}
+
 export async function resolveContinuingCropCase(options: {
   identity: AppIdentity;
   requestedCaseId?: string | null;
@@ -135,13 +153,22 @@ export async function persistConversationTurn(options: {
         activeIntent: options.payload?.intent ?? null,
       });
 
+  const knownLocation = await lastKnownLocationForOwner({
+    userId: identity.authUserId,
+    anonymousSessionId: identity.guestSessionId,
+  });
+  const profile = {
+    country: options.profile?.country || knownLocation.country,
+    district: options.profile?.district || knownLocation.district,
+  };
+
   if (!record) {
     record = await createCropCase({
       userId: identity.authUserId,
       anonymousSessionId: identity.guestSessionId,
       accessState: identity.access,
       message: options.userMessage,
-      profile: options.profile,
+      profile,
     });
     createdNewCase = true;
     recordUsageEvent({
@@ -154,9 +181,9 @@ export async function persistConversationTurn(options: {
 
   await updateCaseFromConversation(record.id, options.userMessage, {
     country:
-      options.payload?.regionalContext?.country || options.profile?.country || undefined,
+      options.payload?.regionalContext?.country || profile.country || undefined,
     district:
-      options.payload?.regionalContext?.district || options.profile?.district || undefined,
+      options.payload?.regionalContext?.district || profile.district || undefined,
     productsRequested:
       record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
     verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
@@ -248,6 +275,17 @@ export async function persistConversationTurn(options: {
 export async function similarCaseHint(caseId: string): Promise<string | null> {
   const record = await getCropCase(caseId);
   if (!record) return null;
+  if (record.caseType === "farm_business" || record.caseType === "calculation") {
+    return null;
+  }
+  if (
+    record.conversationIntent === "cashflow" ||
+    record.conversationIntent === "simple_math" ||
+    record.conversationIntent === "unit_conversion" ||
+    record.conversationIntent === "market"
+  ) {
+    return null;
+  }
   const matches = (
     await getSimilarCases(
       {

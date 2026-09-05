@@ -147,4 +147,38 @@ describe("POST /api/ai/case persistence", () => {
     expect(logs).toContain(`CASE_MESSAGE_SAVED case=${body.caseId} role=user`);
     expect(logs).toContain(`CASE_MESSAGE_SAVED case=${body.caseId} role=assistant`);
   });
+
+  it("fills an empty profile from the guest's last known country", async () => {
+    const { POST } = await import("./route");
+    const first = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "My celery leaves are yellow in Guyana.",
+          profile: { country: "Guyana", district: "Berbice" },
+        }),
+      }),
+    );
+    expect(first.status).toBe(200);
+
+    vi.mocked(runAgronomicCase).mockClear();
+    const second = await POST(
+      new Request("http://localhost/api/ai/case", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "Help me prepare a cashflow for the bank",
+          profile: {},
+        }),
+      }),
+    );
+    expect(second.status).toBe(200);
+    expect(vi.mocked(runAgronomicCase).mock.calls).toHaveLength(1);
+    const options = vi.mocked(runAgronomicCase).mock.calls[0]?.[0] as {
+      profile?: { country?: string | null; district?: string | null };
+    };
+    expect(options.profile?.country).toBe("Guyana");
+    expect(options.profile?.district).toBe("Berbice");
+  });
 });

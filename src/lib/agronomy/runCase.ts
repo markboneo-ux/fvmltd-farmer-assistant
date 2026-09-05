@@ -51,6 +51,7 @@ import {
 import {
   applyCommercialSafetyGuards,
   countPriorAssistantQuestions,
+  historyAlreadyRequestedPhoto,
   type KnownFarmerFacts,
 } from "./tomato-protocol";
 
@@ -592,6 +593,8 @@ function assistantPayloadFromText(options: {
   questionCategory?: string;
   calculationType?: string | null;
   nextQuestion?: string;
+  country?: string | null;
+  district?: string | null;
 }): AgronomicCasePayload {
   return {
     mode: "quick_help",
@@ -607,7 +610,10 @@ function assistantPayloadFromText(options: {
     actionsToAvoid: [],
     photoRecommended: false,
     escalationRecommended: false,
-    regionalContext: emptyRegionalContext(),
+    regionalContext: emptyRegionalContext({
+      country: options.country ?? null,
+      district: options.district ?? null,
+    }),
     weatherRisks: [],
     verifiedInputOptions: [],
     internalMissingInformation: [],
@@ -724,6 +730,8 @@ export async function runAgronomicCase(options: {
           intent: classified.intent,
           questionCategory: classified.questionCategory,
           calculationType: calc.handled ? calc.calculationType : classified.calculationType,
+          country: knownFacts.country,
+          district: knownFacts.district,
         }),
         turn,
       );
@@ -750,6 +758,8 @@ export async function runAgronomicCase(options: {
         intent: "cashflow",
         questionCategory: "cashflow",
         nextQuestion: "",
+        country: knownFacts.country,
+        district: knownFacts.district,
       }),
       turn,
     );
@@ -763,6 +773,8 @@ export async function runAgronomicCase(options: {
       questionsAsked: cash.missingField ? 1 : 0,
     };
   }
+
+  const photoAlreadyRequested = historyAlreadyRequestedPhoto(history);
 
   const researchTopics = detectResearchTopics({
     message: effectiveMessage,
@@ -879,6 +891,7 @@ export async function runAgronomicCase(options: {
     rankedCauses: rankedCausesForPrompt(rankedCauses),
     researchNotes: research ? researchNotesForPrompt(research) : "",
     askForCountry,
+    photoAlreadyRequested,
   });
 
   const textFormat = {
@@ -993,6 +1006,8 @@ export async function runAgronomicCase(options: {
           intent: classified.intent,
           askForCrop: turn.askForCrop,
           askForCountry,
+          photoAlreadyRequested,
+          hasImages: images.length > 0,
         },
       );
       parsed = attachIntent(parsed, turn);

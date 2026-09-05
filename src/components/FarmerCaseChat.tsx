@@ -48,6 +48,7 @@ type ChatMessage = {
   diagnosticCode?: string;
   questionsAsked?: number;
   local?: boolean;
+  similarCaseNote?: string;
 };
 
 type CaseApiPayload = {
@@ -119,6 +120,10 @@ export function FarmerCaseChat({
   const [questionsAsked, setQuestionsAsked] = useState<number | null>(null);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [caseId, setCaseId] = useState<string | null>(null);
+  const [sessionCountry, setSessionCountry] = useState(defaultCountry);
+  const [sessionDistrict, setSessionDistrict] = useState<string | null>(
+    defaultDistrict,
+  );
   const [access, setAccess] = useState<string>("guest");
   const [limitBanner, setLimitBanner] = useState<string | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -252,8 +257,8 @@ export function FarmerCaseChat({
       form.append(
         "profile",
         JSON.stringify({
-          country: defaultCountry || null,
-          district: defaultDistrict,
+          country: sessionCountry || defaultCountry || null,
+          district: sessionDistrict || defaultDistrict,
         }),
       );
       for (const file of preparedFiles) {
@@ -348,23 +353,19 @@ export function FarmerCaseChat({
             typeof payload.questionsAsked === "number"
               ? payload.questionsAsked
               : undefined,
+          similarCaseNote: payload.similarCaseHint || undefined,
         },
       ]);
 
-      if (payload.persistenceFailed) {
-        setError(FARMER_PERSISTENCE_DEGRADED);
+      if (casePayload.regionalContext?.country) {
+        setSessionCountry(casePayload.regionalContext.country);
+      }
+      if (casePayload.regionalContext?.district) {
+        setSessionDistrict(casePayload.regionalContext.district);
       }
 
-      if (payload.similarCaseHint) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: messageId(),
-            role: "assistant",
-            text: payload.similarCaseHint || "",
-            local: true,
-          },
-        ]);
+      if (payload.persistenceFailed) {
+        setError(FARMER_PERSISTENCE_DEGRADED);
       }
     } catch (err) {
       clearQuickReplies();
@@ -646,6 +647,7 @@ export function FarmerCaseChat({
                           message.casePayload?.questionId === activeQuestionId
                         }
                         quickRepliesDisabled={loading || !isLatestAssistant}
+                        similarCaseNote={message.similarCaseNote}
                         onUploadPhoto={() => attachRef.current?.openLibrary()}
                         onQuickReply={
                           isLatestAssistant

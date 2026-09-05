@@ -10,6 +10,7 @@ import {
   CasePersistenceError,
   evaluateConversationGate,
   loadPersistedConversationHistory,
+  lastKnownLocationForOwner,
   persistConversationTurn,
   resolveContinuingCropCase,
   similarCaseHint,
@@ -336,6 +337,17 @@ export async function POST(request: Request) {
         logOps("rate_limit", { route: "ai/case-image" });
         return jsonError(model, "OPENAI_RATE_LIMIT", FARMER_RATE_LIMIT_MESSAGE, 429);
       }
+    }
+
+    if (!profile.country || !profile.district) {
+      const known = await lastKnownLocationForOwner({
+        userId: identity.authUserId,
+        anonymousSessionId: identity.guestSessionId,
+      });
+      profile = {
+        country: profile.country || known.country,
+        district: profile.district || known.district,
+      };
     }
 
     const result = await runAgronomicCase({

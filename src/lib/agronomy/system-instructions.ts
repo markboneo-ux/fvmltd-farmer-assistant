@@ -26,6 +26,7 @@ export function buildCaseSystemInstructions(options: {
   rankedCauses?: string;
   researchNotes?: string;
   askForCountry?: boolean;
+  photoAlreadyRequested?: boolean;
 }): string {
   const intent = options.intent ?? "general_agriculture";
   const diagnostic =
@@ -64,7 +65,9 @@ export function buildCaseSystemInstructions(options: {
 - Low-confidence image assessment must set escalationRecommended=true.
 - Do not invent pests or diseases that are not visible.
 - Give a useful first read immediately, then one follow-up if needed.`
-    : `PHOTO ANALYSIS: No image on this turn. You may set photoRecommended=true when a photo would help.`;
+    : options.photoAlreadyRequested
+      ? `PHOTO ANALYSIS: No image on this turn. A photo was already requested. Do not ask again unless a specific extra view (underside, roots, stem base, whole plant) would change the advice.`
+      : `PHOTO ANALYSIS: No image on this turn. You may set photoRecommended=true when a photo would help.`;
 
   const intentBlock = diagnostic
     ? `CURRENT INTENT: ${intent} (crop / field problem)
