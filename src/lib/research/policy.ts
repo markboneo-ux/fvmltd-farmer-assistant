@@ -43,7 +43,7 @@ export function detectResearchTopics(options: {
   const text = options.message.trim();
   const topics = new Set<ResearchTopic>();
 
-  if (MARKET.test(text) || options.intent === "market") {
+  if (MARKET.test(text) || options.intent === "market" || options.intent === "pricing") {
     topics.add("market_prices");
   }
   if (PESTICIDE.test(text) || PRODUCT_ASK.test(text) || options.asksForProducts) {

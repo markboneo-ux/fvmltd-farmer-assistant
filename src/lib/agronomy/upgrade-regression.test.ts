@@ -405,6 +405,15 @@ describe("U12–U14 trends", () => {
     expect(aggregateCluster([member({ caseId: "c1", sessionKey: "s1" })])).toBeNull();
   });
 
+  it("two unique cases are not enough for a trusted trend", () => {
+    expect(
+      aggregateCluster([
+        member({ caseId: "c1", sessionKey: "a" }),
+        member({ caseId: "c2", sessionKey: "b", createdAt: "2026-09-02T00:00:00.000Z" }),
+      ]),
+    ).toBeNull();
+  });
+
   it("multiple unique similar cases can create a candidate trend", () => {
     const trend = aggregateCluster([
       member({ caseId: "c1", sessionKey: "a" }),

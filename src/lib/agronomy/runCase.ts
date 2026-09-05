@@ -478,7 +478,7 @@ async function enrichWithRegionalTools(
   let weatherBrief: string | null = payload.weatherBrief ?? null;
   const weatherRelevance: WeatherRelevanceLevel = relevance;
 
-  if (shouldFetchWeather) {
+  if (shouldFetchWeather && country) {
     try {
       const forecast = await getForecast({
         country: country || "Trinidad and Tobago",

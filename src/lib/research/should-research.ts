@@ -35,7 +35,7 @@ export function classifyResearchNeed(options: {
 
   if (intent && isCalculationIntent(intent)) return "none";
 
-  if (intent === "pricing" || MARKET.test(text)) return "market_prices";
+  if (intent === "pricing" || intent === "market" || MARKET.test(text)) return "market_prices";
   if (intent === "cashflow" && MARKET.test(text)) return "market_prices";
   if (LABEL.test(text)) return "product_label";
   if (intent === "pest_disease" && PESTICIDE.test(text)) return "pesticide_registration";

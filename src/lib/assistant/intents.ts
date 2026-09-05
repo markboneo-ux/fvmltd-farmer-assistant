@@ -130,7 +130,7 @@ export function classifyFarmerIntent(message: string): ClassifiedIntent {
       lower,
     )
   ) {
-    return pack("market");
+    return pack("pricing");
   }
 
   if (

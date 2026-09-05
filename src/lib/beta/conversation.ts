@@ -282,7 +282,8 @@ export async function similarCaseHint(caseId: string): Promise<string | null> {
     record.conversationIntent === "cashflow" ||
     record.conversationIntent === "simple_math" ||
     record.conversationIntent === "unit_conversion" ||
-    record.conversationIntent === "market"
+    record.conversationIntent === "market" ||
+    record.conversationIntent === "pricing"
   ) {
     return null;
   }
