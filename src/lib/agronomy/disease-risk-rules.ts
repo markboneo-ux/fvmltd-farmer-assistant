@@ -76,7 +76,7 @@ export const TOMATO_FOLIAR_DISEASE_RULE_V1: DiseaseRiskRule = {
 export const TOMATO_WHITEFLY_PRESSURE_RULE_V1: DiseaseRiskRule = {
   id: "rule_tomato_whitefly_warm_v1",
   modelId: "model_tomato_whitefly_caribbean_v1",
-  version: "1.0.0",
+  version: "1.1.0",
   crop: "tomato",
   diseaseOrPest: "whitefly population pressure",
   productionSystems: ["open_field", "shade_house", "greenhouse", "other"],
@@ -84,16 +84,16 @@ export const TOMATO_WHITEFLY_PRESSURE_RULE_V1: DiseaseRiskRule = {
   approvedBy: "FVMLTD Agronomy (Phase 1 seed)",
   approvedAt: "2026-08-05T00:00:00.000Z",
   thresholds: {
-    minConsecutiveWetOrHumidHours: 0,
-    minRelativeHumidityPct: 60,
-    minNightTemperatureC: 22,
+    minConsecutiveWetOrHumidHours: 12,
+    minRelativeHumidityPct: 80,
+    minNightTemperatureC: 24,
     minRainEvents72h: 0,
     leafWetnessLevels: ["moderate", "high"],
   },
   riskWindowHours: 72,
   weatherDrivers: [
-    "warm day and night temperatures",
-    "humid canopy conditions favouring rapid insect build-up",
+    "sustained warm nights plus humid canopy",
+    "conditions that can favour whitefly build-up when insects are already present",
   ],
   recommendedChecks: [
     "turn over leaves and count adult whiteflies",

@@ -9,6 +9,7 @@ import type {
 } from "@/lib/agronomy/case-schema";
 import { isGuidanceStage, isInterviewStage } from "@/lib/agronomy/case-schema";
 import { QUICK_HELP_MAX_QUESTIONS } from "@/lib/agronomy/case-schema";
+import { shouldRenderWeatherRiskCard } from "@/lib/agronomy/output-guard";
 
 type CaseEngineResponseProps = {
   payload: AgronomicCasePayload;
@@ -127,9 +128,13 @@ export function CaseEngineResponse({
     !activeQuestionId ||
     payload.questionId === activeQuestionId;
 
+  const replies = payload.quickReplies.filter(
+    (reply) => !/ask about products/i.test(reply) && !/start full crop check/i.test(reply),
+  );
+
   const showQuickReplies =
     Boolean(onQuickReply) &&
-    payload.quickReplies.length > 0 &&
+    replies.length > 0 &&
     questionMatches &&
     !quickRepliesDisabled;
 
@@ -156,7 +161,7 @@ export function CaseEngineResponse({
 
           {showQuickReplies ? (
             <div className="flex flex-wrap gap-2">
-              {payload.quickReplies.map((reply, index) => (
+              {replies.map((reply, index) => (
                 <button
                   key={`${payload.questionId}-${reply}-${index}`}
                   type="button"
@@ -209,7 +214,7 @@ export function CaseEngineResponse({
 
           {showQuickReplies ? (
             <div className="flex flex-wrap gap-2">
-              {payload.quickReplies.map((reply, index) => (
+              {replies.map((reply, index) => (
                 <button
                   key={`${payload.questionId}-${reply}-${index}`}
                   type="button"
@@ -241,7 +246,8 @@ export function CaseEngineResponse({
             </Section>
           ) : null}
 
-          {payload.weatherRisks.length > 0 ? (
+          {payload.weatherRisks.length > 0 &&
+          shouldRenderWeatherRiskCard(payload.weatherRelevance) ? (
             <Section title="Weather-linked risk">
               <div className="space-y-3">
                 {payload.weatherRisks.map((risk) => (

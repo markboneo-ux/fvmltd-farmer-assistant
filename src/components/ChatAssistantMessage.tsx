@@ -2,6 +2,7 @@
 
 import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import { diagnosisConfidenceLabel } from "@/lib/agronomy/diagnosis-confidence";
+import { shouldRenderWeatherRiskCard } from "@/lib/agronomy/output-guard";
 import {
   buildFarmerVisibleReply,
   shouldUseDiagnosisLayout,
@@ -95,15 +96,12 @@ export function ChatAssistantMessage({
   const likelyCauses = payload.likelyCauses ?? [];
   const useDiagnosis =
     shouldUseDiagnosisLayout(payload) || likelyCauses.length > 0;
-  const relevance = payload.weatherRelevance ?? (payload.weatherRisks.length > 0 ? "supporting" : "omit");
-  const showWeatherCard = relevance === "central" && (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
+  const relevance = payload.weatherRelevance ?? "omit";
+  const showWeatherCard =
+    shouldRenderWeatherRiskCard(relevance) &&
+    (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
   const supportingNote =
-    relevance === "supporting"
-      ? payload.weatherBrief ||
-        (payload.weatherRisks.length > 0
-          ? "The next few days are humid, however, so keep watching for spotting or lesions."
-          : null)
-      : null;
+    relevance === "supporting" ? payload.weatherBrief || null : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
   const uniqueSources: WebSourceCitation[] =
     payload.webSources && payload.webSources.length > 0
@@ -145,7 +143,7 @@ export function ChatAssistantMessage({
         <div className="space-y-3">
           <section>
             <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-              What I think is most likely
+              What I think is happening
             </h3>
             {likelyCauses.length > 0 ? (
               <BulletList items={likelyCauses} ordered />
@@ -182,7 +180,7 @@ export function ChatAssistantMessage({
           {payload.safeActionsNow.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to do today
+                What to do now
               </h3>
               <BulletList items={payload.safeActionsNow} />
             </section>
@@ -195,6 +193,21 @@ export function ChatAssistantMessage({
               <BulletList items={payload.actionsToAvoid} />
             </section>
           ) : null}
+          {showProducts ? (
+            <section>
+              <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                If chemical control is needed
+              </h3>
+              {payload.verifiedInputOptions.slice(0, 2).map((option) => (
+                <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1 text-sm">
+                  {option.verifiedBrands[0]?.brandName
+                    ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
+                    : option.activeIngredientOrNutrient}
+                  {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
+                </p>
+              ))}
+            </section>
+          ) : null}
           {(payload.whatWouldChangeDiagnosis ?? []).length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
@@ -204,7 +217,12 @@ export function ChatAssistantMessage({
             </section>
           ) : null}
           {payload.monitorNext ? (
-            <p className="text-sm text-muted">{payload.monitorNext}</p>
+            <p className="text-sm text-muted">
+              <span className="block text-xs font-semibold tracking-wide text-canopy uppercase">
+                What to watch over the next 2–3 days
+              </span>
+              {payload.monitorNext}
+            </p>
           ) : null}
           {question ? (
             <p className="font-medium whitespace-pre-wrap">{question}</p>
@@ -241,7 +259,7 @@ export function ChatAssistantMessage({
         <p className="text-sm text-muted">{supportingNote}</p>
       ) : null}
 
-      {showProducts ? (
+      {showProducts && !useDiagnosis ? (
         <div className="text-sm">
           {payload.verifiedInputOptions.slice(0, 2).map((option) => (
             <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1">

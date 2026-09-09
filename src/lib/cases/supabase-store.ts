@@ -287,6 +287,10 @@ export async function supabaseAddCaseMessage(input: {
   role: CaseMessageRecord["role"];
   content: string;
   hasImages?: boolean;
+  inputMode?: CaseMessageRecord["inputMode"];
+  audioDurationSeconds?: number | null;
+  audioStoragePath?: string | null;
+  transcriptionConfidence?: number | null;
 }): Promise<CaseMessageRecord> {
   const row = buildCaseMessage(input);
   return insertRow("case_messages", messageToRow(row), rowToMessage);
@@ -454,6 +458,14 @@ export async function supabaseRecordFollowupOutcome(input: {
       "crop_cases",
       updated.caseId,
       { case_status: "resolved", updated_at: nowIso() },
+      rowToCropCase,
+    );
+  }
+  if (input.outcome === "worse") {
+    await updateRow(
+      "crop_cases",
+      updated.caseId,
+      { case_status: "in_progress", updated_at: nowIso() },
       rowToCropCase,
     );
   }

@@ -81,7 +81,12 @@ export type VerifiedInputDisplay = {
   agronomistConfirmationRequired: boolean;
 };
 
-export type WeatherRelevanceLevel = "omit" | "supporting" | "central";
+export type WeatherRelevanceLevel =
+  | "omit"
+  | "none"
+  | "supporting"
+  | "important"
+  | "central";
 
 export type AgronomicCasePayload = {
   mode: CaseMode;

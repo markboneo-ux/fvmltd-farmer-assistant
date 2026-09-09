@@ -70,6 +70,9 @@ export async function GET(
       content: item.content,
       hasImages: item.hasImages,
       createdAt: item.createdAt,
+      inputMode: item.inputMode ?? "text",
+      audioDurationSeconds: item.audioDurationSeconds ?? null,
+      transcriptionConfidence: item.transcriptionConfidence ?? null,
     })),
     photos: photos.map((item) => ({
       id: item.id,
@@ -79,5 +82,11 @@ export async function GET(
     assessment: latestAssessment,
     observations,
     actions: actions.map((item) => item.actionText),
+    followups,
+    outcomes,
+    weather: {
+      weatherRisk: record.weatherRisk,
+      recentWeather: record.recentWeather,
+    },
   });
 }

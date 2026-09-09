@@ -53,7 +53,7 @@ describe("weather relevance gate", () => {
   it("treats leaf spots after rain as supporting weather, not the main answer", () => {
     const message = "Tomato leaf spots after heavy rain";
     const facts = extractKnownFacts(message);
-    expect(assessWeatherRelevance({ message, facts }).level).toBe("supporting");
+    expect(assessWeatherRelevance({ message, facts }).level).toBe("important");
     expect(formatSupportingWeatherNote({ wetOrHumid: true })).toMatch(/wet\/humid/);
   });
 });

@@ -169,6 +169,10 @@ export function messageToRow(record: CaseMessageRecord): Record<string, unknown>
     content: record.content,
     has_images: record.hasImages,
     created_at: record.createdAt,
+    input_mode: record.inputMode ?? "text",
+    audio_duration_seconds: record.audioDurationSeconds ?? null,
+    audio_storage_path: record.audioStoragePath ?? null,
+    transcription_confidence: record.transcriptionConfidence ?? null,
   };
 }
 
@@ -180,6 +184,12 @@ export function rowToMessage(row: Record<string, unknown>): CaseMessageRecord {
     content: asString(row.content),
     hasImages: asBoolean(row.has_images),
     createdAt: asString(row.created_at),
+    inputMode: (asNullableString(row.input_mode) as CaseMessageRecord["inputMode"]) ?? "text",
+    audioDurationSeconds:
+      typeof row.audio_duration_seconds === "number" ? row.audio_duration_seconds : null,
+    audioStoragePath: asNullableString(row.audio_storage_path),
+    transcriptionConfidence:
+      typeof row.transcription_confidence === "number" ? row.transcription_confidence : null,
   };
 }
 

@@ -82,7 +82,8 @@ export function trendsMatchFarmerQuery(
     suspectedIssue?: string | null;
   },
 ): boolean {
-  if (query.crop && trend.crop && query.crop.toLowerCase() !== trend.crop.toLowerCase()) {
+  if (!query.crop || !trend.crop) return false;
+  if (query.crop.toLowerCase() !== trend.crop.toLowerCase()) {
     return false;
   }
   if (

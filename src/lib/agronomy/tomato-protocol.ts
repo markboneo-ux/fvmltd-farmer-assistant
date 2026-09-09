@@ -429,18 +429,25 @@ export function applyCommercialSafetyGuards(
     options.intent === "market";
 
   if (skipDiagnosisWorkflow) {
+    const safeQuestion = /\b(ask about products|see products|shop products|browse products)\b/i.test(
+      nextQuestion,
+    )
+      ? ""
+      : nextQuestion;
     return {
       ...payload,
       mode,
-      nextQuestion,
+      nextQuestion: safeQuestion,
       preliminaryAssessment,
       checksToday: [],
       safeActionsNow,
       actionsToAvoid,
       photoRecommended: false,
-      questionId: nextQuestion ? payload.questionId : "",
-      questionType: nextQuestion ? payload.questionType : "",
-      quickReplies: nextQuestion ? quickReplies : [],
+      questionId: safeQuestion ? payload.questionId : "",
+      questionType: safeQuestion ? payload.questionType : "",
+      quickReplies: (safeQuestion ? quickReplies : []).filter(
+        (item) => !/\b(ask about products|see products|shop products|browse products)\b/i.test(item),
+      ),
     };
   }
 
@@ -690,7 +697,12 @@ export function applyCommercialSafetyGuards(
     quickReplies = [];
   }
 
-  quickReplies = quickReplies.filter((item) => !/\bask about products\b/i.test(item));
+  if (/\b(ask about products|see products|shop products|browse products)\b/i.test(nextQuestion)) {
+    nextQuestion = "";
+  }
+  quickReplies = quickReplies.filter(
+    (item) => !/\bask about products\b/i.test(item) && !/\b(see|shop|browse) products\b/i.test(item),
+  );
 
   return {
     ...payload,

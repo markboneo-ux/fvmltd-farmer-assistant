@@ -32,10 +32,19 @@ type CaseDetail = {
     content: string;
     hasImages: boolean;
     createdAt: string;
+    inputMode?: string;
   }>;
   photos?: Array<{ id: string; mimeType: string; createdAt: string }>;
   assessment?: Record<string, unknown> | null;
   actions?: string[];
+  followups?: Array<{
+    id: string;
+    outcome: string | null;
+    followUpDate: string;
+    askedAt: string | null;
+    notes: string | null;
+  }>;
+  weather?: { weatherRisk: string | null; recentWeather: string | null };
   error?: string;
 };
 
@@ -131,11 +140,36 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
             <ul className="mt-2 space-y-3 text-sm">
               {(data?.conversation ?? []).map((item, index) => (
                 <li key={`${item.createdAt}-${index}`}>
-                  <p className="text-xs font-semibold uppercase text-muted">{item.role}</p>
+                  <p className="text-xs font-semibold uppercase text-muted">
+                    {item.role}
+                    {item.inputMode === "voice" ? " · voice transcript" : ""}
+                    {item.hasImages ? " · photo" : ""}
+                  </p>
                   <p className="whitespace-pre-wrap">{item.content}</p>
                 </li>
               ))}
             </ul>
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Weather context</h2>
+            <p className="mt-2 text-sm">
+              {data?.weather?.weatherRisk || data?.weather?.recentWeather || "No weather context."}
+            </p>
+          </section>
+          <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+            <h2 className="font-semibold">Follow-ups</h2>
+            {(data?.followups ?? []).length === 0 ? (
+              <p className="mt-2 text-sm text-muted">No follow-ups.</p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm">
+                {(data?.followups ?? []).map((item) => (
+                  <li key={item.id}>
+                    {item.followUpDate.slice(0, 10)} · {item.outcome || "pending"}
+                    {item.notes ? ` · ${item.notes}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
           <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
             <h2 className="font-semibold">AI diagnosis</h2>
@@ -166,7 +200,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 className="rounded-full bg-canopy px-3 py-2 text-sm text-white"
                 onClick={() => void mark({ diagnosisConfirmed: true, resolved: true })}
               >
-                Diagnosis confirmed
+                CONFIRM DIAGNOSIS
               </button>
               <button
                 type="button"
@@ -176,7 +210,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                   void mark({ diagnosisIncorrect: true, excludeFromLearning: true })
                 }
               >
-                Diagnosis incorrect
+                INCORRECT DIAGNOSIS
               </button>
               <button
                 type="button"
@@ -184,7 +218,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
                 onClick={() => void mark({ needsReview: true })}
               >
-                Needs review
+                NEEDS REVIEW
               </button>
               <button
                 type="button"
@@ -192,7 +226,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
                 onClick={() => void mark({ resolved: true })}
               >
-                Resolved
+                SOLVED
               </button>
               <button
                 type="button"
@@ -200,7 +234,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
                 onClick={() => void mark({ usefulForTrend: true })}
               >
-                Useful for trend learning
+                INCLUDE IN TREND ANALYSIS
               </button>
               <button
                 type="button"
@@ -208,7 +242,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
                 onClick={() => void mark({ includeInTrendLearning: true, excludeFromLearning: false })}
               >
-                Include in trend learning
+                INCLUDE IN TREND LEARNING
               </button>
               <button
                 type="button"
@@ -216,7 +250,7 @@ export function AdminCaseReviewView({ caseId }: { caseId: string }) {
                 className="rounded-full bg-sky px-3 py-2 text-sm text-canopy ring-1 ring-line"
                 onClick={() => void mark({ excludeFromLearning: true, includeInTrendLearning: false })}
               >
-                Exclude from learning
+                EXCLUDE FROM LEARNING
               </button>
             </div>
             <p className="mt-3 text-xs text-muted">

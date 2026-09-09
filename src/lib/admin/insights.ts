@@ -8,8 +8,11 @@ import {
   logCasePersistenceBackend,
 } from "@/lib/cases/store";
 import type { CropCaseRecord, TrendClass } from "@/lib/cases/types";
-import { researchUsageStats } from "@/lib/research/log";
+import { listResearchEvents, researchUsageStats } from "@/lib/research/log";
 import { loadWebResearchDashboardStats } from "@/lib/research/persist";
+import { TRUSTED_SOURCES } from "@/lib/research/sources";
+import { RESEARCH_COUNTRIES } from "@/lib/research/countries";
+import { followUpStatusLabel } from "@/lib/cases/followups";
 import { canExposeTrend } from "@/lib/trends/engine";
 import { listCaseTrends } from "@/lib/trends/store";
 import { trendCountryKey } from "@/lib/trends/types";
@@ -72,24 +75,30 @@ export function topEntries(map: Map<string, number>, limit = 8) {
 function questionBucket(intent: string | null | undefined): string {
   switch (intent) {
     case "crop_problem":
-      return "Crop diagnosis";
+      return "diagnosis";
     case "pest_disease":
-      return "Pest/disease";
+      return "pest/disease";
+    case "pesticide":
+      return "pesticide";
     case "nutrition":
-      return "Nutrition";
+      return "nutrition";
     case "irrigation":
-      return "Irrigation";
+      return "irrigation";
+    case "weather":
+      return "weather";
     case "cashflow":
+      return "cashflow";
     case "farm_business":
     case "costing":
-      return "Business/cashflow";
+      return "bank/business";
     case "simple_math":
     case "unit_conversion":
-      return "Calculations";
+      return "calculations";
     case "pricing":
-      return "Market/pricing";
+    case "market":
+      return "market/pricing";
     case "general_agriculture":
-      return "General agriculture";
+      return "general agriculture";
     default:
       return "Other";
   }
@@ -211,7 +220,12 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     increment(byDay, dayKey(item.createdAt));
     increment(byIntent, item.conversationIntent);
     increment(byCaseType, item.caseType);
-    increment(byQuestionType, questionBucket(item.questionCategory ?? item.conversationIntent));
+    increment(
+      byQuestionType,
+      item.productsRequested
+        ? "pesticide"
+        : questionBucket(item.questionCategory ?? item.conversationIntent),
+    );
     increment(byFarmerLevel, item.userLevel);
     if (item.calculationType) increment(byCalculation, item.calculationType);
     for (const symptom of item.symptoms) increment(bySymptom, symptom);
@@ -298,10 +312,103 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   for (const days of daysByUser.values()) {
     if (days.size > 1) returningUsers += 1;
   }
+  const voiceNotes = persistedMessages.filter((row) => row.inputMode === "voice").length;
+  const photosToday = allPhotos.filter((row) => row.createdAt.slice(0, 10) === today).length;
+  const casesToday = allCases.filter((item) => item.createdAt.slice(0, 10) === today).length;
+  const voiceToday = persistedMessages.filter(
+    (row) => row.inputMode === "voice" && row.createdAt.slice(0, 10) === today,
+  ).length;
+  const messagesTodayPersisted = persistedMessages.filter(
+    (row) => row.createdAt.slice(0, 10) === today,
+  ).length;
+  const webToday = listResearchEvents().filter(
+    (event) => event.usedWeb && event.createdAt.slice(0, 10) === today,
+  ).length;
+
+  const farmersByCrop = new Map<string, Set<string>>();
+  const casesByCrop = new Map<string, number>();
+  for (const item of allCases) {
+    const crop = item.crop?.trim() || "unknown";
+    increment(casesByCrop, crop);
+    const set = farmersByCrop.get(crop) ?? new Set<string>();
+    set.add(ownerKey(item));
+    farmersByCrop.set(crop, set);
+  }
+  const topCrops = [...casesByCrop.entries()]
+    .map(([crop, cases]) => ({
+      crop,
+      cases,
+      farmers: farmersByCrop.get(crop)?.size ?? 0,
+    }))
+    .sort((a, b) => b.cases - a.cases)
+    .slice(0, 8);
+
+  const followupByStatus = new Map<string, number>();
+  for (const row of caseFollowups) {
+    increment(
+      followupByStatus,
+      followUpStatusLabel({
+        outcome: row.outcome,
+        optedOut: row.optedOut,
+        followUpDate: row.followUpDate,
+        askedAt: row.askedAt,
+      }),
+    );
+  }
+
+  const pesticideQuestions = allCases.filter(
+    (item) => item.productsRequested || item.conversationIntent === "pest_disease",
+  ).length;
+  const productsSearched = new Map<string, number>();
+  const ingredientsSearched = new Map<string, number>();
+  const treatmentRequests = new Map<string, number>();
+  for (const item of allCases) {
+    for (const product of item.verifiedProductsShown) {
+      increment(productsSearched, product);
+      const ingredient = product.match(/\(([^)]+)\)/)?.[1]?.trim();
+      if (ingredient) increment(ingredientsSearched, ingredient);
+    }
+    if (item.problemCategory) increment(treatmentRequests, item.problemCategory);
+  }
+  const verifiedRegulatorCountries = [
+    ...new Set(
+      TRUSTED_SOURCES.filter(
+        (item) =>
+          item.active &&
+          item.sourceType === "regulator" &&
+          item.trustLevel === "official" &&
+          item.country !== "regional",
+      ).map((item) => item.country),
+    ),
+  ];
+  const missingRegulatorCountries = RESEARCH_COUNTRIES.filter(
+    (country) => !verifiedRegulatorCountries.includes(country),
+  );
+  const failedVerificationSearches = Math.max(
+    persistedWeb.sourceFailures,
+    web.sourceFailures.reduce((sum, row) => sum + row.count, 0),
+  );
+
+  const conversationLengths = new Map<string, number>();
+  for (const row of persistedMessages) {
+    const owner =
+      allCases.find((item) => item.id === row.caseId)?.userId ||
+      allCases.find((item) => item.id === row.caseId)?.anonymousSessionId ||
+      row.caseId;
+    conversationLengths.set(owner, (conversationLengths.get(owner) ?? 0) + 1);
+  }
+  const lengthValues = [...conversationLengths.values()];
+  const averageConversationLength =
+    lengthValues.length === 0
+      ? 0
+      : Math.round((lengthValues.reduce((sum, n) => sum + n, 0) / lengthValues.length) * 10) / 10;
+
+  const weekCases = allCases.filter((item) => item.createdAt >= weekAgo);
+  const weekFarmers = new Set(weekCases.map((item) => ownerKey(item)));
+  const weekReturning = [...weekFarmers].filter((key) => (daysByUser.get(key)?.size ?? 0) > 1).length;
   const resolved = allCases.filter(
     (item) => item.caseStatus === "resolved" || item.caseStatus === "closed",
   ).length;
-
   return {
     users: {
       total: uniqueUsers,
@@ -337,6 +444,60 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       activeUsersThisWeek: activeWeek.size,
       averageMessagesPerUser,
       returningUsers,
+      voiceNotes,
+    },
+    today: {
+      farmers: activeToday.size,
+      messages: Math.max(messagesToday, messagesTodayPersisted),
+      cases: casesToday,
+      photos: photosToday,
+      voiceNotes: voiceToday,
+      webResearchedAnswers: webToday,
+    },
+    last7Days: {
+      uniqueFarmers: weekFarmers.size,
+      returningFarmers: weekReturning,
+      messages: messagesWeek,
+      cropCases: weekCases.length,
+    },
+    cropIntelligence: {
+      topCrops,
+      topIssues: {
+        symptoms: topEntries(bySymptom),
+        suspectedProblems: topEntries(byProblem),
+        confirmedProblems: topEntries(
+          allCases
+            .filter((item) => item.diagnosisConfirmed)
+            .reduce((map, item) => {
+              increment(map, item.problemCategory);
+              return map;
+            }, new Map<string, number>()),
+        ),
+      },
+    },
+    pesticideIntelligence: {
+      pesticideQuestions,
+      productsSearched: topEntries(productsSearched),
+      activeIngredientsSearched: topEntries(ingredientsSearched),
+      countriesWithVerifiedCoverage: verifiedRegulatorCountries,
+      countriesWithMissingCoverage: missingRegulatorCountries,
+      failedVerificationSearches,
+      mostCommonTreatmentRequests: topEntries(treatmentRequests),
+    },
+    engagement: {
+      guest: guests.size,
+      registered: registered.size,
+      messagesPerFarmer: averageMessagesPerUser,
+      averageConversationLength,
+      returningUsers,
+      casesWithFollowUp: caseFollowups.length,
+      followupResponseRate: averageFollowupCompletion,
+      casesSolved: solved,
+      casesImproved: improved,
+      unresolved,
+      photoUsage: allPhotos.length,
+      voiceUsage: voiceNotes,
+      followupByStatus: topEntries(followupByStatus),
     },
     overview: {
       messagesToday,

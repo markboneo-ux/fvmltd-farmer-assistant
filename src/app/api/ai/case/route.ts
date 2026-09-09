@@ -25,6 +25,7 @@ import {
   isCalculationIntent,
   shouldStartNewCase,
 } from "@/lib/assistant/intents";
+import { similarCaseNoteIsAllowed } from "@/lib/agronomy/output-guard";
 import {
   logCasePersistenceBackend,
   logCasePersistenceError,
@@ -165,6 +166,9 @@ export async function POST(request: Request) {
 
   const contentType = request.headers.get("content-type") || "";
   let incomingCaseId: string | null = null;
+  let incomingInputMode: "text" | "photo" | "voice" = "text";
+  let audioDurationSeconds: number | null = null;
+  let transcriptionConfidence: number | null = null;
 
   try {
     let message = "";
@@ -226,6 +230,14 @@ export async function POST(request: Request) {
       profile = parsed.profile;
 
       incomingCaseId = String(form.get("caseId") || "").trim() || null;
+      const modeRawInput = String(form.get("inputMode") || form.get("input_mode") || "").trim();
+      if (modeRawInput === "voice" || modeRawInput === "photo" || modeRawInput === "text") {
+        incomingInputMode = modeRawInput;
+      }
+      const durationRaw = Number(form.get("audioDurationSeconds") || form.get("audio_duration_seconds") || "");
+      if (Number.isFinite(durationRaw) && durationRaw > 0) audioDurationSeconds = durationRaw;
+      const confidenceRaw = Number(form.get("transcriptionConfidence") || "");
+      if (Number.isFinite(confidenceRaw) && confidenceRaw > 0) transcriptionConfidence = confidenceRaw;
       const parsedImages = await parseImagesFromFormData(form);
       if (!parsedImages.ok) {
         logOps("photo_upload_failure", { reason: parsedImages.farmerError });
@@ -271,6 +283,9 @@ export async function POST(request: Request) {
       const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
       incomingCaseId =
         typeof record.caseId === "string" ? record.caseId.trim() || null : incomingCaseId;
+      if (record.inputMode === "voice" || record.inputMode === "photo" || record.inputMode === "text") {
+        incomingInputMode = record.inputMode;
+      }
     }
 
     incomingCaseId = await resolveContinuingCropCase({
@@ -453,6 +468,9 @@ export async function POST(request: Request) {
         imageCount: images.length,
         profile,
         correlationId,
+        inputMode: images.length > 0 ? "photo" : incomingInputMode,
+        audioDurationSeconds,
+        transcriptionConfidence,
       });
       persistedCaseId = persisted.caseId;
     } catch (persistError) {
@@ -510,7 +528,12 @@ export async function POST(request: Request) {
 
     let hint: string | null = null;
     if (persistedCaseId) {
-      hint = await similarCaseHint(persistedCaseId);
+      const persisted = await getCropCase(persistedCaseId);
+      hint = similarCaseNoteIsAllowed({
+        note: await similarCaseHint(persistedCaseId),
+        crop: persisted?.crop ?? null,
+        userMessage: message,
+      });
     }
 
     return NextResponse.json({
