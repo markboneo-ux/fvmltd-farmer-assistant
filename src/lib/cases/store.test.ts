@@ -383,6 +383,14 @@ describe("Supabase case persistence layer", () => {
       diagnosisConfirmed: true,
       knowledgeState: "validated",
     });
+    const other = await createCropCase({
+      anonymousSessionId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      message: "Cucumber leaf spots in Couva",
+    });
+    await updateCaseFromConversation(other.id, "reviewed", {
+      agronomistReviewed: true,
+      knowledgeState: "validated",
+    });
     const ranked = await getSimilarCases({
       country: "Trinidad and Tobago",
       district: "Couva",

@@ -95,16 +95,14 @@ export function mentionsTomato(text: string): boolean {
 }
 
 /**
- * Remove tomato (or another unmentioned crop) from farmer-facing text
- * when that crop was not named in this conversation.
+ * Remove tomato from farmer-facing text when tomato is not an allowed crop.
  */
 export function stripUnmentionedCrop(
   text: string,
-  crop: string,
+  _crop: string,
   allowedCrops: string[],
 ): string {
-  if (!crop || allowedCrops.includes(crop)) return text;
-  if (crop !== "tomato") return text;
+  if (allowedCrops.includes("tomato")) return text;
   return text
     .replace(/\btomato(?:es)?\s+/gi, "")
     .replace(/\s+tomato(?:es)?\b/gi, "")

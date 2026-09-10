@@ -114,6 +114,10 @@ export type CaseMessageRecord = {
   content: string;
   hasImages: boolean;
   createdAt: string;
+  inputMode?: "text" | "photo" | "voice";
+  audioDurationSeconds?: number | null;
+  audioStoragePath?: string | null;
+  transcriptionConfidence?: number | null;
 };
 
 export type CaseObservationRecord = {

@@ -212,6 +212,10 @@ export function buildCaseMessage(input: {
   role: CaseMessageRecord["role"];
   content: string;
   hasImages?: boolean;
+  inputMode?: CaseMessageRecord["inputMode"];
+  audioDurationSeconds?: number | null;
+  audioStoragePath?: string | null;
+  transcriptionConfidence?: number | null;
 }): CaseMessageRecord {
   return {
     id: crypto.randomUUID(),
@@ -220,6 +224,10 @@ export function buildCaseMessage(input: {
     content: input.content,
     hasImages: Boolean(input.hasImages),
     createdAt: nowIso(),
+    inputMode: input.inputMode ?? (input.hasImages ? "photo" : "text"),
+    audioDurationSeconds: input.audioDurationSeconds ?? null,
+    audioStoragePath: input.audioStoragePath ?? null,
+    transcriptionConfidence: input.transcriptionConfidence ?? null,
   };
 }
 

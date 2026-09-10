@@ -50,11 +50,37 @@ describe("weather-linked disease risk", () => {
       forecast,
     });
 
-    for (const alert of alerts) {
-      expect(alert.disclaimer.toLowerCase()).toContain("does not prove");
-      expect(alert.confidence).toBeTruthy();
-      expect(alert.dataSource).toBeTruthy();
-      expect(alert.generatedAt).toBeTruthy();
-    }
+    expect(alerts).toEqual([]);
+  });
+
+  it("does not apply tomato blight models to celery or unknown crops", () => {
+    const forecast = buildMockHumidRainyForecast();
+    expect(
+      assessWeatherDiseaseRisk({
+        country: "Trinidad and Tobago",
+        crop: "celery",
+        recentSymptoms: "outer leaves burning",
+        forecast,
+      }),
+    ).toEqual([]);
+    expect(
+      assessWeatherDiseaseRisk({
+        country: "Trinidad and Tobago",
+        crop: null,
+        recentSymptoms: "leaf spots after rain",
+        forecast,
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not create whitefly pressure from warmth alone", () => {
+    const forecast = buildMockHumidRainyForecast();
+    const alerts = assessWeatherDiseaseRisk({
+      country: "Trinidad and Tobago",
+      crop: "tomato",
+      recentSymptoms: "plants look weak",
+      forecast,
+    });
+    expect(alerts.some((alert) => /whitefly/i.test(alert.diseaseOrPest))).toBe(false);
   });
 });

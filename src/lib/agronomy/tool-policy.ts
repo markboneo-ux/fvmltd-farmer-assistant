@@ -1,9 +1,9 @@
 import type { IntentCategory } from "@/lib/assistant/intents";
 import type { KnownFarmerFacts } from "./tomato-protocol";
+import type { WeatherRelevanceLevel } from "./case-schema";
 import {
   assessWeatherRelevance,
   shouldInvokeWeatherTool as weatherToolFromRelevance,
-  type WeatherRelevanceLevel,
 } from "./weather-relevance";
 
 /**

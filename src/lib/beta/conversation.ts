@@ -133,6 +133,10 @@ export async function persistConversationTurn(options: {
   imageCount?: number;
   profile?: { country?: string | null; district?: string | null } | null;
   correlationId?: string;
+  inputMode?: "text" | "photo" | "voice";
+  audioDurationSeconds?: number | null;
+  audioStoragePath?: string | null;
+  transcriptionConfidence?: number | null;
 }): Promise<{ caseId: string; createdNewCase: boolean }> {
   logCasePersistenceStart();
   logCasePersistenceBackend();
@@ -195,6 +199,12 @@ export async function persistConversationTurn(options: {
     role: "user",
     content: options.userMessage,
     hasImages: (options.imageCount ?? 0) > 0,
+    inputMode:
+      options.inputMode ??
+      ((options.imageCount ?? 0) > 0 ? "photo" : "text"),
+    audioDurationSeconds: options.audioDurationSeconds ?? null,
+    audioStoragePath: options.audioStoragePath ?? null,
+    transcriptionConfidence: options.transcriptionConfidence ?? null,
   });
   await appendCaseMessage({
     caseId: record.id,
@@ -350,29 +360,38 @@ export async function similarCaseHint(caseId: string): Promise<string | null> {
     ) {
       return null;
     }
+    const currentCrop = record.crop?.trim().toLowerCase() || null;
+    if (!currentCrop) return null;
+
     const matches = (
       await getSimilarCases(
         {
           country: record.country,
           district: record.district,
-          crop: record.crop,
+          crop: currentCrop,
           variety: record.variety,
           symptoms: record.symptoms,
           problemCategory: record.problemCategory,
           productionSystem: record.productionSystem,
           weatherContext: record.weatherRisk,
         },
-        3,
+        8,
       )
     ).filter((item) => item.caseId !== caseId);
+    if (matches.length === 0) {
+      return null;
+    }
     const trendHint = await relevantTrendHint({
-      crop: record.crop,
+      crop: currentCrop,
       region: record.district,
       country: record.country,
       symptoms: record.symptoms,
       suspectedIssue: record.problemCategory,
     });
-    return trendHint ?? matches[0]?.farmerFacingSummary ?? null;
+    const note = trendHint ?? matches[0]?.farmerFacingSummary ?? null;
+    if (!note) return null;
+    if (/\btomato/i.test(note) && currentCrop !== "tomato") return null;
+    return note;
   } catch (error) {
     logCasePersistenceError(error, "similar_cases");
     return null;

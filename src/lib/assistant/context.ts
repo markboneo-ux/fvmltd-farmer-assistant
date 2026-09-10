@@ -6,7 +6,6 @@ import {
   ASK_CROP_QUESTION,
   extractCrops,
   extractLastCrop,
-  mentionsTomato,
   stripUnmentionedCrop,
 } from "./crops";
 import {
@@ -205,7 +204,8 @@ export function resolveTurnContext(options: {
     ...new Set(
       [
         currentCrop,
-        ...(carryCrop && !resetHistory ? extractCrops(`${userHistoryText(history)}\n${options.message}`) : extractCrops(options.message)),
+        ...(carryCrop && !resetHistory && crop ? [crop] : []),
+        ...extractCrops(options.message),
       ].filter((item): item is string => Boolean(item)),
     ),
   ];
@@ -246,7 +246,6 @@ export function sanitizeFarmerFacingText(
   allowedCrops: string[],
 ): string {
   if (allowedCrops.includes("tomato")) return text;
-  if (!mentionsTomato(text)) return text;
   return stripUnmentionedCrop(text, "tomato", allowedCrops);
 }
 

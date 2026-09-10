@@ -1,6 +1,27 @@
+/**
+ * Rank similar cases. Higher when reviewed, confirmed, outcome recorded,
+ * same region, same crop/variety, similar symptoms, similar weather.
+ * Never includes another farmer's identity.
+ *
+ * Hard gate before any farmer-facing similar-case sentence:
+ * currentCrop != null
+ * AND retrievedCaseCrop == currentCrop
+ * AND symptom overlap >= threshold
+ * AND unique farmer count >= configured threshold
+ *
+ * Never substitute tomato (or any other crop).
+ */
+
 import { listCropCases, listOutcomes, logCasePersistenceBackend } from "./store";
-import type { SimilarCaseMatch, SimilarCaseQuery } from "./types";
+import type { CropCaseRecord, SimilarCaseMatch, SimilarCaseQuery } from "./types";
 import { trustedCaseForSimilarity } from "@/lib/trends/ingest";
+
+export const SIMILAR_CASE_UNIQUE_FARMER_THRESHOLD = 2;
+export const SIMILAR_CASE_SYMPTOM_THRESHOLD = 1;
+
+function sessionKey(record: Pick<CropCaseRecord, "id" | "userId" | "anonymousSessionId">): string {
+  return record.userId || record.anonymousSessionId || record.id;
+}
 
 function overlap(a: string[] | undefined, b: string[] | undefined): number {
   if (!a?.length || !b?.length) return 0;
@@ -12,6 +33,25 @@ function overlap(a: string[] | undefined, b: string[] | undefined): number {
   return score;
 }
 
+function sameCrop(queryCrop: string | null | undefined, itemCrop: string | null | undefined): boolean {
+  if (!queryCrop || !itemCrop) return false;
+  return queryCrop.trim().toLowerCase() === itemCrop.trim().toLowerCase();
+}
+
+export function farmerFacingSimilarSummary(crop: string): string {
+  return `We have seen similar ${crop} cases. Use that only as a check, not as a diagnosis of your plants.`;
+}
+
+function qualifiesMatch(
+  query: SimilarCaseQuery,
+  item: CropCaseRecord,
+  symptomHits: number,
+): boolean {
+  if (!sameCrop(query.crop, item.crop)) return false;
+  if (symptomHits < SIMILAR_CASE_SYMPTOM_THRESHOLD) return false;
+  return true;
+}
+
 /**
  * Rank similar cases. Higher when reviewed, confirmed, outcome recorded,
  * same region, same crop/variety, similar symptoms, similar weather.
@@ -21,6 +61,9 @@ export async function getSimilarCases(
   query: SimilarCaseQuery,
   limit = 5,
 ): Promise<SimilarCaseMatch[]> {
+  const currentCrop = query.crop?.trim().toLowerCase() || null;
+  if (!currentCrop) return [];
+
   const allCases = await listCropCases();
   logCasePersistenceBackend();
   const allOutcomes = await listOutcomes();
@@ -32,8 +75,17 @@ export async function getSimilarCases(
       if (!trusted) {
         return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
       }
+      if (!sameCrop(currentCrop, item.crop)) {
+        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
+      }
+
       let score = 0;
       const reasons: string[] = [];
+      const symptomHits = overlap(query.symptoms, item.symptoms);
+
+      if (!qualifiesMatch(query, item, symptomHits)) {
+        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
+      }
 
       if (item.agronomistReviewed) {
         score += 40;
@@ -63,17 +115,8 @@ export async function getSimilarCases(
         score += 8;
         reasons.push("same country");
       }
-      if (
-        query.crop &&
-        item.crop &&
-        query.crop.toLowerCase() !== item.crop.toLowerCase()
-      ) {
-        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
-      }
-      if (query.crop && item.crop && query.crop.toLowerCase() === item.crop.toLowerCase()) {
-        score += 16;
-        reasons.push("same crop");
-      }
+      score += 16;
+      reasons.push("same crop");
       if (
         query.variety &&
         item.variety &&
@@ -82,7 +125,6 @@ export async function getSimilarCases(
         score += 12;
         reasons.push("same variety");
       }
-      const symptomHits = overlap(query.symptoms, item.symptoms);
       if (symptomHits > 0) {
         score += symptomHits * 8;
         reasons.push("similar symptoms");
@@ -111,25 +153,36 @@ export async function getSimilarCases(
         reasons.push("similar weather");
       }
 
-      const sameCrop = reasons.includes("same crop");
-      if (!sameCrop && symptomHits === 0) {
-        return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
-      }
-
-      const farmerFacingSummary = buildFarmerFacingSimilarSummary(item, reasons);
-      return { caseId: item.id, score, reasons, farmerFacingSummary };
+      return {
+        caseId: item.id,
+        score,
+        reasons,
+        farmerFacingSummary: farmerFacingSimilarSummary(currentCrop),
+        uniqueFarmerKey: sessionKey(item),
+      };
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  return scored.slice(0, limit);
+  const uniqueFarmers = new Set(scored.map((item) => item.uniqueFarmerKey));
+  if (uniqueFarmers.size < SIMILAR_CASE_UNIQUE_FARMER_THRESHOLD) {
+    return [];
+  }
+
+  return scored.slice(0, limit).map(({ uniqueFarmerKey: _key, ...item }) => item);
 }
 
-function buildFarmerFacingSimilarSummary(
-  item: { district: string | null; crop: string | null },
-  _reasons: string[],
-): string {
-  const area = item.district ? " in your area" : "";
-  const cropBit = item.crop ? ` on ${item.crop}` : "";
-  return `We have seen similar reports recently${area}${cropBit}. Use that only as a check, not as a diagnosis of your plants.`;
+export function similarCaseHardGate(options: {
+  currentCrop: string | null | undefined;
+  retrievedCrop: string | null | undefined;
+  symptomSimilarity: number;
+  uniqueFarmerCount: number;
+}): boolean {
+  const current = options.currentCrop?.trim().toLowerCase() || null;
+  const retrieved = options.retrievedCrop?.trim().toLowerCase() || null;
+  if (!current) return false;
+  if (!retrieved || retrieved !== current) return false;
+  if (options.symptomSimilarity < SIMILAR_CASE_SYMPTOM_THRESHOLD) return false;
+  if (options.uniqueFarmerCount < SIMILAR_CASE_UNIQUE_FARMER_THRESHOLD) return false;
+  return true;
 }

@@ -366,6 +366,9 @@ describe("controlled beta — farmer journey and safety", () => {
       anonymousSessionId: "a",
       message: "Tomato wilt in Couva",
     });
+    await updateCaseFromConversation(weak.id, "reviewed", {
+      agronomistReviewed: true,
+    });
     const strong = await createCropCase({
       anonymousSessionId: "b",
       message: "Tomato wilt in Couva after rain",

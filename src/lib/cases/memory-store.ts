@@ -107,6 +107,10 @@ export function memoryAddCaseMessage(input: {
   role: CaseMessageRecord["role"];
   content: string;
   hasImages?: boolean;
+  inputMode?: CaseMessageRecord["inputMode"];
+  audioDurationSeconds?: number | null;
+  audioStoragePath?: string | null;
+  transcriptionConfidence?: number | null;
 }): CaseMessageRecord {
   const row = buildCaseMessage(input);
   const list = messages.get(input.caseId) ?? [];
@@ -241,6 +245,13 @@ export function memoryRecordFollowupOutcome(input: {
     const cropCase = cases.get(row.caseId);
     if (cropCase && input.outcome === "problem_solved") {
       cropCase.caseStatus = "resolved";
+      cropCase.updatedAt = nowIso();
+    }
+    if (cropCase && input.outcome === "worse") {
+      cropCase.caseStatus = "in_progress";
+      cropCase.updatedAt = nowIso();
+    }
+    if (cropCase && input.outcome === "improved") {
       cropCase.updatedAt = nowIso();
     }
     return row;

@@ -114,6 +114,9 @@ describe("admin dashboard metrics", () => {
     expect(insights.agronomy.problemsByCrop.some((row) => row.label === "tomato")).toBe(true);
     expect(insights.webResearch.answersUsingWeb).toBe(1);
     expect(insights.cases.every((item) => !("email" in item))).toBe(true);
+    expect(insights.today.farmers).toBeGreaterThanOrEqual(0);
+    expect(insights.today.webResearchedAnswers).toBe(1);
+    expect(insights.cropIntelligence.topCrops.some((row) => row.crop === "celery")).toBe(true);
   });
 
   it("keeps unknown-country cases out of Trinidad analytics", async () => {
@@ -147,6 +150,18 @@ describe("admin dashboard metrics", () => {
     expect(unknownOnly.agronomy.casesByCountry.some((row) => row.label === "Unknown")).toBe(
       true,
     );
+  });
+
+  it("shows zeros instead of invented dashboard metrics when no data exists", async () => {
+    const insights = await buildInsights();
+    expect(insights.today.farmers).toBe(0);
+    expect(insights.today.messages).toBe(0);
+    expect(insights.today.cases).toBe(0);
+    expect(insights.today.photos).toBe(0);
+    expect(insights.today.voiceNotes).toBe(0);
+    expect(insights.today.webResearchedAnswers).toBe(0);
+    expect(insights.cropIntelligence.topCrops).toEqual([]);
+    expect(insights.engagement.voiceUsage).toBe(0);
   });
 
   it("requires multiple unique farmers for a trend and ignores excluded cases", async () => {

@@ -103,6 +103,10 @@ export async function appendCaseMessage(input: {
   role: CaseMessageRecord["role"];
   content: string;
   hasImages?: boolean;
+  inputMode?: CaseMessageRecord["inputMode"];
+  audioDurationSeconds?: number | null;
+  audioStoragePath?: string | null;
+  transcriptionConfidence?: number | null;
 }): Promise<CaseMessageRecord> {
   const record = isMemoryBackend()
     ? memory.memoryAddCaseMessage(input)

@@ -69,11 +69,24 @@ function matchesProductionSystem(
   );
 }
 
+function symptomsSupportRule(rule: DiseaseRiskRule, recentSymptoms: string | null | undefined): boolean {
+  const hint = (recentSymptoms || "").toLowerCase();
+  if (!hint) return false;
+  if (rule.diseaseOrPest.includes("foliar") || /blight/.test(rule.diseaseOrPest)) {
+    return /spot|blight|mould|mold|lesion|fungal|leaf spot/.test(hint);
+  }
+  if (/whitefly/.test(rule.diseaseOrPest)) {
+    return /whitefly|white\s*fl|sticky|honeydew|sooty/.test(hint);
+  }
+  return false;
+}
+
 function evaluateRule(
   rule: DiseaseRiskRule,
   input: WeatherRiskAssessmentInput,
 ): WeatherRiskAlert | null {
   if (!matchesProductionSystem(rule, input.productionSystem)) return null;
+  if (!symptomsSupportRule(rule, input.recentSymptoms)) return null;
 
   const rainEvents = countRainEvents72h(input.forecast);
   const nightTemp = avgNightTemperatureC(input.forecast);
@@ -90,11 +103,10 @@ function evaluateRule(
   const nightOk =
     nightTemp === null || nightTemp >= rule.thresholds.minNightTemperatureC;
 
-  // Foliar rules need wet/humid drivers; whitefly rule is warmth/humidity leaning.
-  const triggered =
-    rule.diseaseOrPest.includes("foliar")
-      ? wetOk && humidityOk && (rainOk || leafOk) && nightOk
-      : humidityOk && nightOk;
+  const foliar = rule.diseaseOrPest.includes("foliar") || /blight/.test(rule.diseaseOrPest);
+  const triggered = foliar
+    ? wetOk && humidityOk && (rainOk || leafOk) && nightOk
+    : humidityOk && nightOk && wetOk;
 
   if (!triggered) return null;
 
@@ -140,14 +152,18 @@ function evaluateRule(
 /**
  * Combine crop context + verified forecast into risk warnings.
  * Never claims weather alone confirms a disease.
+ * Never uses tomato models for another crop. Unknown crop → no alerts.
  */
 export function assessWeatherDiseaseRisk(
   input: WeatherRiskAssessmentInput,
 ): WeatherRiskAlert[] {
-  const rules = rulesForCrop(input.crop);
+  const crop = input.crop?.trim().toLowerCase() || null;
+  if (!crop) return [];
+  const rules = rulesForCrop(crop);
   const alerts: WeatherRiskAlert[] = [];
 
   for (const rule of rules) {
+    if (rule.crop !== crop) continue;
     const alert = evaluateRule(rule, input);
     if (alert) alerts.push(alert);
   }

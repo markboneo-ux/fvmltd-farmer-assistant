@@ -28,6 +28,7 @@ import {
 import { farmerPersistenceBanner } from "@/lib/chat/persistence-warning";
 import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
 import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
+import { MAX_VOICE_SECONDS } from "@/lib/voice/caribbean-vocab";
 
 type ChatRole = "user" | "assistant";
 
@@ -129,7 +130,21 @@ export function FarmerCaseChat({
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
-  const [followup, setFollowup] = useState<{ id: string } | null>(null);
+  const [followup, setFollowup] = useState<{ id: string; caseId?: string } | null>(null);
+  const [followupPrompt, setFollowupPrompt] = useState(FOLLOWUP_PROMPT);
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
+  const [pendingVoice, setPendingVoice] = useState<{
+    blob: Blob;
+    duration: number;
+  } | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<number | null>(null);
+  const recordStartedAtRef = useRef<number>(0);
   const [mainWebsiteUrl] = useState(() => getMainWebsiteUrl());
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
 
@@ -164,6 +179,20 @@ export function FarmerCaseChat({
       } catch {
         // Guest chat still works if session lookup fails.
       }
+      try {
+        const due = await fetch("/api/followups?due=1");
+        if (!due.ok) return;
+        const body = (await due.json()) as {
+          prompt?: string;
+          due?: { id: string; caseId: string } | null;
+        };
+        if (body.due?.id) {
+          setFollowup({ id: body.due.id, caseId: body.due.caseId });
+          if (body.prompt) setFollowupPrompt(body.prompt);
+        }
+      } catch {
+        // Follow-up is optional when the farmer returns.
+      }
     })();
   }, []);
 
@@ -178,7 +207,11 @@ export function FarmerCaseChat({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }
 
-  async function sendQuestion(question: string, modeOverride?: CaseMode) {
+  async function sendQuestion(
+    question: string,
+    modeOverride?: CaseMode,
+    extras?: { inputMode?: "text" | "photo" | "voice"; audioDurationSeconds?: number | null },
+  ) {
     const trimmed = question.trim();
     if ((!trimmed && attachedImages.length === 0) || loading) return;
 
@@ -254,6 +287,10 @@ export function FarmerCaseChat({
       form.append("previousResponseId", previousResponseId ?? "");
       form.append("mode", nextMode);
       if (caseId) form.append("caseId", caseId);
+      if (extras?.inputMode) form.append("inputMode", extras.inputMode);
+      if (extras?.audioDurationSeconds) {
+        form.append("audioDurationSeconds", String(extras.audioDurationSeconds));
+      }
       form.append(
         "profile",
         JSON.stringify({
@@ -353,7 +390,13 @@ export function FarmerCaseChat({
             typeof payload.questionsAsked === "number"
               ? payload.questionsAsked
               : undefined,
-          similarCaseNote: payload.similarCaseHint || undefined,
+          similarCaseNote:
+            payload.similarCaseHint &&
+            !(/\btomato/i.test(payload.similarCaseHint) &&
+              !/\btomato/i.test(trimmed) &&
+              !/\btomato/i.test(casePayload.preliminaryAssessment))
+              ? payload.similarCaseHint
+              : undefined,
         },
       ]);
 
@@ -381,6 +424,120 @@ export function FarmerCaseChat({
       setLoading(false);
       setAnalyzingPhotos(false);
       inputRef.current?.focus();
+    }
+  }
+
+  function clearRecordTimer() {
+    if (recordTimerRef.current) {
+      window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+  }
+
+  function discardVoicePreview() {
+    if (voicePreviewUrl) URL.revokeObjectURL(voicePreviewUrl);
+    setVoicePreviewUrl(null);
+    setPendingVoice(null);
+    setRecordSeconds(0);
+    setRecording(false);
+  }
+
+  async function startVoiceRecording() {
+    setVoiceError(null);
+    setError(null);
+    discardVoicePreview();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceError("Voice notes are not supported in this browser. Please type instead.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        voiceStreamRef.current = null;
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const duration = Math.max(1, Math.round((Date.now() - recordStartedAtRef.current) / 1000));
+        const url = URL.createObjectURL(blob);
+        setVoicePreviewUrl(url);
+        setPendingVoice({ blob, duration });
+        setRecording(false);
+        clearRecordTimer();
+      };
+      recorder.start();
+      setRecording(true);
+      setRecordSeconds(0);
+      recordStartedAtRef.current = Date.now();
+      recordTimerRef.current = window.setInterval(() => {
+        const elapsed = Math.round((Date.now() - recordStartedAtRef.current) / 1000);
+        setRecordSeconds(elapsed);
+        if (elapsed >= MAX_VOICE_SECONDS) {
+          recorder.stop();
+        }
+      }, 250);
+    } catch {
+      setVoiceError("I could not access the microphone. Please type your question.");
+    }
+  }
+
+  function stopVoiceRecording() {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    clearRecordTimer();
+  }
+
+  function cancelVoiceRecording() {
+    const stream = voiceStreamRef.current;
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.onstop = () => {
+        stream?.getTracks().forEach((track) => track.stop());
+        voiceStreamRef.current = null;
+      };
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    } else {
+      stream?.getTracks().forEach((track) => track.stop());
+      voiceStreamRef.current = null;
+    }
+    clearRecordTimer();
+    discardVoicePreview();
+  }
+
+  async function sendVoiceNote() {
+    if (!pendingVoice || loading) return;
+    setLoading(true);
+    setVoiceError(null);
+    try {
+      const form = new FormData();
+      const file = new File([pendingVoice.blob], "farmer-voice.webm", {
+        type: pendingVoice.blob.type || "audio/webm",
+      });
+      form.append("audio", file);
+      form.append("durationSeconds", String(pendingVoice.duration));
+      const response = await fetch("/api/ai/transcribe", { method: "POST", body: form });
+      const payload = (await response.json()) as { text?: string; error?: string };
+      if (!response.ok || !payload.text) {
+        setVoiceError(payload.error || "I could not hear that clearly. Please try again or type it.");
+        setLoading(false);
+        return;
+      }
+      const transcript = payload.text;
+      const duration = pendingVoice.duration;
+      discardVoicePreview();
+      setLoading(false);
+      await sendQuestion(transcript, undefined, {
+        inputMode: "voice",
+        audioDurationSeconds: duration,
+      });
+    } catch {
+      setVoiceError("I could not send that voice note. Please try again or type it.");
+      setLoading(false);
     }
   }
 
@@ -799,7 +956,7 @@ export function FarmerCaseChat({
           ) : null}
           {followup ? (
             <div className="rounded-2xl bg-surface px-3 py-3 text-sm shadow-sm ring-1 ring-line">
-              <p className="font-medium">{FOLLOWUP_PROMPT}</p>
+              <p className="font-medium">{followupPrompt}</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {FOLLOWUP_OPTIONS.map((option) => (
                   <button
@@ -807,16 +964,27 @@ export function FarmerCaseChat({
                     type="button"
                     className="min-h-11 rounded-full bg-sky px-3 text-sm font-medium text-canopy ring-1 ring-line"
                     onClick={() => {
-                      void fetch("/api/followups", {
-                        method: "POST",
-                        headers: { "content-type": "application/json" },
-                        body: JSON.stringify({
-                          followupId: followup.id,
-                          caseId,
-                          outcome: option,
-                        }),
-                      });
-                      setFollowup(null);
+                      const targetCaseId = followup.caseId || caseId;
+                      void (async () => {
+                        const response = await fetch("/api/followups", {
+                          method: "POST",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({
+                            followupId: followup.id,
+                            caseId: targetCaseId,
+                            outcome: option,
+                          }),
+                        });
+                        const body = (await response.json()) as { reopen?: boolean };
+                        setFollowup(null);
+                        if (option === "Worse" || body.reopen) {
+                          void sendQuestion(
+                            "The problem is worse than last time. Please reassess the case.",
+                          );
+                        } else if (option === "Improved") {
+                          void sendQuestion("The crop has improved. What should I keep doing?");
+                        }
+                      })();
                     }}
                   >
                     {option}
@@ -825,10 +993,56 @@ export function FarmerCaseChat({
               </div>
             </div>
           ) : null}
-          {error ? (
+          {voiceError ? (
             <p className="px-1 text-sm font-medium text-danger" role="alert">
-              {error}
+              {voiceError}
             </p>
+          ) : null}
+          {recording ? (
+            <div className="flex items-center justify-between rounded-2xl bg-surface px-3 py-2 text-sm ring-1 ring-line">
+              <p className="font-medium text-danger">
+                Recording… {String(Math.floor(recordSeconds / 60)).padStart(2, "0")}:
+                {String(recordSeconds % 60).padStart(2, "0")} / 0:{String(MAX_VOICE_SECONDS).padStart(2, "0")}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full bg-sky px-3 font-medium text-canopy ring-1 ring-line"
+                  onClick={cancelVoiceRecording}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full bg-canopy px-3 font-semibold text-white"
+                  onClick={stopVoiceRecording}
+                >
+                  Stop
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {pendingVoice && voicePreviewUrl && !recording ? (
+            <div className="flex flex-col gap-2 rounded-2xl bg-surface px-3 py-2 text-sm ring-1 ring-line sm:flex-row sm:items-center">
+              <audio controls src={voicePreviewUrl} className="w-full sm:flex-1" />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full bg-sky px-3 font-medium text-canopy ring-1 ring-line"
+                  onClick={discardVoicePreview}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full bg-canopy px-3 font-semibold text-white"
+                  onClick={() => void sendVoiceNote()}
+                  disabled={loading}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
           ) : null}
 
           <CasePhotoAttach
@@ -897,11 +1111,28 @@ export function FarmerCaseChat({
             <button
               type="button"
               onClick={() => attachRef.current?.openCamera()}
-              disabled={loading}
+              disabled={loading || recording}
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface text-canopy shadow-sm ring-1 ring-line/80 hover:bg-white disabled:opacity-50"
               aria-label="Take photo"
             >
               <CameraIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (recording) {
+                  stopVoiceRecording();
+                  return;
+                }
+                void startVoiceRecording();
+              }}
+              disabled={loading}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-sm ring-1 ring-line/80 disabled:opacity-50 ${
+                recording ? "bg-danger text-white" : "bg-surface text-canopy hover:bg-white"
+              }`}
+              aria-label={recording ? "Stop recording" : "Record a voice note"}
+            >
+              <MicrophoneIcon />
             </button>
             <button
               type="submit"
@@ -914,6 +1145,23 @@ export function FarmerCaseChat({
         </div>
       </div>
     </div>
+  );
+}
+
+function MicrophoneIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden
+    >
+      <rect x="9" y="3.5" width="6" height="11" rx="3" />
+      <path d="M6.5 11.5a5.5 5.5 0 0 0 11 0" />
+      <path d="M12 17v3.5" />
+    </svg>
   );
 }
 

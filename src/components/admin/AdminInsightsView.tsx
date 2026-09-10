@@ -61,6 +61,53 @@ type InsightsPayload = {
       activeUsersToday: number;
       activeUsersThisWeek: number;
       averageMessagesPerUser: number;
+      voiceNotes?: number;
+    };
+    today?: {
+      farmers: number;
+      messages: number;
+      cases: number;
+      photos: number;
+      voiceNotes: number;
+      webResearchedAnswers: number;
+    };
+    last7Days?: {
+      uniqueFarmers: number;
+      returningFarmers: number;
+      messages: number;
+      cropCases: number;
+    };
+    cropIntelligence?: {
+      topCrops: Array<{ crop: string; cases: number; farmers: number }>;
+      topIssues: {
+        symptoms: CountRow[];
+        suspectedProblems: CountRow[];
+        confirmedProblems: CountRow[];
+      };
+    };
+    pesticideIntelligence?: {
+      pesticideQuestions: number;
+      productsSearched: CountRow[];
+      activeIngredientsSearched: CountRow[];
+      countriesWithVerifiedCoverage: string[];
+      countriesWithMissingCoverage: string[];
+      failedVerificationSearches: number;
+      mostCommonTreatmentRequests: CountRow[];
+    };
+    engagement?: {
+      guest: number;
+      registered: number;
+      messagesPerFarmer: number;
+      averageConversationLength: number;
+      returningUsers: number;
+      casesWithFollowUp: number;
+      followupResponseRate: number;
+      casesSolved: number;
+      casesImproved: number;
+      unresolved: number;
+      photoUsage: number;
+      voiceUsage: number;
+      followupByStatus: CountRow[];
     };
     questionTypes?: CountRow[];
     usage?: {
@@ -361,6 +408,26 @@ export function AdminInsightsView() {
       {error ? <p className="mt-4 text-danger">{error}</p> : null}
       {insights && agronomy && summary ? (
         <div className="mt-6 space-y-6">
+          <section>
+            <h2 className="mb-2 font-semibold">Today</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <Card label="Farmers / users" value={insights.today?.farmers ?? 0} />
+              <Card label="Messages" value={insights.today?.messages ?? 0} />
+              <Card label="Cases" value={insights.today?.cases ?? 0} />
+              <Card label="Photos" value={insights.today?.photos ?? 0} />
+              <Card label="Voice notes" value={insights.today?.voiceNotes ?? 0} />
+              <Card label="Web-researched answers" value={insights.today?.webResearchedAnswers ?? 0} />
+            </div>
+          </section>
+          <section>
+            <h2 className="mb-2 font-semibold">Last 7 days</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card label="Unique farmers" value={insights.last7Days?.uniqueFarmers ?? 0} />
+              <Card label="Returning farmers" value={insights.last7Days?.returningFarmers ?? 0} />
+              <Card label="Messages" value={insights.last7Days?.messages ?? 0} />
+              <Card label="Crop cases" value={insights.last7Days?.cropCases ?? 0} />
+            </div>
+          </section>
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Card label="Total messages" value={summary.totalMessages} />
             <Card label="Total crop cases" value={summary.totalCropCases} />
@@ -392,7 +459,17 @@ export function AdminInsightsView() {
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Top crops</h2>
-              <Bars rows={agronomy.problemsByCrop} />
+              {(insights.cropIntelligence?.topCrops ?? []).length === 0 ? (
+                <p className="mt-2 text-sm text-muted">No data</p>
+              ) : (
+                <ul className="mt-2 space-y-1 text-sm">
+                  {(insights.cropIntelligence?.topCrops ?? []).map((row) => (
+                    <li key={row.crop}>
+                      {row.crop || "unknown"} — {row.farmers} farmers, {row.cases} cases
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Top symptoms</h2>
@@ -487,6 +564,51 @@ export function AdminInsightsView() {
               </div>
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
+              <h2 className="font-semibold">Product / pesticide intelligence</h2>
+              <ul className="mt-2 space-y-1 text-sm">
+                <li>Pesticide questions: {insights.pesticideIntelligence?.pesticideQuestions ?? 0}</li>
+                <li>
+                  Failed verification searches:{" "}
+                  {insights.pesticideIntelligence?.failedVerificationSearches ?? 0}
+                </li>
+              </ul>
+              <p className="mt-3 text-xs font-medium text-muted">Verified regulatory coverage</p>
+              <p className="text-sm">
+                {(insights.pesticideIntelligence?.countriesWithVerifiedCoverage ?? []).join(", ") ||
+                  "No data"}
+              </p>
+              <p className="mt-3 text-xs font-medium text-muted">Missing regulatory coverage</p>
+              <p className="text-sm">
+                {(insights.pesticideIntelligence?.countriesWithMissingCoverage ?? []).join(", ") ||
+                  "No data"}
+              </p>
+              <p className="mt-3 text-xs font-medium text-muted">Products searched</p>
+              <Bars rows={insights.pesticideIntelligence?.productsSearched ?? []} />
+              <p className="mt-3 text-xs font-medium text-muted">Active ingredients searched</p>
+              <Bars rows={insights.pesticideIntelligence?.activeIngredientsSearched ?? []} />
+              <p className="mt-3 text-xs font-medium text-muted">Treatment requests</p>
+              <Bars rows={insights.pesticideIntelligence?.mostCommonTreatmentRequests ?? []} />
+            </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+              <h2 className="font-semibold">Farmer engagement</h2>
+              <ul className="mt-2 space-y-1 text-sm">
+                <li>Guest: {insights.engagement?.guest ?? 0}</li>
+                <li>Registered: {insights.engagement?.registered ?? 0}</li>
+                <li>Messages / farmer: {insights.engagement?.messagesPerFarmer ?? 0}</li>
+                <li>Avg conversation length: {insights.engagement?.averageConversationLength ?? 0}</li>
+                <li>Returning users: {insights.engagement?.returningUsers ?? 0}</li>
+                <li>Cases with follow-up: {insights.engagement?.casesWithFollowUp ?? 0}</li>
+                <li>Follow-up response rate: {insights.engagement?.followupResponseRate ?? 0}%</li>
+                <li>Solved: {insights.engagement?.casesSolved ?? 0}</li>
+                <li>Improved: {insights.engagement?.casesImproved ?? 0}</li>
+                <li>Unresolved: {insights.engagement?.unresolved ?? 0}</li>
+                <li>Photo usage: {insights.engagement?.photoUsage ?? 0}</li>
+                <li>Voice usage: {insights.engagement?.voiceUsage ?? 0}</li>
+              </ul>
+              <p className="mt-3 text-xs font-medium text-muted">Follow-up status</p>
+              <Bars rows={insights.engagement?.followupByStatus ?? []} />
+            </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
               <h2 className="font-semibold">Cases</h2>
               <p className="mt-1 text-xs text-muted">
                 Aggregate list — no farmer names or emails.
@@ -508,6 +630,9 @@ export function AdminInsightsView() {
                   </li>
                 ))}
               </ul>
+              {(insights.cases ?? []).length === 0 ? (
+                <p className="mt-2 text-sm text-muted">No data</p>
+              ) : null}
             </section>
           </div>
         </div>

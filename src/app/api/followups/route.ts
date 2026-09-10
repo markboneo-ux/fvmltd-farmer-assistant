@@ -3,11 +3,19 @@ import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import {
   assertCaseOwned,
   CasePersistenceError,
+  casesForOwner,
+  getCropCase,
   listFollowups,
   optOutFollowups,
   recordFollowupOutcome,
+  updateCaseFromConversation,
 } from "@/lib/cases/store";
-import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT, parseFollowUpOutcome } from "@/lib/cases/followups";
+import {
+  FOLLOWUP_OPTIONS,
+  followUpPromptForCase,
+  FOLLOWUP_PROMPT,
+  parseFollowUpOutcome,
+} from "@/lib/cases/followups";
 import { logOps } from "@/lib/security/ops-log";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import { FARMER_GENERIC_ERROR } from "@/lib/beta/limits";
@@ -17,11 +25,38 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const identity = await resolveIdentityFromRequest();
-  const caseId = new URL(request.url).searchParams.get("caseId");
-  if (!caseId) {
-    return NextResponse.json({ prompt: FOLLOWUP_PROMPT, options: FOLLOWUP_OPTIONS, followups: [] });
-  }
+  const url = new URL(request.url);
+  const caseId = url.searchParams.get("caseId");
+  const dueOnly = url.searchParams.get("due") === "1";
+
   try {
+    if (!caseId) {
+      const owned = await casesForOwner({
+        userId: identity.authUserId,
+        anonymousSessionId: identity.guestSessionId,
+      });
+      const ownedIds = new Set(owned.map((item) => item.id));
+      const all = await listFollowups();
+      const now = Date.now();
+      const due = all.filter(
+        (row) =>
+          ownedIds.has(row.caseId) &&
+          !row.outcome &&
+          !row.optedOut &&
+          new Date(row.followUpDate).getTime() <= now,
+      );
+      const first = due[0] ?? null;
+      const record = first ? await getCropCase(first.caseId) : null;
+      return NextResponse.json({
+        prompt: record ? followUpPromptForCase(record) : FOLLOWUP_PROMPT,
+        options: FOLLOWUP_OPTIONS,
+        followups: dueOnly ? (first ? [first] : []) : due,
+        due: first,
+        channels: ["in_app"],
+        plannedChannels: ["notification", "email", "whatsapp", "sms"],
+      });
+    }
+
     const owned = await assertCaseOwned(caseId, {
       userId: identity.authUserId,
       anonymousSessionId: identity.guestSessionId,
@@ -30,9 +65,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Case not found." }, { status: 404 });
     }
     return NextResponse.json({
-      prompt: FOLLOWUP_PROMPT,
+      prompt: followUpPromptForCase(owned),
       options: FOLLOWUP_OPTIONS,
       followups: await listFollowups(caseId),
+      channels: ["in_app"],
+      plannedChannels: ["notification", "email", "whatsapp", "sms"],
     });
   } catch (error) {
     if (error instanceof CasePersistenceError) {
@@ -80,7 +117,22 @@ export async function POST(request: Request) {
     if (!saved) {
       return NextResponse.json({ error: "Follow-up not found." }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, followup: saved });
+
+    if (saved.caseId && (outcome === "worse" || outcome === "problem_solved")) {
+      const current = await getCropCase(saved.caseId);
+      if (current) {
+        await updateCaseFromConversation(saved.caseId, current.farmerProblemText, {
+          caseStatus: outcome === "worse" ? "in_progress" : "resolved",
+        });
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      followup: saved,
+      reopen: outcome === "worse",
+      askWhatChanged: outcome === "improved",
+    });
   } catch (error) {
     if (error instanceof CasePersistenceError) {
       logOps("database_failure", { route: "followups" });
