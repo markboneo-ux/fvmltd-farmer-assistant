@@ -422,9 +422,14 @@ describe("controlled beta — farmer journey and safety", () => {
 
   it("28. /admin/insights is staff-protected", () => {
     const page = readFileSync(join(process.cwd(), "src/app/admin/insights/page.tsx"), "utf8");
+    const layout = readFileSync(
+      join(process.cwd(), "src/components/admin/AdminInsightsLayout.tsx"),
+      "utf8",
+    );
     const api = readFileSync(join(process.cwd(), "src/app/api/admin/insights/route.ts"), "utf8");
     const middleware = readFileSync(join(process.cwd(), "src/middleware.ts"), "utf8");
-    expect(page).toMatch(/getStaffSession/);
+    expect(page).toMatch(/AdminInsightsLayout/);
+    expect(layout).toMatch(/getStaffSession/);
     expect(api).toMatch(/requireStaffApi/);
     expect(middleware).toMatch(/\/admin/);
   });

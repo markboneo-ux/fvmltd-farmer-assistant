@@ -1,7 +1,7 @@
 import "server-only";
 
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
-import { resolveCasePersistenceMode } from "@/lib/cases/persistence";
+import { isTestRuntime, resolveCasePersistenceMode } from "@/lib/cases/persistence";
 import { getEntitlement, grantEntitlement, type EntitlementRecord } from "@/lib/beta/entitlements";
 import { linkGuestCasesToUser } from "@/lib/cases/store";
 import { logOps } from "@/lib/security/ops-log";
@@ -263,6 +263,7 @@ export async function linkGuestSessionToUser(
 }
 
 export async function persistEntitlementRecord(record: EntitlementRecord): Promise<void> {
+  if (isTestRuntime()) return;
   if (resolveCasePersistenceMode() !== "supabase") return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
@@ -293,6 +294,7 @@ export async function hydrateEntitlementsFromDb(options: {
   authUserId?: string | null;
   guestSessionId?: string | null;
 }): Promise<void> {
+  if (isTestRuntime()) return;
   if (resolveCasePersistenceMode() !== "supabase") return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
@@ -365,6 +367,7 @@ export async function maybeStoreFarmerContextHints(options: {
   crops?: string[];
   farmSizeText?: string | null;
 }): Promise<void> {
+  if (isTestRuntime()) return;
   if (!options.authUserId && !options.farmerProfileId) return;
   const current = options.authUserId
     ? await loadFarmerAccountProfile(options.authUserId)

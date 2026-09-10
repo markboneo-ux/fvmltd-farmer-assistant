@@ -1,7 +1,7 @@
 import "server-only";
 
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
-import { resolveCasePersistenceMode } from "@/lib/cases/persistence";
+import { isTestRuntime, resolveCasePersistenceMode } from "@/lib/cases/persistence";
 import {
   redeemPromoCode,
   validatePromoCode,
@@ -16,6 +16,7 @@ export async function redeemPromoCodeSecure(
   const local = validatePromoCode(code, { ownerKey });
   if (!local.ok) return local;
 
+  if (isTestRuntime()) return local;
   if (resolveCasePersistenceMode() === "supabase") {
     const admin = tryCreateAdminClient();
     if (admin.ok) {

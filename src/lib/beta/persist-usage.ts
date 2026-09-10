@@ -1,11 +1,12 @@
 import "server-only";
 
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
-import { resolveCasePersistenceMode } from "@/lib/cases/persistence";
+import { isTestRuntime, resolveCasePersistenceMode } from "@/lib/cases/persistence";
 import type { UsageEvent } from "./usage-store";
 import { logOps } from "@/lib/security/ops-log";
 
 export async function persistUsageEvent(event: UsageEvent): Promise<void> {
+  if (isTestRuntime()) return;
   if (resolveCasePersistenceMode() !== "supabase") return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
@@ -27,6 +28,7 @@ export async function countPersistedUsage(owner: {
   guestSessionId?: string | null;
   authUserId?: string | null;
 }): Promise<{ messages: number; cases: number; imageAnalyses: number } | null> {
+  if (isTestRuntime()) return null;
   if (resolveCasePersistenceMode() !== "supabase") return null;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return null;
