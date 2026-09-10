@@ -730,7 +730,7 @@ export function FarmerCaseChat({
                 </button>
               ) : null}
               <Link
-                href={accountIdentity?.signedIn ? "/account" : "/signin"}
+                href={accountIdentity?.signedIn ? "/account/profile" : "/signin"}
                 className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
                 onClick={() => setMenuOpen(false)}
               >

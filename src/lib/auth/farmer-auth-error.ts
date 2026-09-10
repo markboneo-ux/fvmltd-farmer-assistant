@@ -5,7 +5,9 @@
 const ALREADY_REGISTERED =
   /already\s+registered|user already exists|email address is already|already been registered/i;
 const INVALID_CREDENTIALS = /invalid login|invalid credentials|invalid email or password/i;
-const EXPIRED_OTP = /expired|otp_expired|token has expired/i;
+/** GoTrue uses this same string for wrong type, used token, and true expiry. */
+const OTP_EXPIRED_OR_INVALID = /token has expired or is invalid/i;
+const EXPIRED_OTP = /otp_expired|token has expired|otp expired/i;
 const INVALID_OTP = /invalid.*(otp|token|code)|token not found|otp_disabled/i;
 const NOT_CONFIRMED = /email not confirmed|not confirmed/i;
 const RATE_LIMITED = /rate limit|too many requests|over_email_send_rate_limit/i;
@@ -32,6 +34,7 @@ export function farmerAuthError(
       ? error
       : `${error?.code ?? ""} ${error?.message ?? ""}`.trim();
   const status = typeof error === "object" && error ? error.status : null;
+  const errorCode = typeof error === "object" && error ? error.code : null;
 
   if (status === 429 || RATE_LIMITED.test(raw)) {
     return {
@@ -45,13 +48,20 @@ export function farmerAuthError(
       message: "An account with this email already exists. Try logging in.",
     };
   }
+  if (OTP_EXPIRED_OR_INVALID.test(raw) || errorCode === "otp_expired") {
+    return {
+      code: "incorrect_code",
+      message:
+        "That code is not valid. Use the latest 6-digit code we sent, or request a new one.",
+    };
+  }
   if (EXPIRED_OTP.test(raw)) {
     return {
       code: "expired_code",
       message: "That code has expired. Request a new one.",
     };
   }
-  if (INVALID_OTP.test(raw) || /otp_expired|otp_disabled/.test(raw)) {
+  if (INVALID_OTP.test(raw) || /otp_disabled/.test(raw)) {
     return {
       code: "incorrect_code",
       message: "That code is not correct. Check it and try again.",

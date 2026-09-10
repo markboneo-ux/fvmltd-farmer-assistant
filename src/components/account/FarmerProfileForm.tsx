@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { AccountShell } from "@/components/account/AccountShell";
 
 type Profile = {
@@ -24,26 +25,66 @@ const FARMER_TYPES = [
   { id: "extension_officer", label: "Extension officer" },
 ];
 
+function blankProfile(email: string | null = null): Profile {
+  return {
+    fullName: "",
+    email,
+    country: null,
+    district: null,
+    farmerType: null,
+    primaryCrops: [],
+    farmSize: null,
+    farmSizeUnit: "acres",
+    avatarUrl: null,
+  };
+}
+
 export function FarmerProfileForm({ countries }: { countries: string[] }) {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [cropsText, setCropsText] = useState("");
+  const [countryOptions, setCountryOptions] = useState(countries);
 
-  useEffect(() => {
-    void (async () => {
+  const loadProfile = useCallback(async () => {
+    setStatus("loading");
+    setMessage(null);
+    try {
       const response = await fetch("/api/account/profile");
-      const payload = (await response.json()) as { profile?: Profile; error?: string };
-      if (!response.ok) {
+      const payload = (await response.json()) as {
+        profile?: Profile | null;
+        countries?: string[];
+        error?: string;
+        email?: string | null;
+      };
+      if (response.status === 401) {
+        setProfile(null);
+        setStatus("error");
         setMessage(payload.error || "Log in to view your profile.");
         return;
       }
-      if (payload.profile) {
-        setProfile(payload.profile);
-        setCropsText(payload.profile.primaryCrops.join(", "));
+      if (!response.ok || !payload.profile) {
+        setProfile(blankProfile(payload.email ?? null));
+        setCropsText("");
+        setStatus("error");
+        setMessage(payload.error || "I couldn’t load your profile. Please try again.");
+        return;
       }
-    })();
+      if (payload.countries?.length) setCountryOptions(payload.countries);
+      setProfile(payload.profile);
+      setCropsText(payload.profile.primaryCrops.join(", "));
+      setStatus("ready");
+    } catch {
+      setProfile(blankProfile());
+      setStatus("error");
+      setMessage("I couldn’t load your profile. Please try again.");
+    }
   }, []);
+
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -69,7 +110,10 @@ export function FarmerProfileForm({ countries }: { countries: string[] }) {
         setMessage(payload.error || "I couldn’t save your profile. Please try again.");
         return;
       }
-      if (payload.profile) setProfile(payload.profile);
+      if (payload.profile) {
+        setProfile(payload.profile);
+        setStatus("ready");
+      }
       setMessage("Saved.");
     } catch {
       setMessage("I couldn’t complete that right now. Please try again.");
@@ -90,7 +134,10 @@ export function FarmerProfileForm({ countries }: { countries: string[] }) {
         setMessage(payload.error || "I couldn’t save that photo.");
         return;
       }
-      if (payload.profile) setProfile(payload.profile);
+      if (payload.profile) {
+        setProfile(payload.profile);
+        setStatus("ready");
+      }
       setMessage("Profile picture updated.");
     } catch {
       setMessage("I couldn’t complete that right now. Please try again.");
@@ -99,16 +146,61 @@ export function FarmerProfileForm({ countries }: { countries: string[] }) {
     }
   }
 
+  if (status === "loading") {
+    return (
+      <AccountShell title="My Profile">
+        <p className="text-sm text-muted">Loading profile…</p>
+      </AccountShell>
+    );
+  }
+
+  if (status === "error" && !profile) {
+    return (
+      <AccountShell title="My Profile">
+        <p className="text-sm text-ink" role="alert">
+          {message || "Log in to view your profile."}
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link
+            href="/signin?mode=login"
+            className="inline-flex min-h-11 items-center rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+          >
+            Log in
+          </Link>
+          <button
+            type="button"
+            onClick={() => void loadProfile()}
+            className="inline-flex min-h-11 items-center rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+          >
+            Try again
+          </button>
+        </div>
+      </AccountShell>
+    );
+  }
+
   if (!profile) {
     return (
       <AccountShell title="My Profile">
-        <p className="text-sm text-muted">{message || "Loading…"}</p>
+        <p className="text-sm text-ink">Your profile is empty. Add a few details when you are ready.</p>
       </AccountShell>
     );
   }
 
   return (
     <AccountShell title="My Profile">
+      {status === "error" ? (
+        <div className="mb-4 rounded-xl bg-sky px-3 py-3 text-sm text-ink">
+          <p>{message || "I couldn’t load a saved profile yet. You can still fill this in."}</p>
+          <button
+            type="button"
+            onClick={() => void loadProfile()}
+            className="mt-2 text-sm font-medium text-canopy underline underline-offset-2"
+          >
+            Try loading again
+          </button>
+        </div>
+      ) : null}
       <form className="space-y-4" onSubmit={save}>
         <div className="flex items-center gap-3">
           <div className="h-16 w-16 overflow-hidden rounded-full bg-sky ring-1 ring-line">
@@ -117,7 +209,7 @@ export function FarmerProfileForm({ countries }: { countries: string[] }) {
               <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-canopy">
-                {(profile.fullName || "F").slice(0, 2).toUpperCase()}
+                {(profile.fullName || profile.email || "F").slice(0, 2).toUpperCase()}
               </div>
             )}
           </div>
@@ -158,7 +250,7 @@ export function FarmerProfileForm({ countries }: { countries: string[] }) {
             className="mt-1 min-h-12 w-full rounded-xl bg-surface px-3 ring-1 ring-line"
           >
             <option value="">Not set yet</option>
-            {countries.map((country) => (
+            {countryOptions.map((country) => (
               <option key={country} value={country}>
                 {country}
               </option>
@@ -230,7 +322,7 @@ export function FarmerProfileForm({ countries }: { countries: string[] }) {
         >
           Save
         </button>
-        {message ? <p className="text-sm text-ink">{message}</p> : null}
+        {status === "ready" && message ? <p className="text-sm text-ink">{message}</p> : null}
         <p className="text-xs text-muted">
           None of these are required. Add them when they help us give better advice.
         </p>

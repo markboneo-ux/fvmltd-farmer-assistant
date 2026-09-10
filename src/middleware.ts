@@ -6,6 +6,7 @@ import {
   guestCookieOptions,
   normalizeGuestSessionId,
 } from "@/lib/beta/identity";
+import { isStaffLoginPath, staffLoginPathFor } from "@/lib/staff/login-path";
 
 function withGuestCookie(request: NextRequest, response: NextResponse) {
   const existing = normalizeGuestSessionId(
@@ -23,7 +24,7 @@ function withGuestCookie(request: NextRequest, response: NextResponse) {
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isStaffLogin = pathname === "/staff/login";
+  const isStaffLogin = isStaffLoginPath(pathname);
   const isProtectedPage =
     pathname === "/staff" ||
     pathname.startsWith("/staff/") ||
@@ -54,7 +55,7 @@ export async function middleware(request: NextRequest) {
       );
     }
     const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = "/staff/login";
+    loginUrl.pathname = staffLoginPathFor(pathname);
     loginUrl.searchParams.set("error", "config");
     return NextResponse.redirect(loginUrl);
   }
@@ -94,7 +95,7 @@ export async function middleware(request: NextRequest) {
       );
     }
     const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = "/staff/login";
+    loginUrl.pathname = staffLoginPathFor(pathname);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }

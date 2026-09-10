@@ -7,6 +7,7 @@ import {
   isCompleteOtpCode,
   normalizeOtpCode,
 } from "@/lib/auth/farmer-auth-error";
+import { farmerSignupOtpVerifyParams, normalizeFarmerEmail } from "@/lib/auth/farmer-otp";
 import {
   checkCombinedRateLimit,
   clientIp,
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
   let token = "";
   try {
     const body = (await request.json()) as { email?: unknown; token?: unknown; code?: unknown };
-    email = typeof body.email === "string" ? body.email.trim() : "";
+    email = typeof body.email === "string" ? normalizeFarmerEmail(body.email) : "";
     token = normalizeOtpCode(
       typeof body.token === "string"
         ? body.token
@@ -55,18 +56,7 @@ export async function POST(request: Request) {
 
   try {
     const supabase = await createClient();
-    let verified = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: "signup",
-    });
-    if (verified.error) {
-      verified = await supabase.auth.verifyOtp({
-        email,
-        token,
-        type: "email",
-      });
-    }
+    const verified = await supabase.auth.verifyOtp(farmerSignupOtpVerifyParams(email, token));
     if (verified.error || !verified.data.user) {
       logOps("auth_failure", { error: verified.error?.message ?? "otp failed" });
       const mapped = farmerAuthError(verified.error);

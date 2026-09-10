@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import { completeFarmerAuthentication } from "@/lib/auth/complete-farmer-auth";
 import { farmerAuthError } from "@/lib/auth/farmer-auth-error";
+import { normalizeFarmerEmail } from "@/lib/auth/farmer-otp";
 import {
   checkCombinedRateLimit,
   clientIp,
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
   let password = "";
   try {
     const body = (await request.json()) as { email?: unknown; password?: unknown };
-    email = typeof body.email === "string" ? body.email.trim() : "";
+    email = typeof body.email === "string" ? normalizeFarmerEmail(body.email) : "";
     password = typeof body.password === "string" ? body.password : "";
   } catch {
     return NextResponse.json({ error: "Enter your email and password." }, { status: 400 });

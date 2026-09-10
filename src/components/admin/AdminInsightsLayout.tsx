@@ -14,7 +14,7 @@ export async function AdminInsightsLayout(options: {
 }) {
   const session = await getStaffSession();
   if (!session.ok) {
-    redirect(`/staff/login?next=${encodeURIComponent(options.current)}`);
+    redirect(`/admin/login?next=${encodeURIComponent(options.current)}`);
   }
   return (
     <StaffShell

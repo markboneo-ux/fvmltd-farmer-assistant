@@ -5,6 +5,7 @@ import { isTestRuntime, resolveCasePersistenceMode } from "@/lib/cases/persisten
 import { getEntitlement, grantEntitlement, type EntitlementRecord } from "@/lib/beta/entitlements";
 import { linkGuestCasesToUser } from "@/lib/cases/store";
 import { logOps } from "@/lib/security/ops-log";
+import { newFarmerCode } from "@/lib/auth/farmer-otp";
 
 const FARMER_TYPES = [
   "home_gardener",
@@ -104,13 +105,20 @@ export async function ensureFarmerProfileForUser(options: {
   const admin = tryCreateAdminClient();
   if (!admin.ok) return null;
 
-  const { data: existing } = await admin.client
+  const { data: existing, error: loadError } = await admin.client
     .from("farmer_profiles")
     .select(
       "id, auth_user_id, full_name, email, country, region, district, farmer_type, primary_crops, farm_size, farm_size_unit, avatar_storage_path",
     )
     .eq("auth_user_id", options.authUserId)
     .maybeSingle();
+
+  if (loadError) {
+    logOps("database_failure", {
+      route: "farmer-profile-load",
+      error: loadError.message,
+    });
+  }
 
   if (existing) {
     const row = existing as Record<string, unknown>;
@@ -128,6 +136,7 @@ export async function ensureFarmerProfileForUser(options: {
   const fullName = asTrimmed(options.fullName) || displayNameFromEmail(options.email);
   const insert = {
     auth_user_id: options.authUserId,
+    farmer_code: newFarmerCode(),
     full_name: fullName,
     email: options.email ?? null,
     country: null,
@@ -135,6 +144,7 @@ export async function ensureFarmerProfileForUser(options: {
     primary_crops: [] as string[],
     consent_store_data: true,
     consent_at: new Date().toISOString(),
+    is_active: true,
   };
 
   const { data, error } = await admin.client
@@ -146,6 +156,16 @@ export async function ensureFarmerProfileForUser(options: {
     .maybeSingle();
 
   if (error || !data) {
+    const { data: raced } = await admin.client
+      .from("farmer_profiles")
+      .select(
+        "id, auth_user_id, full_name, email, country, region, district, farmer_type, primary_crops, farm_size, farm_size_unit, avatar_storage_path",
+      )
+      .eq("auth_user_id", options.authUserId)
+      .maybeSingle();
+    if (raced) {
+      return mapProfile(raced as Record<string, unknown>, await signedAvatarUrl(asTrimmed((raced as Record<string, unknown>).avatar_storage_path)));
+    }
     logOps("database_failure", { route: "farmer-profile-create", error: error?.message ?? "insert failed" });
     return null;
   }
@@ -184,7 +204,8 @@ export async function updateFarmerAccountProfile(
 ): Promise<FarmerAccountProfile | null> {
   const current = await loadFarmerAccountProfile(authUserId);
   if (!current) {
-    await ensureFarmerProfileForUser({ authUserId });
+    const created = await ensureFarmerProfileForUser({ authUserId });
+    if (!created) return null;
   }
   const admin = tryCreateAdminClient();
   if (!admin.ok) return null;

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { staffLoginPathFor } from "@/lib/staff/login-path";
 
 export function StaffSignOutButton() {
   const router = useRouter();
@@ -9,7 +10,11 @@ export function StaffSignOutButton() {
   async function signOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.replace("/staff/login");
+    const nextLogin =
+      typeof window !== "undefined"
+        ? staffLoginPathFor(window.location.pathname)
+        : "/staff/login";
+    router.replace(nextLogin);
     router.refresh();
   }
 

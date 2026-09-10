@@ -69,8 +69,10 @@ export function SignInForm() {
         return;
       }
       if (payload.needsEmailConfirm) {
+        setCode(["", "", "", "", "", ""]);
         setMode("otp");
         setMessage(null);
+        queueMicrotask(() => otpRefs.current[0]?.focus());
         return;
       }
       router.push("/");
@@ -152,7 +154,9 @@ export function SignInForm() {
         setMessage(payload.error || "Please wait a moment before requesting another code.");
         return;
       }
-      setMessage(payload.message || "We sent a new code.");
+      setCode(["", "", "", "", "", ""]);
+      setMessage(payload.message || "We sent a new code. Enter that latest code.");
+      queueMicrotask(() => otpRefs.current[0]?.focus());
     } catch {
       setMessage("I couldn’t complete that right now. Please try again.");
     } finally {

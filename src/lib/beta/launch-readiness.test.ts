@@ -25,7 +25,10 @@ describe("farmer auth errors", () => {
   });
 
   it("maps incorrect and expired OTP codes", () => {
-    expect(farmerAuthError({ message: "Token has expired or is invalid" }).code).toBe("expired_code");
+    expect(farmerAuthError({ message: "Token has expired or is invalid", code: "otp_expired" }).code).toBe(
+      "incorrect_code",
+    );
+    expect(farmerAuthError({ message: "Token has expired or is invalid" }).message).toMatch(/latest 6-digit code/i);
     expect(farmerAuthError({ message: "Invalid OTP token" }).code).toBe("incorrect_code");
   });
 
@@ -183,5 +186,21 @@ describe("staff vs farmer authorization", () => {
         "farmer-user",
       ),
     ).toBeNull();
+  });
+
+  it("accepts an active staff row linked by auth_user_id", () => {
+    expect(
+      mapStaffUser(
+        {
+          id: "staff-1",
+          auth_user_id: "staff-user",
+          full_name: "Ada",
+          email: "ada@fvmltd.example",
+          role: "agronomist",
+          is_active: true,
+        },
+        "staff-user",
+      )?.authUserId,
+    ).toBe("staff-user");
   });
 });

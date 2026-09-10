@@ -85,7 +85,7 @@ export function FarmerAccountMenu({
               <p className="truncate px-3 py-2 text-xs text-muted">
                 Signed in{identity?.email ? ` as ${identity.email}` : ""}
               </p>
-              <MenuLink href="/account" onClick={onClose}>
+              <MenuLink href="/account/profile" onClick={onClose}>
                 My Profile
               </MenuLink>
               <MenuLink href="/account/cases" onClick={onClose}>

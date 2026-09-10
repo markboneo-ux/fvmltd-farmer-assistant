@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import {
-  loadFarmerAccountProfile,
+  ensureFarmerProfileForUser,
   updateFarmerAccountProfile,
   type FarmerType,
 } from "@/lib/auth/complete-farmer-auth";
@@ -24,7 +24,19 @@ export async function GET() {
   if (!identity.authUserId) {
     return NextResponse.json({ error: "Log in to view your profile." }, { status: 401 });
   }
-  const profile = await loadFarmerAccountProfile(identity.authUserId);
+  const profile = await ensureFarmerProfileForUser({
+    authUserId: identity.authUserId,
+    email: identity.email,
+  });
+  if (!profile) {
+    return NextResponse.json(
+      {
+        error: farmerFacingError("I couldn’t load your profile. Please try again."),
+        email: identity.email,
+      },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     profile,
     countries: COUNTRY_OPTIONS,

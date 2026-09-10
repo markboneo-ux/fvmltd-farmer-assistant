@@ -69,15 +69,15 @@ export async function getStaffSession(): Promise<
     return { ok: false, status: 503, error: admin.error };
   }
 
-  const { data, error } = await admin.client
+  const { data: byAuth, error: byAuthError } = await admin.client
     .from("staff_profiles")
     .select("id, auth_user_id, full_name, email, role, is_active")
     .eq("is_active", true)
-    .or(`auth_user_id.eq.${authUserId},id.eq.${authUserId}`)
+    .eq("auth_user_id", authUserId)
     .maybeSingle();
 
-  if (error) {
-    console.error("Staff session lookup failed:", error);
+  if (byAuthError) {
+    console.error("Staff session lookup failed:", byAuthError);
     return {
       ok: false,
       status: 503,
@@ -85,7 +85,28 @@ export async function getStaffSession(): Promise<
     };
   }
 
-  const staff = data ? mapStaffUser(data, authUserId) : null;
+  const byAuthStaff = byAuth ? mapStaffUser(byAuth, authUserId) : null;
+  if (byAuthStaff) {
+    return { ok: true, staff: byAuthStaff };
+  }
+
+  const { data: byId, error: byIdError } = await admin.client
+    .from("staff_profiles")
+    .select("id, auth_user_id, full_name, email, role, is_active")
+    .eq("is_active", true)
+    .eq("id", authUserId)
+    .maybeSingle();
+
+  if (byIdError) {
+    console.error("Staff session lookup failed:", byIdError);
+    return {
+      ok: false,
+      status: 503,
+      error: "Could not verify staff access.",
+    };
+  }
+
+  const staff = byId ? mapStaffUser(byId, authUserId) : null;
   if (!staff) {
     return {
       ok: false,

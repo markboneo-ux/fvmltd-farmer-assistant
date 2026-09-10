@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import { farmerAuthError } from "@/lib/auth/farmer-auth-error";
+import { farmerSignupOtpResendParams, normalizeFarmerEmail } from "@/lib/auth/farmer-otp";
 import {
   checkCombinedRateLimit,
   clientIp,
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
   let email = "";
   try {
     const body = (await request.json()) as { email?: unknown };
-    email = typeof body.email === "string" ? body.email.trim() : "";
+    email = typeof body.email === "string" ? normalizeFarmerEmail(body.email) : "";
   } catch {
     return NextResponse.json({ error: "Enter your email." }, { status: 400 });
   }
@@ -43,10 +44,7 @@ export async function POST(request: Request) {
 
   try {
     const supabase = await createClient();
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-    });
+    const { error } = await supabase.auth.resend(farmerSignupOtpResendParams(email));
     if (error) {
       logOps("auth_failure", { error: error.message });
       const mapped = farmerAuthError(error);
