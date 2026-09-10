@@ -35,8 +35,8 @@ import {
 } from "@/lib/cases/store";
 import {
   FARMER_GENERIC_ERROR,
+  FREE_LIMIT_HEADING,
   GUEST_LIMIT_MESSAGE,
-  REGISTERED_LIMIT_HEADING,
 } from "@/lib/beta/limits";
 import { recordUsageEvent } from "@/lib/beta/usage-store";
 import { persistPrivateCaseImages } from "@/lib/cases/photo-persist";
@@ -336,13 +336,15 @@ export async function POST(request: Request) {
       history = persistedHistory;
     }
 
-    const imageGate =
+    const nextUsage =
       images.length > 0
-        ? await evaluateConversationGate({ identity, next: "image_analysis" })
-        : await evaluateConversationGate({
-            identity,
-            next: incomingCaseId ? "message" : "case",
-          });
+        ? "image_analysis"
+        : incomingInputMode === "voice"
+          ? "voice"
+          : incomingCaseId
+            ? "message"
+            : "case";
+    const imageGate = await evaluateConversationGate({ identity, next: nextUsage });
     if (!imageGate.ok && !imageGate.allowFinishActiveCase) {
       recordUsageEvent({
         guestSessionId: identity.guestSessionId,
@@ -357,7 +359,10 @@ export async function POST(request: Request) {
           responseId: null,
           requestCompleted: false,
           error:
-            identity.access === "guest" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
+            imageGate.reason === "guest_limit" || imageGate.reason === "registered_free_limit"
+              ? FREE_LIMIT_HEADING
+              : GUEST_LIMIT_MESSAGE,
+          limitHeading: FREE_LIMIT_HEADING,
           usage: imageGate.used,
           remaining: imageGate.remaining,
           access: identity.access,

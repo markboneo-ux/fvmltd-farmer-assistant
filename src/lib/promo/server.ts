@@ -3,7 +3,7 @@
  * The beta code is never treated as a client-side secret.
  */
 
-export type PromoEntitlement = "promo" | "trial" | "paid";
+export type PromoEntitlement = "fvm_beta" | "promo" | "trial" | "paid";
 
 export type PromoCodeRecord = {
   id: string;
@@ -14,12 +14,26 @@ export type PromoCodeRecord = {
   maximumUses: number | null;
   currentUses: number;
   entitlementGranted: PromoEntitlement;
+  messagesAllowance: number | null;
+  casesAllowance: number | null;
+  imageAnalysesAllowance: number | null;
+  voiceMessagesAllowance: number | null;
   createdAt: string;
   createdBy: string | null;
 };
 
 export type PromoRedeemResult =
-  | { ok: true; entitlement: PromoEntitlement; code: string }
+  | {
+      ok: true;
+      entitlement: "fvm_beta" | "paid";
+      code: string;
+      allowances: {
+        messages: number | null;
+        cases: number | null;
+        imageAnalyses: number | null;
+        voiceMessages: number | null;
+      };
+    }
   | {
       ok: false;
       reason:
@@ -29,6 +43,7 @@ export type PromoRedeemResult =
         | "expired"
         | "max_uses"
         | "already_redeemed"
+        | "login_required"
         | "rate_limited";
       error: string;
     };
@@ -40,6 +55,10 @@ const redemptions = new Map<string, Set<string>>();
 
 function normalizeCode(code: string): string {
   return code.trim().toUpperCase();
+}
+
+function normalizeEntitlement(value: PromoEntitlement): "fvm_beta" | "paid" {
+  return value === "paid" ? "paid" : "fvm_beta";
 }
 
 export function resetPromoStore() {
@@ -59,7 +78,11 @@ export function seedControlledBetaPromo(now = new Date()) {
     expiryDate: "2027-12-31T23:59:59.000Z",
     maximumUses: 500,
     currentUses: 0,
-    entitlementGranted: "promo",
+    entitlementGranted: "fvm_beta",
+    messagesAllowance: 500,
+    casesAllowance: 50,
+    imageAnalysesAllowance: 100,
+    voiceMessagesAllowance: 100,
     createdAt: now.toISOString(),
     createdBy: "fvmltd",
   };
@@ -112,7 +135,17 @@ export function validatePromoCode(
     return { ok: false, reason: "already_redeemed", error: "You have already used this promotional code." };
   }
 
-  return { ok: true, entitlement: record.entitlementGranted, code: normalized };
+  return {
+    ok: true,
+    entitlement: normalizeEntitlement(record.entitlementGranted),
+    code: normalized,
+    allowances: {
+      messages: record.messagesAllowance,
+      cases: record.casesAllowance,
+      imageAnalyses: record.imageAnalysesAllowance,
+      voiceMessages: record.voiceMessagesAllowance,
+    },
+  };
 }
 
 export function redeemPromoCode(
@@ -141,3 +174,6 @@ export function listPromoCodes(): PromoCodeRecord[] {
 }
 
 export const CONTROLLED_BETA_PROMO_CODE = CONTROLLED_BETA_CODE;
+
+export const PROMO_LOGIN_REQUIRED =
+  "Log in or create an account first, then enter your access code.";

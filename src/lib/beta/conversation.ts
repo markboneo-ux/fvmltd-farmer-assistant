@@ -32,7 +32,8 @@ import type { CropCaseRecord } from "@/lib/cases/types";
 import { logOps } from "@/lib/security/ops-log";
 import { logStageFailure } from "@/lib/errors/correlation";
 import type { AppIdentity } from "./identity";
-import { evaluateUsage, type UsageDecision } from "./limits";
+import { evaluateUsage, getUsageLimits, type UsageDecision, type UsageKind } from "./limits";
+import { loadUsageLimitOverlay } from "./app-settings";
 import { countUsage, recordUsageEvent } from "./usage-store";
 
 export type ConversationGate = UsageDecision & {
@@ -41,7 +42,7 @@ export type ConversationGate = UsageDecision & {
 
 export async function evaluateConversationGate(options: {
   identity: AppIdentity;
-  next: "message" | "case" | "image_analysis";
+  next: UsageKind;
 }): Promise<ConversationGate> {
   const used = countUsage({
     guestSessionId: options.identity.guestSessionId,
@@ -51,11 +52,13 @@ export async function evaluateConversationGate(options: {
     userId: options.identity.authUserId,
     anonymousSessionId: options.identity.guestSessionId,
   });
+  const overlay = await loadUsageLimitOverlay();
   const decision = evaluateUsage({
     access: options.identity.access,
     used,
     next: options.next,
     activeCaseInProgress,
+    limits: getUsageLimits(overlay),
   });
   return { ...decision, used };
 }
@@ -223,6 +226,14 @@ export async function persistConversationTurn(options: {
       guestSessionId: identity.guestSessionId,
       authUserId: identity.authUserId,
       kind: "image_analysis",
+      caseId: record.id,
+    });
+  }
+  if (options.inputMode === "voice") {
+    recordUsageEvent({
+      guestSessionId: identity.guestSessionId,
+      authUserId: identity.authUserId,
+      kind: "voice",
       caseId: record.id,
     });
   }

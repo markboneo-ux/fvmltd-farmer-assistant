@@ -16,6 +16,7 @@ import {
   FOLLOWUP_PROMPT,
   parseFollowUpOutcome,
 } from "@/lib/cases/followups";
+import { listFarmerFollowups } from "@/lib/beta/account";
 import { logOps } from "@/lib/security/ops-log";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import { FARMER_GENERIC_ERROR } from "@/lib/beta/limits";
@@ -28,9 +29,19 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const caseId = url.searchParams.get("caseId");
   const dueOnly = url.searchParams.get("due") === "1";
+  const listAll = url.searchParams.get("all") === "1";
 
   try {
     if (!caseId) {
+      if (listAll) {
+        if (identity.kind !== "registered" || !identity.authUserId) {
+          return NextResponse.json({ error: "Log in to see follow-ups." }, { status: 401 });
+        }
+        return NextResponse.json({
+          followups: await listFarmerFollowups(identity),
+          options: FOLLOWUP_OPTIONS,
+        });
+      }
       const owned = await casesForOwner({
         userId: identity.authUserId,
         anonymousSessionId: identity.guestSessionId,

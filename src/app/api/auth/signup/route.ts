@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
-import { grantEntitlement } from "@/lib/beta/entitlements";
-import { linkGuestCasesToUser } from "@/lib/cases/store";
-import { ownerKey } from "@/lib/beta/session";
+import { grantAndPersistEntitlement } from "@/lib/beta/entitlement-persist";
+import { claimGuestHistoryForUser } from "@/lib/beta/claim-guest";
 import { farmerFacingError } from "@/lib/beta/farmer-error";
 import {
   checkCombinedRateLimit,
@@ -13,6 +12,8 @@ import {
 } from "@/lib/security/rate-limit";
 import { logOps } from "@/lib/security/ops-log";
 import { absoluteAppUrl } from "@/lib/config/urls";
+import { getEntitlement } from "@/lib/beta/entitlements";
+import { canonicalAccess } from "@/lib/beta/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,15 +65,23 @@ export async function POST(request: Request) {
     }
 
     if (data.user) {
-      grantEntitlement(`user:${data.user.id}`, "free_registered", "signup");
-      await linkGuestCasesToUser(identity.guestSessionId, data.user.id);
+      const linked = await claimGuestHistoryForUser(identity.guestSessionId, data.user.id);
+      const existing = getEntitlement(`user:${data.user.id}`);
+      const tier = existing ? canonicalAccess(existing.access) : "GUEST";
+      if (tier === "GUEST") {
+        await grantAndPersistEntitlement(`user:${data.user.id}`, "free_registered", "signup");
+      }
+      return NextResponse.json({
+        ok: true,
+        needsEmailConfirm: !data.session,
+        linkedGuestCases: linked.casesLinked,
+      });
     }
-    grantEntitlement(ownerKey(identity), "free_registered", "signup");
 
     return NextResponse.json({
       ok: true,
       needsEmailConfirm: !data.session,
-      linkedGuestCases: Boolean(data.user),
+      linkedGuestCases: false,
     });
   } catch (error) {
     logOps("auth_failure", {

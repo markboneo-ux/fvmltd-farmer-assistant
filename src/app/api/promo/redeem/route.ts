@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import { ownerKey } from "@/lib/beta/session";
-import { grantEntitlement } from "@/lib/beta/entitlements";
+import { grantAndPersistEntitlement } from "@/lib/beta/entitlement-persist";
 import { recordUsageEvent } from "@/lib/beta/usage-store";
-import { redeemPromoCode } from "@/lib/promo/server";
+import { redeemPromoForOwner } from "@/lib/promo/persist";
+import { PROMO_LOGIN_REQUIRED } from "@/lib/promo/server";
+import { FVM_BETA_ACTIVATED } from "@/lib/beta/limits";
 import {
   checkCombinedRateLimit,
   clientIp,
@@ -32,6 +34,13 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!identity.authUserId) {
+    return NextResponse.json(
+      { ok: false, error: PROMO_LOGIN_REQUIRED, loginRequired: true },
+      { status: 401 },
+    );
+  }
+
   let code = "";
   try {
     const body = (await request.json()) as { code?: unknown };
@@ -47,7 +56,7 @@ export async function POST(request: Request) {
     caseId: null,
   });
 
-  const result = redeemPromoCode(code, ownerKey(identity));
+  const result = await redeemPromoForOwner(code, ownerKey(identity));
   if (!result.ok) {
     logOps("promo_failure", { reason: result.reason });
     return NextResponse.json(
@@ -56,7 +65,7 @@ export async function POST(request: Request) {
     );
   }
 
-  grantEntitlement(ownerKey(identity), result.entitlement, "promo");
+  await grantAndPersistEntitlement(ownerKey(identity), result.entitlement, "promo");
   recordUsageEvent({
     guestSessionId: identity.guestSessionId,
     authUserId: identity.authUserId,
@@ -68,6 +77,6 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     access: result.entitlement,
-    message: "Promotional access is now active.",
+    message: FVM_BETA_ACTIVATED,
   });
 }

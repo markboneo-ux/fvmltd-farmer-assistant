@@ -205,6 +205,12 @@ export function memoryLinkGuestCasesToUser(anonymousSessionId: string, userId: s
         photo.ownerUserId = userId;
       }
     }
+    const caseFollowups = followups.get(record.id) ?? [];
+    for (const follow of caseFollowups) {
+      if (follow.anonymousSessionId === anonymousSessionId && !follow.userId) {
+        follow.userId = userId;
+      }
+    }
   }
   return linked;
 }

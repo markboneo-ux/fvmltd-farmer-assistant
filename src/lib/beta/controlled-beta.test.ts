@@ -291,12 +291,16 @@ describe("controlled beta — farmer journey and safety", () => {
 
   it("16–18. email / Google / Apple auth paths exist as relative routes", () => {
     const signup = readFileSync(join(process.cwd(), "src/app/api/auth/signup/route.ts"), "utf8");
-    const signin = readFileSync(join(process.cwd(), "src/components/SignInForm.tsx"), "utf8");
+    const oauth = readFileSync(join(process.cwd(), "src/components/FarmerOAuthButtons.tsx"), "utf8");
+    const login = readFileSync(join(process.cwd(), "src/components/LoginForm.tsx"), "utf8");
     const callback = readFileSync(join(process.cwd(), "src/app/auth/callback/route.ts"), "utf8");
     expect(signup).toMatch(/signUp/);
-    expect(signin).toMatch(/Continue with Google/);
-    expect(signin).toMatch(/Continue with Apple/);
-    expect(signin).toMatch(/signInWithOAuth/);
+    expect(oauth).toMatch(/Continue with Google/);
+    expect(oauth).toMatch(/Continue with Apple/);
+    expect(oauth).toMatch(/signInWithOAuth/);
+    expect(login).toMatch(/Log in/);
+    expect(login).toMatch(/Forgot password/);
+    expect(login).toMatch(/Continue as Guest/);
     expect(callback).toMatch(/exchangeCodeForSession/);
     expect(callback).not.toMatch(/vercel\.app/);
   });
@@ -329,8 +333,8 @@ describe("controlled beta — farmer journey and safety", () => {
     expect(validatePromoCode("WRONG").ok).toBe(false);
     const redeemed = redeemPromoCode(CONTROLLED_BETA_PROMO_CODE, "user:user-1");
     expect(redeemed.ok).toBe(true);
-    grantEntitlement("user:user-1", "promo", "promo");
-    expect(resolveAccess({ authUserId: "user-1" })).toBe("promo");
+    grantEntitlement("user:user-1", "fvm_beta", "promo");
+    expect(resolveAccess({ authUserId: "user-1" })).toBe("fvm_beta");
   });
 
   it("24. follow-up outcome is stored", async () => {

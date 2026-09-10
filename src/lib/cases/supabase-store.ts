@@ -407,6 +407,15 @@ export async function supabaseLinkGuestCasesToUser(
     if (!id) continue;
     await updateRow("case_photos", id, { owner_user_id: userId }, rowToPhoto);
   }
+
+  const followupRows = await selectRows("case_followups", (builder) =>
+    builder.eq("anonymous_session_id", anonymousSessionId).is("user_id", null),
+  );
+  for (const follow of followupRows) {
+    const id = typeof follow.id === "string" ? follow.id : "";
+    if (!id) continue;
+    await updateRow("case_followups", id, { user_id: userId }, rowToFollowup);
+  }
   return linked;
 }
 

@@ -1,4 +1,5 @@
 import type { AccessState } from "./limits";
+import { canonicalAccess } from "./limits";
 
 export type EntitlementRecord = {
   ownerKey: string;
@@ -18,9 +19,11 @@ export function grantEntitlement(
   access: AccessState,
   source: EntitlementRecord["source"],
 ): EntitlementRecord {
+  const normalized: AccessState =
+    access === "promo" || access === "trial" ? "fvm_beta" : access;
   const record: EntitlementRecord = {
     ownerKey,
-    access,
+    access: normalized,
     source,
     grantedAt: new Date().toISOString(),
   };
@@ -46,6 +49,22 @@ export function resolveAccess(options: {
     if (guest) return guest.access;
   }
   return "guest";
+}
+
+export function transferGuestEntitlementToUser(
+  guestSessionId: string,
+  authUserId: string,
+): EntitlementRecord | null {
+  const guest = entitlements.get(`guest:${guestSessionId}`);
+  if (!guest) return getEntitlement(`user:${authUserId}`);
+  const existing = entitlements.get(`user:${authUserId}`);
+  const guestTier = canonicalAccess(guest.access);
+  const existingTier = existing ? canonicalAccess(existing.access) : "GUEST";
+  const rank = { GUEST: 0, REGISTERED_FREE: 1, FVM_BETA: 2, PAID: 3 };
+  if (!existing || rank[guestTier] >= rank[existingTier]) {
+    return grantEntitlement(`user:${authUserId}`, guest.access, guest.source);
+  }
+  return existing;
 }
 
 /** Payments are not faked. Without a processor this stays informational. */
