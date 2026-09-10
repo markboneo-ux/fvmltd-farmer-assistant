@@ -204,7 +204,9 @@ export function FarmerCaseChat({
             if (body.messages?.length) {
               setMessages(
                 body.messages
-                  .filter((item) => item.role === "user" || item.role === "assistant")
+                  .filter((item): item is { id: string; role: ChatRole; text: string } =>
+                    item.role === "user" || item.role === "assistant",
+                  )
                   .map((item) => ({
                     id: item.id,
                     role: item.role,

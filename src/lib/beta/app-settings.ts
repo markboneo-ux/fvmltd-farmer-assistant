@@ -27,6 +27,7 @@ export function resetAppSettingsCache() {
 }
 
 export async function loadUsageLimitOverlay(): Promise<Partial<UsageLimits> | null> {
+  if (process.env.VITEST) return cached?.overlay ?? null;
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.overlay;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return null;

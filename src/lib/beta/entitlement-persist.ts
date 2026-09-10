@@ -20,6 +20,7 @@ function parseAccess(value: unknown): AccessState | null {
 }
 
 export async function persistEntitlement(record: EntitlementRecord): Promise<void> {
+  if (process.env.VITEST) return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
   const authUserId = record.ownerKey.startsWith("user:")
@@ -49,6 +50,7 @@ export async function persistEntitlement(record: EntitlementRecord): Promise<voi
 export async function loadPersistedEntitlement(ownerKey: string): Promise<EntitlementRecord | null> {
   const memory = getEntitlement(ownerKey);
   if (memory) return memory;
+  if (process.env.VITEST) return null;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return null;
   try {

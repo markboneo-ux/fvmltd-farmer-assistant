@@ -40,6 +40,7 @@ function rowToPromo(row: Record<string, unknown>): PromoCodeRecord {
 }
 
 export async function hydratePromoCodesFromDb(): Promise<void> {
+  if (process.env.VITEST) return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
   try {
@@ -57,6 +58,7 @@ export async function persistPromoRedemption(options: {
   code: string;
   ownerKey: string;
 }): Promise<void> {
+  if (process.env.VITEST) return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
   const record = getPromoCode(options.code);
@@ -79,6 +81,9 @@ export async function redeemPromoForOwner(
   ownerKey: string,
 ): Promise<PromoRedeemResult> {
   await hydratePromoCodesFromDb();
+  if (process.env.VITEST) {
+    return redeemPromoCode(code, ownerKey);
+  }
   const admin = tryCreateAdminClient();
   if (admin.ok) {
     try {

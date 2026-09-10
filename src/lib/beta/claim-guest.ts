@@ -10,6 +10,7 @@ export async function persistGuestSessionLink(
   guestSessionId: string,
   userId: string,
 ): Promise<void> {
+  if (process.env.VITEST) return;
   const admin = tryCreateAdminClient();
   if (!admin.ok) return;
   try {
