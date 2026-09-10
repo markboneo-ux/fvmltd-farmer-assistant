@@ -9,13 +9,10 @@ export const AGRICULTURAL_ANSWER_SHAPE = `For a normal agricultural question, wr
 
 Cover, in this order, using plain sentences (no markdown headings):
 1. WHAT I THINK IS HAPPENING
-2. WHY
-3. CHECK THIS NOW
-4. WHAT TO DO NOW
-5. IF CHEMICAL CONTROL IS NEEDED — verified country-specific options when they exist; otherwise active-ingredient classes clearly marked unverified
-6. WHAT NOT TO DO
-7. WHAT TO WATCH OVER THE NEXT 2–3 DAYS
-8. ONE FOLLOW-UP QUESTION
+2. WHAT YOU SHOULD DO NOW
+3. WHAT TO WATCH
+4. ONE IMPORTANT QUESTION IF NEEDED
+Add a brief why, field checks, or chemical note only when it changes the advice.
 Skip a heading when it is not needed.
 Use Integrated Pest Management: cultural/physical, then biological, then chemical when justified. Do not make farmers feel guilty for using registered products.
 

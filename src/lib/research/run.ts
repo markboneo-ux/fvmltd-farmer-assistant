@@ -425,7 +425,7 @@ async function enrichPesticideHitsWithPages(hits: SearchHit[]): Promise<SearchHi
 
 export function researchNotesForPrompt(result: ResearchResult): string {
   if (result.countryMissing) {
-    return "Country is unknown and required for this local question. Ask: What country are you farming in? Give only general agronomy until the country is known. Do not use Trinidad information for another country.";
+    return "Location is unknown and needed for this local question. Ask: What area are you farming in? Give only general agronomy until the area is known. Do not use Trinidad information for another country.";
   }
   if (!result.used) return "";
 
@@ -539,7 +539,7 @@ export async function runWebResearch(
     return {
       ...empty,
       brief:
-        "Country is unknown. Do not assume Trinidad and Tobago. Ask: What country are you farming in? Do not invent registrations, prices, or programmes.",
+        "Location is unknown. Do not assume Trinidad and Tobago. Ask: What area are you farming in? Do not invent registrations, prices, or programmes.",
     };
   }
 

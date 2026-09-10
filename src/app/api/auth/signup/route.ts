@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
-import { grantEntitlement } from "@/lib/beta/entitlements";
-import { linkGuestCasesToUser } from "@/lib/cases/store";
-import { ownerKey } from "@/lib/beta/session";
-import { farmerFacingError } from "@/lib/beta/farmer-error";
+import { completeFarmerAuthentication } from "@/lib/auth/complete-farmer-auth";
+import { farmerAuthError } from "@/lib/auth/farmer-auth-error";
 import {
   checkCombinedRateLimit,
   clientIp,
@@ -12,7 +10,6 @@ import {
   RATE_LIMITS,
 } from "@/lib/security/rate-limit";
 import { logOps } from "@/lib/security/ops-log";
-import { absoluteAppUrl } from "@/lib/config/urls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,35 +48,44 @@ export async function POST(request: Request) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        emailRedirectTo: absoluteAppUrl("/auth/callback") || undefined,
-      },
     });
     if (error) {
       logOps("auth_failure", { error: error.message });
+      const mapped = farmerAuthError(error);
       return NextResponse.json(
-        { error: farmerFacingError("I couldn’t create that account. Please try again.") },
-        { status: 400 },
+        { error: mapped.message, code: mapped.code },
+        { status: mapped.code === "existing_account" ? 409 : 400 },
       );
     }
 
-    if (data.user) {
-      grantEntitlement(`user:${data.user.id}`, "free_registered", "signup");
-      await linkGuestCasesToUser(identity.guestSessionId, data.user.id);
+    if (data.session && data.user) {
+      const completed = await completeFarmerAuthentication({
+        authUserId: data.user.id,
+        email: data.user.email ?? email,
+        fullName:
+          typeof data.user.user_metadata?.full_name === "string"
+            ? data.user.user_metadata.full_name
+            : null,
+        guestSessionId: identity.guestSessionId,
+      });
+      return NextResponse.json({
+        ok: true,
+        needsEmailConfirm: false,
+        linkedGuestCases: completed.linkedGuestCases,
+      });
     }
-    grantEntitlement(ownerKey(identity), "free_registered", "signup");
 
     return NextResponse.json({
       ok: true,
-      needsEmailConfirm: !data.session,
-      linkedGuestCases: Boolean(data.user),
+      needsEmailConfirm: true,
+      email,
     });
   } catch (error) {
     logOps("auth_failure", {
       error: error instanceof Error ? error.message : "signup failed",
     });
     return NextResponse.json(
-      { error: farmerFacingError(null) },
+      { error: farmerAuthError(error instanceof Error ? error.message : null).message },
       { status: 503 },
     );
   }

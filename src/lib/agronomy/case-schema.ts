@@ -207,7 +207,7 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
 } as const;
 
 /** Max assistant questions before Quick Help must give preliminary guidance. */
-export const QUICK_HELP_MAX_QUESTIONS = 3;
+export const QUICK_HELP_MAX_QUESTIONS = 1;
 
 export function emptyRegionalContext(
   overrides: Partial<RegionalContext> = {},

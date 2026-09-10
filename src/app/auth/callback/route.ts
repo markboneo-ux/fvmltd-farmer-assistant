@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { linkGuestCasesToUser } from "@/lib/cases/store";
-import { grantEntitlement } from "@/lib/beta/entitlements";
+import { completeFarmerAuthentication } from "@/lib/auth/complete-farmer-auth";
 import { GUEST_COOKIE_NAME } from "@/lib/beta/identity";
 import { normalizeGuestSessionId } from "@/lib/beta/identity";
 import { logOps } from "@/lib/security/ops-log";
@@ -31,10 +30,18 @@ export async function GET(request: Request) {
     const cookieHeader = request.headers.get("cookie") ?? "";
     const guestMatch = cookieHeader.match(new RegExp(`${GUEST_COOKIE_NAME}=([^;]+)`));
     const guestId = normalizeGuestSessionId(guestMatch?.[1] ?? null);
-    if (guestId) {
-      await linkGuestCasesToUser(guestId, data.user.id);
-    }
-    grantEntitlement(`user:${data.user.id}`, "free_registered", "signup");
+    const metadata = data.user.user_metadata ?? {};
+    await completeFarmerAuthentication({
+      authUserId: data.user.id,
+      email: data.user.email ?? null,
+      fullName:
+        typeof metadata.full_name === "string"
+          ? metadata.full_name
+          : typeof metadata.name === "string"
+            ? metadata.name
+            : null,
+      guestSessionId: guestId,
+    });
 
     const safeNext = next.startsWith("/") ? next : "/";
     return NextResponse.redirect(`${origin}${safeNext === "/" ? "" : safeNext}` || `${origin}/`);

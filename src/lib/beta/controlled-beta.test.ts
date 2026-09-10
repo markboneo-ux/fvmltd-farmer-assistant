@@ -518,7 +518,7 @@ describe("controlled beta — farmer journey and safety", () => {
   });
 
   it("maps technical failures to a simple farmer error", () => {
-    expect(farmerFacingError("OPENAI_API_KEY missing")).toMatch(/couldn.?t finish that just now/i);
+    expect(farmerFacingError("OPENAI_API_KEY missing")).toMatch(/couldn.?t complete that right now/i);
   });
 
   it("never classifies a verified outbreak from AI counts alone", () => {

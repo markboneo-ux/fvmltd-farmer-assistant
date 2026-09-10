@@ -8,7 +8,6 @@ import type {
   SeverityLevel,
 } from "@/lib/agronomy/case-schema";
 import { isGuidanceStage, isInterviewStage } from "@/lib/agronomy/case-schema";
-import { QUICK_HELP_MAX_QUESTIONS } from "@/lib/agronomy/case-schema";
 import { shouldRenderWeatherRiskCard } from "@/lib/agronomy/output-guard";
 
 type CaseEngineResponseProps = {
@@ -144,10 +143,9 @@ export function CaseEngineResponse({
     <div className="space-y-4">
       {interviewing && !showFullSummary ? (
         <>
-          {typeof questionsAsked === "number" ? (
+          {typeof questionsAsked === "number" && interviewing ? (
             <p className="text-xs font-semibold tracking-wide text-muted uppercase">
-              Question {Math.min(questionsAsked, QUICK_HELP_MAX_QUESTIONS)} of
-              up to {QUICK_HELP_MAX_QUESTIONS}
+              Follow-up
             </p>
           ) : null}
 

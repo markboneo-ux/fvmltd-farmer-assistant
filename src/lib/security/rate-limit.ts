@@ -22,6 +22,9 @@ export const RATE_LIMITS = {
   promo: { name: "promo", windowMs: 10 * 60_000, max: 8 },
   auth: { name: "auth", windowMs: 15 * 60_000, max: 12 },
   signup: { name: "signup", windowMs: 60 * 60_000, max: 6 },
+  login: { name: "login", windowMs: 15 * 60_000, max: 10 },
+  otp: { name: "otp", windowMs: 15 * 60_000, max: 12 },
+  otp_resend: { name: "otp_resend", windowMs: 60_000, max: 1 },
 } as const;
 
 export const FARMER_RATE_LIMIT_MESSAGE =

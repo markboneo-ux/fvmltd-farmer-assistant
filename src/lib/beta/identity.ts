@@ -20,7 +20,23 @@ export type AppIdentity = {
 
 export const GUEST_COOKIE_NAME = "fvm_guest_session";
 export const CASE_COOKIE_NAME = "fvm_crop_case";
+export const NEW_CONVERSATION_COOKIE_VALUE = "new";
 export const GUEST_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 180;
+
+export type CaseCookieState =
+  | { kind: "missing" }
+  | { kind: "new" }
+  | { kind: "id"; id: string };
+
+export function parseCaseCookie(value: string | null | undefined): CaseCookieState {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return { kind: "missing" };
+  if (trimmed === NEW_CONVERSATION_COOKIE_VALUE || trimmed === "-") {
+    return { kind: "new" };
+  }
+  if (isUuid(trimmed)) return { kind: "id", id: trimmed };
+  return { kind: "missing" };
+}
 
 export function guestCookieOptions(secure = process.env.NODE_ENV === "production") {
   return {

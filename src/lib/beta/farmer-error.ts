@@ -1,7 +1,7 @@
 import { FARMER_GENERIC_ERROR, FARMER_WEB_LOOKUP_FAILED } from "./limits";
 
 const TECHNICAL =
-  /openai|api[_ ]?key|supabase|service.?role|diagnostic|model|endpoint|quota|billing|json|stack|sql|database|rls|correlation/i;
+  /openai|api[_ ]?key|supabase|service.?role|diagnostic|model|endpoint|quota|billing|json|stack|sql|database|rls|correlation|payload|schema|persistence|retrieval|vector|inference|http\s*\d+|triage/i;
 
 export function farmerFacingError(
   error: string | null | undefined,

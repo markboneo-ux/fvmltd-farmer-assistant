@@ -124,7 +124,7 @@ describe("tomato-protocol rapid triage", () => {
     expect(guarded.nextQuestion).toBe("");
   });
 
-  it("forces preliminary guidance after three Quick Help questions", () => {
+  it("forces preliminary guidance after one Quick Help question", () => {
     const guarded = applyCommercialSafetyGuards(
       basePayload({
         stage: "questioning",
@@ -134,7 +134,7 @@ describe("tomato-protocol rapid triage", () => {
       }),
       {
         mode: "quick_help",
-        questionsAskedBeforeThisTurn: 3,
+        questionsAskedBeforeThisTurn: 1,
         knownFacts: extractKnownFacts("Tomato whiteflies"),
       },
     );

@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
-import { resolveRequestIdentity } from "./session";
+import { hydrateEntitlementsFromDb } from "@/lib/auth/complete-farmer-auth";
+import { ensureGuestSessionId, resolveRequestIdentity } from "./session";
+import { normalizeGuestSessionId } from "./identity";
 import type { AppIdentity } from "./identity";
 
 export async function getAuthUser(): Promise<{
@@ -31,10 +33,16 @@ export async function resolveIdentityFromRequest(guestSessionId?: string | null)
       farmerProfileId = (data?.id as string | undefined) ?? null;
     }
   }
+  const guestId =
+    normalizeGuestSessionId(guestSessionId) ?? (await ensureGuestSessionId());
+  await hydrateEntitlementsFromDb({
+    authUserId: user?.id ?? null,
+    guestSessionId: guestId,
+  });
   return resolveRequestIdentity({
     authUserId: user?.id ?? null,
     email: user?.email ?? null,
     farmerProfileId,
-    guestSessionId,
+    guestSessionId: guestId,
   });
 }

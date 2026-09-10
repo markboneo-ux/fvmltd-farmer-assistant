@@ -5,8 +5,11 @@ import {
   GUEST_COOKIE_NAME,
   guestCookieOptions,
   isUuid,
+  NEW_CONVERSATION_COOKIE_VALUE,
   normalizeGuestSessionId,
+  parseCaseCookie,
   type AppIdentity,
+  type CaseCookieState,
 } from "./identity";
 import { resolveAccess } from "./entitlements";
 
@@ -21,14 +24,18 @@ export async function readGuestSessionId(): Promise<string | null> {
   }
 }
 
-export async function readActiveCaseId(): Promise<string | null> {
+export async function readActiveCaseCookie(): Promise<CaseCookieState> {
   try {
     const store = await cookies();
-    const value = store.get(CASE_COOKIE_NAME)?.value?.trim() ?? "";
-    return isUuid(value) ? value : null;
+    return parseCaseCookie(store.get(CASE_COOKIE_NAME)?.value);
   } catch {
-    return null;
+    return { kind: "missing" };
   }
+}
+
+export async function readActiveCaseId(): Promise<string | null> {
+  const state = await readActiveCaseCookie();
+  return state.kind === "id" ? state.id : null;
 }
 
 export async function persistActiveCaseId(caseId: string): Promise<void> {
@@ -37,6 +44,15 @@ export async function persistActiveCaseId(caseId: string): Promise<void> {
   try {
     const store = await cookies();
     store.set(CASE_COOKIE_NAME, id, guestCookieOptions());
+  } catch {
+    // Route handlers may set the cookie on the NextResponse instead.
+  }
+}
+
+export async function clearActiveCaseId(): Promise<void> {
+  try {
+    const store = await cookies();
+    store.set(CASE_COOKIE_NAME, NEW_CONVERSATION_COOKIE_VALUE, guestCookieOptions());
   } catch {
     // Route handlers may set the cookie on the NextResponse instead.
   }

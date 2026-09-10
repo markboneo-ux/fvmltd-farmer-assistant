@@ -29,4 +29,18 @@ describe("admin insights staff gate", () => {
     const response = await GET(new Request("http://localhost/api/admin/insights"));
     expect(response.status).toBe(401);
   });
+
+  it("denies a signed-in farmer who is not staff", async () => {
+    vi.mocked(requireStaffApi).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(
+        { error: "This account is not an active FVMLTD staff member." },
+        { status: 403 },
+      ),
+    } as never);
+
+    const { GET } = await import("@/app/api/admin/insights/route");
+    const response = await GET(new Request("http://localhost/api/admin/insights"));
+    expect(response.status).toBe(403);
+  });
 });

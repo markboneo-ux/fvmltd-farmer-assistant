@@ -49,9 +49,9 @@ const ALIASES: Array<{ name: ResearchCountry; pattern: RegExp }> = [
 
 /** Districts that uniquely imply Trinidad and Tobago. */
 const TT_ONLY_DISTRICTS =
-  /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin|toco|cedros|macoya)\b/i;
+  /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin|toco|cedros|macoya|caroni)\b/i;
 
-export const ASK_COUNTRY_QUESTION = "What country are you farming in?";
+export const ASK_COUNTRY_QUESTION = "What area are you farming in?";
 
 export function isResearchCountry(value: string | null | undefined): value is ResearchCountry {
   if (!value) return false;

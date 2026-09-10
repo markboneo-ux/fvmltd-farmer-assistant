@@ -16,6 +16,9 @@ import { followUpStatusLabel } from "@/lib/cases/followups";
 import { canExposeTrend } from "@/lib/trends/engine";
 import { listCaseTrends } from "@/lib/trends/store";
 import { trendCountryKey } from "@/lib/trends/types";
+import { buildResearchCoverage } from "./research-coverage";
+import { tryCreateAdminClient } from "@/lib/supabase/helpers";
+import { isTestRuntime } from "@/lib/cases/persistence";
 
 export type InsightsFilters = {
   from?: string | null;
@@ -409,6 +412,73 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const resolved = allCases.filter(
     (item) => item.caseStatus === "resolved" || item.caseStatus === "closed",
   ).length;
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const monthCases = allCases.filter((item) => item.createdAt >= monthAgo);
+  const monthFarmers = new Set(monthCases.map((item) => ownerKey(item)));
+  const monthReturning = [...monthFarmers].filter((key) => (daysByUser.get(key)?.size ?? 0) > 1).length;
+  const previousMonthCases = allCases.filter(
+    (item) => item.createdAt >= new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString() && item.createdAt < monthAgo,
+  );
+  const previousMonthByCrop = new Map<string, number>();
+  for (const item of previousMonthCases) increment(previousMonthByCrop, item.crop?.trim() || "unknown");
+  const topCropsWithChange = topCrops.map((row) => {
+    const previous = previousMonthByCrop.get(row.crop) ?? 0;
+    const change =
+      previous === 0
+        ? row.cases > 0
+          ? "Increasing reports"
+          : "Stable"
+        : row.cases > previous
+          ? "Increasing reports"
+          : row.cases < previous
+            ? "Improving"
+            : "Stable";
+    return { ...row, changeVsPrevious: change };
+  });
+  const weekPhotos = allPhotos.filter((row) => row.createdAt >= weekAgo).length;
+  const weekVoice = persistedMessages.filter(
+    (row) => row.inputMode === "voice" && row.createdAt >= weekAgo,
+  ).length;
+  const weekFollowups = caseFollowups.filter((row) => row.createdAt >= weekAgo).length;
+  const weekSolved = outcomes.filter(
+    (row) => row.outcome === "problem_solved" && row.createdAt >= weekAgo,
+  ).length;
+  const monthPhotos = allPhotos.filter((row) => row.createdAt >= monthAgo).length;
+  const monthVoice = persistedMessages.filter(
+    (row) => row.inputMode === "voice" && row.createdAt >= monthAgo,
+  ).length;
+  const monthFollowups = caseFollowups.filter((row) => row.createdAt >= monthAgo).length;
+  const monthSolved = outcomes.filter(
+    (row) => row.outcome === "problem_solved" && row.createdAt >= monthAgo,
+  ).length;
+  const monthMessages = Math.max(
+    persistedMessages.filter((row) => row.createdAt >= monthAgo).length,
+    usage.filter((event) => event.kind === "message" && event.createdAt >= monthAgo).length,
+  );
+  const bySeverity = new Map<string, number>();
+  for (const item of allCases) increment(bySeverity, item.severity || "unknown");
+  const firstSeenByRegistered = new Map<string, string>();
+  for (const item of allCases) {
+    if (!item.userId) continue;
+    const current = firstSeenByRegistered.get(item.userId);
+    if (!current || item.createdAt < current) firstSeenByRegistered.set(item.userId, item.createdAt);
+  }
+  const newRegisteredToday = [...firstSeenByRegistered.values()].filter(
+    (iso) => iso.slice(0, 10) === today,
+  ).length;
+  let newRegisteredFarmersDb: number | null = null;
+  if (!isTestRuntime()) {
+    const admin = tryCreateAdminClient();
+    if (admin.ok) {
+      const { count } = await admin.client
+        .from("farmer_profiles")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", startOfToday);
+      if (typeof count === "number") newRegisteredFarmersDb = count;
+    }
+  }
+
+  const researchCoverage = buildResearchCoverage();
   return {
     users: {
       total: uniqueUsers,
@@ -453,15 +523,33 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       photos: photosToday,
       voiceNotes: voiceToday,
       webResearchedAnswers: webToday,
+      newRegisteredFarmers: newRegisteredFarmersDb ?? newRegisteredToday,
     },
     last7Days: {
       uniqueFarmers: weekFarmers.size,
       returningFarmers: weekReturning,
-      messages: messagesWeek,
+      messages: Math.max(
+        messagesWeek,
+        persistedMessages.filter((row) => row.createdAt >= weekAgo).length,
+      ),
       cropCases: weekCases.length,
+      photos: weekPhotos,
+      voiceNotes: weekVoice,
+      followUps: weekFollowups,
+      solved: weekSolved,
+    },
+    last30Days: {
+      uniqueFarmers: monthFarmers.size,
+      returningFarmers: monthReturning,
+      messages: monthMessages,
+      cropCases: monthCases.length,
+      photos: monthPhotos,
+      voiceNotes: monthVoice,
+      followUps: monthFollowups,
+      solved: monthSolved,
     },
     cropIntelligence: {
-      topCrops,
+      topCrops: topCropsWithChange,
       topIssues: {
         symptoms: topEntries(bySymptom),
         suspectedProblems: topEntries(byProblem),
@@ -474,6 +562,14 @@ export async function buildInsights(filters: InsightsFilters = {}) {
             }, new Map<string, number>()),
         ),
       },
+      severity: topEntries(bySeverity),
+      outcomes: [
+        { label: "Improved", count: improved },
+        { label: "About the same", count: unchanged },
+        { label: "Worse", count: worsened },
+        { label: "Solved", count: solved },
+        { label: "Unresolved", count: unresolved },
+      ],
     },
     pesticideIntelligence: {
       pesticideQuestions,
@@ -623,6 +719,7 @@ export async function buildInsights(filters: InsightsFilters = {}) {
       })),
       nonDiagnosticCaseCount: nonDiagnostic.length,
     },
+    researchCoverage,
   };
 }
 

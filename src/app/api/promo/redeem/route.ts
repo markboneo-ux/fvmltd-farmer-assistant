@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import { ownerKey } from "@/lib/beta/session";
 import { grantEntitlement } from "@/lib/beta/entitlements";
+import { persistEntitlementRecord } from "@/lib/auth/complete-farmer-auth";
 import { recordUsageEvent } from "@/lib/beta/usage-store";
-import { redeemPromoCode } from "@/lib/promo/server";
+import { redeemPromoCodeSecure } from "@/lib/promo/persist";
+import { FVM_BETA_ACTIVATED_MESSAGE } from "@/lib/beta/usage-notice";
 import {
   checkCombinedRateLimit,
   clientIp,
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
     caseId: null,
   });
 
-  const result = redeemPromoCode(code, ownerKey(identity));
+  const result = await redeemPromoCodeSecure(code, ownerKey(identity));
   if (!result.ok) {
     logOps("promo_failure", { reason: result.reason });
     return NextResponse.json(
@@ -56,7 +58,12 @@ export async function POST(request: Request) {
     );
   }
 
-  grantEntitlement(ownerKey(identity), result.entitlement, "promo");
+  const entitlement = grantEntitlement(ownerKey(identity), result.entitlement, "promo");
+  void persistEntitlementRecord(entitlement);
+  if (identity.authUserId) {
+    const userEntitlement = grantEntitlement(`user:${identity.authUserId}`, result.entitlement, "promo");
+    void persistEntitlementRecord(userEntitlement);
+  }
   recordUsageEvent({
     guestSessionId: identity.guestSessionId,
     authUserId: identity.authUserId,
@@ -68,6 +75,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     access: result.entitlement,
-    message: "Promotional access is now active.",
+    message: FVM_BETA_ACTIVATED_MESSAGE,
+    tier: "FVM Beta",
   });
 }

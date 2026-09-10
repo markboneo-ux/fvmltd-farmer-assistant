@@ -27,6 +27,11 @@ export function recordUsageEvent(event: Omit<UsageEvent, "id" | "createdAt"> & {
     meta: event.meta,
   };
   events.push(row);
+  void import("./persist-usage")
+    .then((mod) => mod.persistUsageEvent(row))
+    .catch(() => {
+      // Memory still holds the event for this process.
+    });
   return row;
 }
 
