@@ -1,4 +1,5 @@
 import type { AccessState, UsageKind, UsageSnapshot } from "./limits";
+import { emptyUsage } from "./limits";
 
 export type UsageEvent = {
   id: string;
@@ -44,14 +45,26 @@ function matchesOwner(
 export function countUsage(
   owner: { guestSessionId?: string | null; authUserId?: string | null },
 ): UsageSnapshot {
-  const snapshot: UsageSnapshot = { messages: 0, cases: 0, imageAnalyses: 0 };
+  const snapshot = emptyUsage();
   for (const event of events) {
     if (!matchesOwner(event, owner)) continue;
     if (event.kind === "message") snapshot.messages += 1;
     if (event.kind === "case") snapshot.cases += 1;
     if (event.kind === "image_analysis") snapshot.imageAnalyses += 1;
+    if (event.kind === "voice") snapshot.voiceMessages += 1;
   }
   return snapshot;
+}
+
+export function transferGuestUsageToUser(guestSessionId: string, authUserId: string): number {
+  let moved = 0;
+  for (const event of events) {
+    if (event.guestSessionId === guestSessionId && !event.authUserId) {
+      event.authUserId = authUserId;
+      moved += 1;
+    }
+  }
+  return moved;
 }
 
 export function listUsageEvents(): UsageEvent[] {

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
 import { resolveRequestIdentity } from "./session";
 import type { AppIdentity } from "./identity";
+import { loadPersistedEntitlement } from "./entitlement-persist";
 
 export async function getAuthUser(): Promise<{
   id: string;
@@ -31,6 +32,10 @@ export async function resolveIdentityFromRequest(guestSessionId?: string | null)
       farmerProfileId = (data?.id as string | undefined) ?? null;
     }
   }
+  if (user?.id) {
+    await loadPersistedEntitlement(`user:${user.id}`);
+  }
+
   return resolveRequestIdentity({
     authUserId: user?.id ?? null,
     email: user?.email ?? null,

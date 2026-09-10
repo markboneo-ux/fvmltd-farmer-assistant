@@ -21,8 +21,8 @@ import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 import { getMainWebsiteUrl, MAIN_WEBSITE_LABEL } from "@/lib/config/urls";
 import {
   FARMER_GENERIC_ERROR,
+  FREE_LIMIT_HEADING,
   GUEST_LIMIT_MESSAGE,
-  REGISTERED_LIMIT_HEADING,
   UPGRADE_COMING_SOON,
 } from "@/lib/beta/limits";
 import { farmerPersistenceBanner } from "@/lib/chat/persistence-warning";
@@ -146,7 +146,7 @@ export function FarmerCaseChat({
   const recordTimerRef = useRef<number | null>(null);
   const recordStartedAtRef = useRef<number>(0);
   const [mainWebsiteUrl] = useState(() => getMainWebsiteUrl());
-  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState(false);
 
   const showWelcome = messages.length === 0 && !loading;
 
@@ -163,18 +163,16 @@ export function FarmerCaseChat({
         const response = await fetch("/api/session");
         if (!response.ok) return;
         const payload = (await response.json()) as {
-          identity?: { access?: string; email?: string | null };
+          identity?: { access?: string; email?: string | null; kind?: string };
           approaching?: boolean;
           limitReached?: boolean;
+          limitHeading?: string;
         };
         if (payload.identity?.access) setAccess(payload.identity.access);
-        if (payload.identity?.email) setAccountEmail(payload.identity.email);
+        if (payload.identity?.kind === "registered") setSignedIn(true);
         if (payload.limitReached) {
-          setLimitBanner(
-            payload.identity?.access === "guest"
-              ? GUEST_LIMIT_MESSAGE
-              : REGISTERED_LIMIT_HEADING,
-          );
+          setLimitBanner(payload.limitHeading || FREE_LIMIT_HEADING);
+          setUpgradeOpen(true);
         }
       } catch {
         // Guest chat still works if session lookup fails.
@@ -192,6 +190,32 @@ export function FarmerCaseChat({
         }
       } catch {
         // Follow-up is optional when the farmer returns.
+      }
+      try {
+        const caseIdFromUrl = new URLSearchParams(window.location.search).get("case");
+        if (caseIdFromUrl) {
+          const loaded = await fetch(`/api/cases/${caseIdFromUrl}`);
+          if (loaded.ok) {
+            const body = (await loaded.json()) as {
+              case?: { id?: string };
+              messages?: Array<{ id: string; role: ChatRole | "system"; text: string }>;
+            };
+            if (body.case?.id) setCaseId(body.case.id);
+            if (body.messages?.length) {
+              setMessages(
+                body.messages
+                  .filter((item) => item.role === "user" || item.role === "assistant")
+                  .map((item) => ({
+                    id: item.id,
+                    role: item.role,
+                    text: item.text,
+                  })),
+              );
+            }
+          }
+        }
+      } catch {
+        // Opening a saved case is optional; the farmer can still start a new chat.
       }
     })();
   }, []);
@@ -345,10 +369,8 @@ export function FarmerCaseChat({
       if (payload.caseId) setCaseId(payload.caseId);
       if (payload.access) setAccess(payload.access);
       if (payload.limitReached) {
-        setLimitBanner(
-          payload.reason === "guest_limit" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
-        );
-        if (payload.reason !== "guest_limit") setUpgradeOpen(true);
+        setLimitBanner(FREE_LIMIT_HEADING);
+        setUpgradeOpen(true);
       }
 
       if (!response.ok || !casePayload) {
@@ -660,13 +682,68 @@ export function FarmerCaseChat({
                   Mode: {mode === "full_crop_check" ? "Full crop check" : "Chat"}
                 </button>
               ) : null}
-              <Link
-                href="/signin"
-                className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
-                onClick={() => setMenuOpen(false)}
-              >
-                {accountEmail ? "Account" : "Create a free account"}
-              </Link>
+              {signedIn ? (
+                <>
+                  <Link
+                    href="/cases"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    My Cases
+                  </Link>
+                  <Link
+                    href="/follow-ups"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Follow-ups
+                  </Link>
+                  <Link
+                    href="/account"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Account
+                  </Link>
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void (async () => {
+                        await fetch("/api/auth/logout", { method: "POST" });
+                        window.location.assign("/");
+                      })();
+                    }}
+                  >
+                    Log out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Continue as Guest
+                  </button>
+                  <Link
+                    href="/login"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Log in
+                  </Link>
+                  <Link
+                    href="/signup"
+                    className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Create Free Account
+                  </Link>
+                </>
+              )}
               <Link
                 href="/privacy"
                 className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
@@ -875,44 +952,54 @@ export function FarmerCaseChat({
         <div className="mx-auto w-full max-w-3xl space-y-2">
           {limitBanner ? (
             <div className="rounded-2xl bg-surface px-3 py-3 text-sm text-ink shadow-sm ring-1 ring-line">
-              <p className="font-medium">{limitBanner}</p>
+              <p className="font-medium">{FREE_LIMIT_HEADING}</p>
               {access === "guest" ? (
-                <Link
-                  href="/signin"
-                  className="mt-2 inline-flex min-h-11 items-center rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+                <p className="mt-1 text-muted">{GUEST_LIMIT_MESSAGE}</p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {!signedIn ? (
+                  <>
+                    <Link
+                      href="/login"
+                      className="inline-flex min-h-11 items-center rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+                    >
+                      Log in
+                    </Link>
+                    <Link
+                      href="/signup"
+                      className="inline-flex min-h-11 items-center rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+                    >
+                      Create account
+                    </Link>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+                  onClick={() => setUpgradeOpen(true)}
                 >
-                  Create a free account
-                </Link>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  <button
-                    type="button"
-                    className="mr-2 min-h-11 rounded-full bg-canopy px-4 text-sm font-semibold text-white"
-                    onClick={() => {
-                      setUpgradeOpen(true);
-                      void fetch("/api/upgrade/click", {
-                        method: "POST",
-                        headers: { "content-type": "application/json" },
-                        body: JSON.stringify({ view: false }),
-                      });
-                    }}
-                  >
-                    Upgrade
-                  </button>
-                  <button
-                    type="button"
-                    className="min-h-11 rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
-                    onClick={() => setUpgradeOpen(true)}
-                  >
-                    Enter promotional code
-                  </button>
-                </div>
-              )}
+                  Enter access code
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+                  onClick={() => {
+                    setUpgradeOpen(true);
+                    void fetch("/api/upgrade/click", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ view: false }),
+                    });
+                  }}
+                >
+                  Upgrade (Coming soon)
+                </button>
+              </div>
             </div>
           ) : null}
           {upgradeOpen ? (
             <div className="rounded-2xl bg-surface px-3 py-3 text-sm shadow-sm ring-1 ring-line">
-              <p className="font-medium">{REGISTERED_LIMIT_HEADING}</p>
+              <p className="font-medium">{FREE_LIMIT_HEADING}</p>
               <p className="mt-1 text-muted">{UPGRADE_COMING_SOON}</p>
               <form
                 className="mt-3 flex gap-2"
@@ -928,11 +1015,18 @@ export function FarmerCaseChat({
                       ok?: boolean;
                       error?: string;
                       message?: string;
+                      loginRequired?: boolean;
+                      access?: string;
                     };
                     setPromoMessage(payload.message || payload.error || null);
+                    if (payload.loginRequired) {
+                      window.location.assign("/login");
+                      return;
+                    }
                     if (payload.ok) {
                       setLimitBanner(null);
-                      setAccess("promo");
+                      setAccess(payload.access || "fvm_beta");
+                      setUpgradeOpen(false);
                     }
                   })();
                 }}
@@ -940,7 +1034,7 @@ export function FarmerCaseChat({
                 <input
                   value={promoCode}
                   onChange={(event) => setPromoCode(event.target.value)}
-                  placeholder="Promotional code"
+                  placeholder="Access code"
                   className="min-h-11 flex-1 rounded-full bg-sky px-3 text-sm ring-1 ring-line"
                   autoComplete="off"
                 />

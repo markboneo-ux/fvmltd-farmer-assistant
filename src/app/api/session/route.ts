@@ -2,7 +2,15 @@ import { NextResponse } from "next/server";
 import { evaluateConversationGate } from "@/lib/beta/conversation";
 import { resolveIdentityFromRequest } from "@/lib/beta/auth-server";
 import { GUEST_COOKIE_NAME, guestCookieOptions } from "@/lib/beta/session";
-import { getUsageLimits, limitsForAccess, FARMER_GENERIC_ERROR } from "@/lib/beta/limits";
+import {
+  accessTierLabel,
+  canonicalAccess,
+  getUsageLimits,
+  limitsForAccess,
+  FARMER_GENERIC_ERROR,
+  FREE_LIMIT_HEADING,
+} from "@/lib/beta/limits";
+import { loadUsageLimitOverlay } from "@/lib/beta/app-settings";
 import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
 import { getMainWebsiteUrl } from "@/lib/config/urls";
 import { CasePersistenceError } from "@/lib/cases/store";
@@ -14,13 +22,16 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const identity = await resolveIdentityFromRequest();
   try {
+    const overlay = await loadUsageLimitOverlay();
     const gate = await evaluateConversationGate({ identity, next: "message" });
-    const caps = limitsForAccess(identity.access, getUsageLimits());
+    const caps = limitsForAccess(identity.access, getUsageLimits(overlay));
 
     const response = NextResponse.json({
       identity: {
         kind: identity.kind,
         access: identity.access,
+        accessTier: canonicalAccess(identity.access),
+        accessLabel: accessTierLabel(identity.access),
         email: identity.email,
       },
       usage: gate.used,
@@ -28,6 +39,7 @@ export async function GET() {
       approaching: gate.ok ? gate.approaching : true,
       limitReached: !gate.ok && !gate.allowFinishActiveCase,
       allowFinishActiveCase: !gate.ok && gate.allowFinishActiveCase,
+      limitHeading: FREE_LIMIT_HEADING,
       privacy: PRIVACY_SUMMARY,
       mainWebsiteUrl: getMainWebsiteUrl(),
     });
@@ -41,4 +53,3 @@ export async function GET() {
     throw error;
   }
 }
-
