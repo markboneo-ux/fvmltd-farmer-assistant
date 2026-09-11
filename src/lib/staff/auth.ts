@@ -119,11 +119,6 @@ export async function getStaffSession(): Promise<
     const supabase = await createClient();
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) {
-      logStaffGate("redirect_session_hydration", {
-        supabaseHost,
-        vercelEnv,
-        hasAuthUser: false,
-      });
       return {
         ok: false,
         status: 401,
@@ -133,7 +128,6 @@ export async function getStaffSession(): Promise<
     }
     authUserId = data.user.id;
   } catch {
-    logStaffGate("supabase_not_configured", { supabaseHost, vercelEnv });
     return {
       ok: false,
       status: 503,
