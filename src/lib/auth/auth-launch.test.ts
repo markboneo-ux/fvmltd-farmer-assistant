@@ -7,7 +7,6 @@ import {
   EXISTING_ACCOUNT_MESSAGE,
   ghostResendDecision,
   isGhostExistingSignUp,
-  OTP_RESEND_WAIT_MESSAGE,
 } from "@/lib/auth/signup-outcome";
 import { farmerAuthError } from "@/lib/auth/farmer-auth-error";
 import { authorizeStaffRecord } from "@/lib/staff/authorize";
@@ -48,27 +47,23 @@ describe("existing signup classification", () => {
 describe("staff login path", () => {
   const staffLogin = readFileSync(join(process.cwd(), "src/components/staff/StaffLoginForm.tsx"), "utf8");
   const staffLoginApi = readFileSync(join(process.cwd(), "src/app/api/staff/login/route.ts"), "utf8");
+  const staffLoginHelper = readFileSync(join(process.cwd(), "src/lib/staff/login.ts"), "utf8");
   const middleware = readFileSync(join(process.cwd(), "src/middleware.ts"), "utf8");
-  const env = readFileSync(join(process.cwd(), "src/lib/supabase/env.ts"), "utf8");
+  const client = readFileSync(join(process.cwd(), "src/lib/supabase/client.ts"), "utf8");
 
   it("authenticates staff on the server, not with the browser Supabase client", () => {
-    expect(staffLogin).toMatch(/\/api\/staff\/login/);
+    expect(staffLogin).toMatch(/STAFF_LOGIN_API_PATH/);
     expect(staffLogin).not.toMatch(/createClient/);
     expect(staffLogin).toMatch(/window\.location\.assign/);
     expect(staffLogin).toMatch(/PasswordField/);
-    expect(staffLoginApi).toMatch(/signInWithPassword/);
-    expect(staffLoginApi).toMatch(/authorizeStaffRecord/);
-    expect(staffLoginApi).toMatch(/auth_user_id/);
-    expect(staffLoginApi).toMatch(/signOut/);
-    expect(staffLoginApi).toMatch(/reason/);
+    expect(staffLoginApi).toMatch(/staffPasswordLogin/);
+    expect(staffLoginHelper).toMatch(/signInWithPassword/);
+    expect(staffLoginHelper).toMatch(/lookupStaffRowForAuthUser/);
+    expect(staffLoginHelper).toMatch(/signOut/);
     expect(isStaffPublicPath(STAFF_LOGIN_API_PATH)).toBe(true);
-    expect(middleware).toMatch(/isStaffPublicPath/);
+    expect(middleware).toMatch(/isStaffLoginApiPath/);
     expect(safeStaffNextPath("/admin/insights")).toBe("/admin/insights");
-  });
-
-  it("inlines NEXT_PUBLIC Supabase env for any remaining browser clients", () => {
-    expect(env).toMatch(/process\.env\.NEXT_PUBLIC_SUPABASE_URL/);
-    expect(env).toMatch(/process\.env\.NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+    expect(client).toMatch(/process\.env\.NEXT_PUBLIC_SUPABASE_URL/);
   });
 });
 
@@ -103,7 +98,7 @@ describe("farmer password visibility and existing-account OTP", () => {
     expect(form).toMatch(/setCode\(\[\.\.\.EMPTY_OTP\]\)/);
     expect(form).toMatch(/Resend code in \$\{resendWaitSec\}s/);
     expect(form).toMatch(/OTP_RESEND_WAIT_MESSAGE/);
-    expect(resend).toContain(OTP_RESEND_WAIT_MESSAGE);
+    expect(resend).toMatch(/OTP_RESEND_WAIT_MESSAGE/);
     expect(farmerAuthError({ message: "For security purposes, you can only request this after 60 seconds." }).code).toBe(
       "rate_limited",
     );

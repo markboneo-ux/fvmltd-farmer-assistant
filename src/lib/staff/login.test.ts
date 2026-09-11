@@ -148,6 +148,27 @@ describe("staff row mapping", () => {
       reason: "staff_not_linked",
     });
   });
+
+  it("accepts a matching Auth UUID and denies a farmer with no staff row", () => {
+    const staffUuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const farmerUuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    expect(
+      classifyStaffRow(
+        { ...ACTIVE_ROW, id: "row-1", auth_user_id: staffUuid },
+        staffUuid,
+      ).ok,
+    ).toBe(true);
+    expect(classifyStaffRow(null, farmerUuid)).toEqual({
+      ok: false,
+      reason: "staff_not_linked",
+    });
+    expect(
+      classifyStaffRow(
+        { ...ACTIVE_ROW, id: staffUuid, auth_user_id: null },
+        staffUuid,
+      ),
+    ).toEqual({ ok: false, reason: "staff_not_linked" });
+  });
 });
 
 describe("staff login route wiring", () => {
@@ -163,9 +184,17 @@ describe("staff login route wiring", () => {
       "utf8",
     );
     expect(form).toMatch(/STAFF_LOGIN_API_PATH/);
-    expect(form).toMatch(/Show password/);
-    expect(form).toMatch(/Hide password/);
+    expect(form).toMatch(/PasswordField/);
+    expect(form).toMatch(/window\.location\.assign/);
     expect(form).not.toMatch(/signInWithPassword/);
+
+    const passwordField = readFileSync(
+      join(process.cwd(), "src/components/PasswordField.tsx"),
+      "utf8",
+    );
+    expect(passwordField).toMatch(/Show password/);
+    expect(passwordField).toMatch(/Hide password/);
+    expect(passwordField).toMatch(/useState\(false\)/);
 
     const client = readFileSync(join(process.cwd(), "src/lib/supabase/client.ts"), "utf8");
     expect(client).toMatch(/process\.env\.NEXT_PUBLIC_SUPABASE_URL/);

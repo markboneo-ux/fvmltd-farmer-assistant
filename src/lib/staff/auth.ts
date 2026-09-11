@@ -8,7 +8,11 @@ import {
   supabaseHostFromUrl,
   type StaffLoginStage,
 } from "./login-stages";
-import type { StaffRole, StaffUser } from "./types";
+import {
+  authorizeStaffRecord,
+  type StaffProfileRow,
+} from "./authorize";
+import type { StaffUser } from "./types";
 
 export type StaffRow = {
   id: string;
@@ -35,27 +39,15 @@ export function classifyStaffRow(
 ):
   | { ok: true; staff: StaffUser }
   | { ok: false; reason: "staff_inactive" | "staff_not_linked" } {
-  if (!row) return { ok: false, reason: "staff_not_linked" };
-  if (!row.is_active) return { ok: false, reason: "staff_inactive" };
-  const linkedAuthId = row.auth_user_id ?? row.id;
-  if (linkedAuthId !== sessionAuthUserId) {
-    return { ok: false, reason: "staff_not_linked" };
+  const authorized = authorizeStaffRecord(
+    sessionAuthUserId,
+    (row as StaffProfileRow | null) ?? null,
+  );
+  if (authorized.ok) return authorized;
+  if (authorized.reason === "inactive_staff") {
+    return { ok: false, reason: "staff_inactive" };
   }
-  const role = row.role as StaffRole;
-  if (role !== "admin" && role !== "agronomist" && role !== "reviewer") {
-    return { ok: false, reason: "staff_not_linked" };
-  }
-  return {
-    ok: true,
-    staff: {
-      id: row.id,
-      authUserId: linkedAuthId,
-      fullName: row.full_name,
-      email: row.email,
-      role,
-      isActive: row.is_active,
-    },
-  };
+  return { ok: false, reason: "staff_not_linked" };
 }
 
 function staffProfiles(client: { from: (table: string) => unknown }) {
@@ -72,8 +64,9 @@ function staffProfiles(client: { from: (table: string) => unknown }) {
 }
 
 /**
- * Resolve staff by auth_user_id first (confirmed mapping).
+ * Resolve staff by auth_user_id only (confirmed mapping).
  * Does not filter is_active in SQL so inactive rows can be diagnosed.
+ * Does not treat staff_profiles.id as an Auth user id.
  */
 export async function lookupStaffRowForAuthUser(
   client: { from: (table: string) => unknown },
@@ -90,17 +83,7 @@ export async function lookupStaffRowForAuthUser(
   if (byAuthError) {
     return { ok: false, error: byAuthError.message };
   }
-  if (byAuth) return { ok: true, row: byAuth };
-
-  const { data: byId, error: byIdError } = await staffProfiles(client)
-    .select(STAFF_SELECT)
-    .eq("id", authUserId)
-    .maybeSingle();
-
-  if (byIdError) {
-    return { ok: false, error: byIdError.message };
-  }
-  return { ok: true, row: byId };
+  return { ok: true, row: byAuth ?? null };
 }
 
 /**

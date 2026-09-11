@@ -14,6 +14,11 @@ export function isStaffLoginApiPath(pathname: string): boolean {
   return pathname === STAFF_LOGIN_API_PATH;
 }
 
+/** Login pages and the server login API must be reachable without a staff session. */
+export function isStaffPublicPath(pathname: string): boolean {
+  return isStaffLoginPath(pathname) || isStaffLoginApiPath(pathname);
+}
+
 export function staffLoginPathFor(targetPath: string): string {
   if (targetPath === "/admin" || targetPath.startsWith("/admin/")) {
     return STAFF_DASHBOARD_LOGIN_PATH;

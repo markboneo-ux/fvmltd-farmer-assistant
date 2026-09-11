@@ -82,7 +82,7 @@ describe("signup OTP type", () => {
 
   it("clears OTP digits after resend in the sign-in form", () => {
     const form = readFileSync(join(process.cwd(), "src/components/SignInForm.tsx"), "utf8");
-    expect(form).toMatch(/setCode\(\["", "", "", "", "", ""\]\)/);
+    expect(form).toMatch(/setCode\(\[\.\.\.EMPTY_OTP\]\)/);
     expect(form).toMatch(/We sent a new code\. Enter that latest code/);
   });
 });
