@@ -6,7 +6,11 @@ import {
   guestCookieOptions,
   normalizeGuestSessionId,
 } from "@/lib/beta/identity";
-import { isStaffLoginPath, staffLoginPathFor } from "@/lib/staff/login-path";
+import {
+  isStaffLoginApiPath,
+  isStaffLoginPath,
+  staffLoginPathFor,
+} from "@/lib/staff/login-path";
 
 function withGuestCookie(request: NextRequest, response: NextResponse) {
   const existing = normalizeGuestSessionId(
@@ -24,7 +28,8 @@ function withGuestCookie(request: NextRequest, response: NextResponse) {
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isStaffLogin = isStaffLoginPath(pathname);
+  const isStaffLogin =
+    isStaffLoginPath(pathname) || isStaffLoginApiPath(pathname);
   const isProtectedPage =
     pathname === "/staff" ||
     pathname.startsWith("/staff/") ||

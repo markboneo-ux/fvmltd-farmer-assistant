@@ -167,7 +167,10 @@ describe("staff dashboard sign-in separation", () => {
 
     const middleware = readFileSync(join(process.cwd(), "src/middleware.ts"), "utf8");
     expect(middleware).toMatch(/isStaffLoginPath/);
+    expect(middleware).toMatch(/isStaffLoginApiPath/);
     const loginPage = readFileSync(join(process.cwd(), "src/app/admin/login/page.tsx"), "utf8");
     expect(loginPage).toMatch(/Staff dashboard sign-in/);
+    const form = readFileSync(join(process.cwd(), "src/components/staff/StaffLoginForm.tsx"), "utf8");
+    expect(form).toMatch(/STAFF_LOGIN_API_PATH/);
   });
 });

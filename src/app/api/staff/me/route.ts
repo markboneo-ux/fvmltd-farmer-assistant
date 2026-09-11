@@ -7,7 +7,7 @@ export async function GET() {
   const session = await getStaffSession();
   if (!session.ok) {
     return NextResponse.json(
-      { error: session.error },
+      { error: session.error, stage: session.stage ?? null },
       { status: session.status },
     );
   }

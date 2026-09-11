@@ -203,4 +203,20 @@ describe("staff vs farmer authorization", () => {
       )?.authUserId,
     ).toBe("staff-user");
   });
+
+  it("rejects an inactive staff row even when auth_user_id matches", () => {
+    expect(
+      mapStaffUser(
+        {
+          id: "staff-1",
+          auth_user_id: "staff-user",
+          full_name: "Ada",
+          email: "ada@fvmltd.example",
+          role: "agronomist",
+          is_active: false,
+        },
+        "staff-user",
+      ),
+    ).toBeNull();
+  });
 });
