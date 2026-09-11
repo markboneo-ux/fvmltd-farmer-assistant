@@ -7,7 +7,7 @@ import { safeStaffNextPath } from "@/lib/staff/next-path";
 import { redirect } from "next/navigation";
 
 type PageProps = {
-  searchParams: Promise<{ next?: string; error?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; reset?: string }>;
 };
 
 export default async function AdminStaffLoginPage({ searchParams }: PageProps) {
@@ -29,6 +29,11 @@ export default async function AdminStaffLoginPage({ searchParams }: PageProps) {
           <p className="mb-4 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">
             Supabase is not configured. Add environment variables before signing
             in.
+          </p>
+        ) : null}
+        {params.reset === "success" ? (
+          <p className="mb-4 rounded-xl bg-leaf/10 px-3 py-2 text-sm text-canopy">
+            Your password was updated. Sign in with your new password.
           </p>
         ) : null}
         <StaffLoginForm nextPath={nextPath} />

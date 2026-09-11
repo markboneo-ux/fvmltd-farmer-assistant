@@ -61,7 +61,7 @@ describe("staff login path", () => {
     expect(staffLoginHelper).toMatch(/lookupStaffRowForAuthUser/);
     expect(staffLoginHelper).toMatch(/signOut/);
     expect(isStaffPublicPath(STAFF_LOGIN_API_PATH)).toBe(true);
-    expect(middleware).toMatch(/isStaffLoginApiPath/);
+    expect(middleware).toMatch(/isStaffPublicPath/);
     expect(safeStaffNextPath("/admin/insights")).toBe("/admin/insights");
     expect(client).toMatch(/process\.env\.NEXT_PUBLIC_SUPABASE_URL/);
   });

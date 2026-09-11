@@ -5,6 +5,7 @@ import { GUEST_COOKIE_NAME } from "@/lib/beta/identity";
 import { normalizeGuestSessionId } from "@/lib/beta/identity";
 import { logOps } from "@/lib/security/ops-log";
 import { absoluteAppUrl } from "@/lib/config/urls";
+import { STAFF_RESET_PASSWORD_PATH } from "@/lib/staff/recovery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +13,51 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
+  const tokenHash = url.searchParams.get("token_hash");
+  const type = url.searchParams.get("type");
   const next = url.searchParams.get("next") || "/";
   const origin = absoluteAppUrl("/") || url.origin;
+  const isFarmerResetNext = next.startsWith("/signin");
+  const isStaffRecovery =
+    next.startsWith(STAFF_RESET_PASSWORD_PATH) ||
+    (type === "recovery" && !isFarmerResetNext);
+  const resetUrl = `${origin}${STAFF_RESET_PASSWORD_PATH}`;
+
+  if (tokenHash && type === "recovery") {
+    try {
+      const supabase = await createClient();
+      const { error } = await supabase.auth.verifyOtp({
+        type: "recovery",
+        token_hash: tokenHash,
+      });
+      if (error) {
+        logOps("auth_failure", {
+          route: "auth-callback",
+          stage: "invalid_recovery_token",
+          error: error.message,
+        });
+        if (isFarmerResetNext) {
+          return NextResponse.redirect(`${origin}/signin?error=auth`);
+        }
+        return NextResponse.redirect(`${resetUrl}?error=invalid`);
+      }
+      if (isFarmerResetNext) {
+        return NextResponse.redirect(`${origin}${next.startsWith("/") ? next : "/signin?mode=reset"}`);
+      }
+      return NextResponse.redirect(resetUrl);
+    } catch (error) {
+      logOps("auth_failure", {
+        route: "auth-callback",
+        error: error instanceof Error ? error.message : "recovery verify failed",
+      });
+      return NextResponse.redirect(`${resetUrl}?error=invalid`);
+    }
+  }
 
   if (!code) {
+    if (isStaffRecovery) {
+      return NextResponse.redirect(`${resetUrl}?error=missing`);
+    }
     return NextResponse.redirect(`${origin}/signin?error=auth`);
   }
 
@@ -24,7 +66,14 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error || !data.user) {
       logOps("auth_failure", { error: error?.message ?? "no user" });
+      if (isStaffRecovery) {
+        return NextResponse.redirect(`${resetUrl}?error=invalid`);
+      }
       return NextResponse.redirect(`${origin}/signin?error=auth`);
+    }
+
+    if (isStaffRecovery) {
+      return NextResponse.redirect(resetUrl);
     }
 
     const cookieHeader = request.headers.get("cookie") ?? "";
@@ -49,6 +98,9 @@ export async function GET(request: Request) {
     logOps("auth_failure", {
       error: error instanceof Error ? error.message : "callback failed",
     });
+    if (isStaffRecovery) {
+      return NextResponse.redirect(`${resetUrl}?error=invalid`);
+    }
     return NextResponse.redirect(`${origin}/signin?error=auth`);
   }
 }

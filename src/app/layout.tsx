@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { StaffRecoveryRedirect } from "@/components/staff/StaffRecoveryRedirect";
 import { PRODUCT_NAME, PRODUCT_SUBTITLE } from "@/lib/brand";
 import "./globals.css";
 
@@ -40,7 +41,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
-      <body className="min-h-full overflow-x-hidden antialiased">{children}</body>
+      <body className="min-h-full overflow-x-hidden antialiased">
+        <StaffRecoveryRedirect />
+        {children}
+      </body>
     </html>
   );
 }

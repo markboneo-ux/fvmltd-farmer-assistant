@@ -166,11 +166,13 @@ describe("staff dashboard sign-in separation", () => {
     }
 
     const middleware = readFileSync(join(process.cwd(), "src/middleware.ts"), "utf8");
-    expect(middleware).toMatch(/isStaffLoginPath/);
-    expect(middleware).toMatch(/isStaffLoginApiPath/);
+    expect(middleware).toMatch(/isStaffPublicPath/);
+    expect(middleware).toMatch(/isStaffRecoveryPath/);
     const loginPage = readFileSync(join(process.cwd(), "src/app/admin/login/page.tsx"), "utf8");
     expect(loginPage).toMatch(/Staff dashboard sign-in/);
+    expect(loginPage).toMatch(/Your password was updated/);
     const form = readFileSync(join(process.cwd(), "src/components/staff/StaffLoginForm.tsx"), "utf8");
     expect(form).toMatch(/STAFF_LOGIN_API_PATH/);
+    expect(form).toMatch(/Forgot password\?/);
   });
 });

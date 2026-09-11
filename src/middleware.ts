@@ -7,10 +7,15 @@ import {
   normalizeGuestSessionId,
 } from "@/lib/beta/identity";
 import {
-  isStaffLoginApiPath,
-  isStaffLoginPath,
+  isStaffPublicPath,
   staffLoginPathFor,
 } from "@/lib/staff/login-path";
+import {
+  isRecoverySearchParams,
+  isStaffRecoveryApiPath,
+  isStaffRecoveryPath,
+  STAFF_RESET_PASSWORD_PATH,
+} from "@/lib/staff/recovery";
 
 function withGuestCookie(request: NextRequest, response: NextResponse) {
   const existing = normalizeGuestSessionId(
@@ -29,7 +34,9 @@ function withGuestCookie(request: NextRequest, response: NextResponse) {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isStaffLogin =
-    isStaffLoginPath(pathname) || isStaffLoginApiPath(pathname);
+    isStaffPublicPath(pathname) ||
+    isStaffRecoveryPath(pathname) ||
+    isStaffRecoveryApiPath(pathname);
   const isProtectedPage =
     pathname === "/staff" ||
     pathname.startsWith("/staff/") ||
@@ -39,6 +46,16 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/staff") || pathname.startsWith("/api/admin");
 
   if (!isProtectedPage && !isProtectedApi) {
+    if (
+      isRecoverySearchParams(request.nextUrl.searchParams) &&
+      pathname !== STAFF_RESET_PASSWORD_PATH &&
+      !pathname.startsWith("/signin") &&
+      pathname !== "/auth/callback"
+    ) {
+      const dest = request.nextUrl.clone();
+      dest.pathname = STAFF_RESET_PASSWORD_PATH;
+      return NextResponse.redirect(dest);
+    }
     return withGuestCookie(request, NextResponse.next());
   }
 

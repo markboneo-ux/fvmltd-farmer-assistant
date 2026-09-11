@@ -177,7 +177,7 @@ describe("staff login route wiring", () => {
     expect(isStaffLoginApiPath(STAFF_LOGIN_API_PATH)).toBe(true);
 
     const middleware = readFileSync(join(process.cwd(), "src/middleware.ts"), "utf8");
-    expect(middleware).toMatch(/isStaffLoginApiPath/);
+    expect(middleware).toMatch(/isStaffPublicPath/);
 
     const form = readFileSync(
       join(process.cwd(), "src/components/staff/StaffLoginForm.tsx"),
@@ -186,6 +186,7 @@ describe("staff login route wiring", () => {
     expect(form).toMatch(/STAFF_LOGIN_API_PATH/);
     expect(form).toMatch(/PasswordField/);
     expect(form).toMatch(/window\.location\.assign/);
+    expect(form).toMatch(/Forgot password\?/);
     expect(form).not.toMatch(/signInWithPassword/);
 
     const passwordField = readFileSync(
