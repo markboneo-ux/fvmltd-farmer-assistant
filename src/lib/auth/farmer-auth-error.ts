@@ -2,6 +2,11 @@
  * Farmer-facing auth errors. Never expose raw Supabase / HTTP messages.
  */
 
+import {
+  EXISTING_ACCOUNT_MESSAGE,
+  OTP_RESEND_WAIT_MESSAGE,
+} from "@/lib/auth/signup-outcome";
+
 const ALREADY_REGISTERED =
   /already\s+registered|user already exists|email address is already|already been registered/i;
 const INVALID_CREDENTIALS = /invalid login|invalid credentials|invalid email or password/i;
@@ -10,7 +15,8 @@ const OTP_EXPIRED_OR_INVALID = /token has expired or is invalid/i;
 const EXPIRED_OTP = /otp_expired|token has expired|otp expired/i;
 const INVALID_OTP = /invalid.*(otp|token|code)|token not found|otp_disabled/i;
 const NOT_CONFIRMED = /email not confirmed|not confirmed/i;
-const RATE_LIMITED = /rate limit|too many requests|over_email_send_rate_limit/i;
+const RATE_LIMITED =
+  /rate limit|too many requests|over_email_send_rate_limit|you can only request this after|email rate limit/i;
 const NETWORK = /fetch|network|failed to fetch|timeout|econnreset/i;
 const TECHNICAL =
   /supabase|jwt|gotrue|postgres|stack|sql|http\s*\d+|status code|auth api/i;
@@ -39,13 +45,13 @@ export function farmerAuthError(
   if (status === 429 || RATE_LIMITED.test(raw)) {
     return {
       code: "rate_limited",
-      message: "Please wait a moment before requesting another code.",
+      message: OTP_RESEND_WAIT_MESSAGE,
     };
   }
   if (ALREADY_REGISTERED.test(raw)) {
     return {
       code: "existing_account",
-      message: "An account with this email already exists. Try logging in.",
+      message: EXISTING_ACCOUNT_MESSAGE,
     };
   }
   if (OTP_EXPIRED_OR_INVALID.test(raw) || errorCode === "otp_expired") {

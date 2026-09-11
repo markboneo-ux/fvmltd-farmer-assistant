@@ -58,9 +58,21 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const verified = await supabase.auth.verifyOtp(farmerSignupOtpVerifyParams(email, token));
     if (verified.error || !verified.data.user) {
-      logOps("auth_failure", { error: verified.error?.message ?? "otp failed" });
+      logOps("auth_failure", {
+        route: "otp-verify",
+        error: verified.error?.message ?? "otp failed",
+      });
       const mapped = farmerAuthError(verified.error);
       return NextResponse.json({ error: mapped.message, code: mapped.code }, { status: 400 });
+    }
+
+    const sessionEstablished = Boolean(verified.data.session);
+    if (!sessionEstablished) {
+      logOps("auth_failure", {
+        route: "otp-verify",
+        reason: "session_missing",
+        authUserPrefix: verified.data.user.id.slice(0, 8),
+      });
     }
 
     const completed = await completeFarmerAuthentication({
@@ -75,6 +87,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      sessionEstablished,
       linkedGuestCases: completed.linkedGuestCases,
     });
   } catch (error) {

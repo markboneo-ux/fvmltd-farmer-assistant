@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error || !data.user) {
-      logOps("auth_failure", { error: error?.message ?? "login failed" });
+      logOps("auth_failure", { route: "login", error: error?.message ?? "login failed" });
       const mapped = farmerAuthError(error);
       return NextResponse.json({ error: mapped.message, code: mapped.code }, { status: 400 });
     }
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      sessionEstablished: true,
       linkedGuestCases: completed.linkedGuestCases,
     });
   } catch (error) {
