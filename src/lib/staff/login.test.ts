@@ -86,7 +86,7 @@ describe("staff login stage classification", () => {
     );
   });
 
-  it("detects staff lookup failure and inactive staff", () => {
+  it("detects staff lookup failure, inactive staff, and service-role project mismatch", () => {
     expect(
       classifyStaffLoginAttempt(
         snapshot({ staffLookupError: "relation staff_profiles does not exist" }),
@@ -97,6 +97,15 @@ describe("staff login stage classification", () => {
         snapshot({ staffActive: false, staffLinked: false }),
       ).stage,
     ).toBe("staff_inactive");
+    expect(
+      classifyStaffLoginAttempt(
+        snapshot({
+          staffLookupError: "Invalid API key",
+          serviceRoleRef: "qzycpoivwwecooscnnju",
+          urlProjectRef: "gcojtfrdjczrvzieynzj",
+        }),
+      ).stage,
+    ).toBe("service_role_project_mismatch");
   });
 
   it("flags Preview talking to Production Supabase", () => {

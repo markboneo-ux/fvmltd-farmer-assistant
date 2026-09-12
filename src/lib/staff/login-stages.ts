@@ -12,6 +12,7 @@ export const STAFF_LOGIN_STAGES = [
   "auth_success_no_session",
   "session_cookie_not_persisted",
   "staff_lookup_failed",
+  "service_role_project_mismatch",
   "staff_inactive",
   "staff_not_linked",
   "wrong_supabase_environment",
@@ -35,6 +36,9 @@ export type StaffLoginDebug = {
   staffActive: boolean | null;
   supabaseHost: string | null;
   vercelEnv: string | null;
+  lookupErrorClass?: string | null;
+  serviceRoleRef?: string | null;
+  urlProjectRef?: string | null;
 };
 
 export type StaffLoginAttemptSnapshot = {
@@ -47,9 +51,12 @@ export type StaffLoginAttemptSnapshot = {
   cookieWriteError: string | null;
   hydratedUserId: string | null;
   staffLookupError: string | null;
+  staffLookupErrorClass?: string | null;
   staffRowAuthUserId: string | null;
   staffActive: boolean | null;
   staffLinked: boolean;
+  serviceRoleRef?: string | null;
+  urlProjectRef?: string | null;
 };
 
 export function supabaseHostFromUrl(url: string | null | undefined): string | null {
@@ -107,6 +114,7 @@ export function staffLoginHttpStatus(stage: StaffLoginStage): number {
       return 403;
     case "supabase_not_configured":
     case "wrong_supabase_environment":
+    case "service_role_project_mismatch":
     case "staff_lookup_failed":
       return 503;
     default:
@@ -156,6 +164,13 @@ export function classifyStaffLoginAttempt(
     if (detectWrongSupabaseEnvironment(snapshot)) {
       return stageResult("wrong_supabase_environment");
     }
+    if (
+      snapshot.serviceRoleRef &&
+      snapshot.urlProjectRef &&
+      snapshot.serviceRoleRef !== snapshot.urlProjectRef
+    ) {
+      return stageResult("service_role_project_mismatch");
+    }
     return stageResult("staff_lookup_failed");
   }
 
@@ -190,6 +205,9 @@ export function debugFromSnapshot(
     staffActive: snapshot.staffActive,
     supabaseHost: snapshot.supabaseHost,
     vercelEnv: snapshot.vercelEnv,
+    lookupErrorClass: snapshot.staffLookupErrorClass ?? null,
+    serviceRoleRef: snapshot.serviceRoleRef ?? null,
+    urlProjectRef: snapshot.urlProjectRef ?? null,
   };
 }
 

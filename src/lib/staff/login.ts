@@ -2,10 +2,18 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { getSupabasePublicEnv } from "@/lib/supabase/env";
+import { getSupabasePublicEnv, getSupabaseServiceRoleKey } from "@/lib/supabase/env";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
+import {
+  projectRefFromJwt,
+  projectRefFromSupabaseUrl,
+} from "@/lib/supabase/project-ref";
 import { logOps } from "@/lib/security/ops-log";
 import { classifyStaffRow, lookupStaffRowForAuthUser } from "./auth";
+import {
+  classifyStaffLookupError,
+  sanitizeLookupError,
+} from "./lookup-error";
 import type { StaffUser } from "./types";
 import {
   classifyStaffLoginAttempt,
@@ -41,12 +49,20 @@ export async function staffPasswordLogin(options: {
 }): Promise<StaffPasswordLoginResult> {
   const vercelEnv = process.env.VERCEL_ENV ?? null;
   let supabaseHost: string | null = null;
+  let urlProjectRef: string | null = null;
+  let serviceRoleRef: string | null = null;
   const written: WrittenCookie[] = [];
   let cookieWriteError: string | null = null;
 
   try {
     const { url, anonKey } = getSupabasePublicEnv();
     supabaseHost = supabaseHostFromUrl(url);
+    urlProjectRef = projectRefFromSupabaseUrl(url);
+    try {
+      serviceRoleRef = projectRefFromJwt(getSupabaseServiceRoleKey());
+    } catch {
+      serviceRoleRef = null;
+    }
     const cookieStore = await cookies();
 
     const supabase = createServerClient(url, anonKey, {
@@ -94,9 +110,12 @@ export async function staffPasswordLogin(options: {
       cookieWriteError,
       hydratedUserId: null,
       staffLookupError: null,
+      staffLookupErrorClass: null,
       staffRowAuthUserId: null,
       staffActive: null,
       staffLinked: false,
+      serviceRoleRef,
+      urlProjectRef,
     };
 
     if (error || !userId || !hasSession) {
@@ -112,13 +131,22 @@ export async function staffPasswordLogin(options: {
     const admin = tryCreateAdminClient();
     if (!admin.ok) {
       snapshot.staffLookupError = admin.error;
+      snapshot.staffLookupErrorClass = classifyStaffLookupError(admin.error);
       return fail(snapshot);
     }
 
-    const lookup = await lookupStaffRowForAuthUser(admin.client, userId);
+    let lookup = await lookupStaffRowForAuthUser(admin.client, userId);
     if (!lookup.ok) {
-      snapshot.staffLookupError = lookup.error;
-      return fail(snapshot);
+      snapshot.staffLookupError = sanitizeLookupError(lookup.error);
+      snapshot.staffLookupErrorClass = classifyStaffLookupError(lookup.error);
+      const sessionLookup = await lookupStaffRowForAuthUser(supabase, userId);
+      if (sessionLookup.ok) {
+        lookup = sessionLookup;
+        snapshot.staffLookupError = null;
+        snapshot.staffLookupErrorClass = null;
+      } else {
+        return fail(snapshot);
+      }
     }
 
     snapshot.staffRowAuthUserId = lookup.row?.auth_user_id ?? null;
@@ -160,9 +188,12 @@ export async function staffPasswordLogin(options: {
       cookieWriteError,
       hydratedUserId: null,
       staffLookupError: null,
+      staffLookupErrorClass: null,
       staffRowAuthUserId: null,
       staffActive: null,
       staffLinked: false,
+      serviceRoleRef,
+      urlProjectRef,
     };
     return fail(snapshot);
   }
@@ -209,6 +240,9 @@ function fail(snapshot: StaffLoginAttemptSnapshot): StaffPasswordLoginResult {
     staffActive: debug.staffActive,
     supabaseHost: debug.supabaseHost,
     vercelEnv: debug.vercelEnv,
+    lookupErrorClass: debug.lookupErrorClass ?? null,
+    serviceRoleRef: debug.serviceRoleRef ?? null,
+    urlProjectRef: debug.urlProjectRef ?? null,
   });
   return {
     ok: false,

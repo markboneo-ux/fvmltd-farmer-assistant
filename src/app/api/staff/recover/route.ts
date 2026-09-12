@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createImplicitAuthClient } from "@/lib/supabase/implicit";
 import { normalizeFarmerEmail } from "@/lib/auth/farmer-otp";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
 import {
@@ -65,17 +65,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = await createClient();
+    // Implicit flow: recovery email is not bound to a PKCE verifier in this
+    // browser, so the staff member can open it on another device/tab.
+    const supabase = createImplicitAuthClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
       logOps("auth_failure", {
         route: "staff-recover",
         error: error.message,
+        flowType: "implicit",
       });
     } else {
       logOps("auth_failure", {
         route: "staff-recover",
         stage: "recovery_email_sent",
+        flowType: "implicit",
         redirectHost: new URL(redirectTo).host,
       });
     }

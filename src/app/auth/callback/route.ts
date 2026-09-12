@@ -5,7 +5,7 @@ import { GUEST_COOKIE_NAME } from "@/lib/beta/identity";
 import { normalizeGuestSessionId } from "@/lib/beta/identity";
 import { logOps } from "@/lib/security/ops-log";
 import { absoluteAppUrl } from "@/lib/config/urls";
-import { STAFF_RESET_PASSWORD_PATH } from "@/lib/staff/recovery";
+import { staffResetForwardUrl, STAFF_RESET_PASSWORD_PATH } from "@/lib/staff/recovery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +21,17 @@ export async function GET(request: Request) {
   const isStaffRecovery =
     next.startsWith(STAFF_RESET_PASSWORD_PATH) ||
     (type === "recovery" && !isFarmerResetNext);
-  const resetUrl = `${origin}${STAFF_RESET_PASSWORD_PATH}`;
+
+  // Do not consume staff recovery tokens here. Forward the format to
+  // /admin/reset-password so a click on that page hydrates once.
+  if (isStaffRecovery) {
+    logOps("auth_failure", {
+      route: "auth-callback",
+      stage: "staff_recovery_forward",
+      format: tokenHash ? "token_hash" : code ? "pkce_code" : "none",
+    });
+    return NextResponse.redirect(staffResetForwardUrl(origin, url.searchParams));
+  }
 
   if (tokenHash && type === "recovery") {
     try {
@@ -36,28 +46,21 @@ export async function GET(request: Request) {
           stage: "invalid_recovery_token",
           error: error.message,
         });
-        if (isFarmerResetNext) {
-          return NextResponse.redirect(`${origin}/signin?error=auth`);
-        }
-        return NextResponse.redirect(`${resetUrl}?error=invalid`);
+        return NextResponse.redirect(`${origin}/signin?error=auth`);
       }
-      if (isFarmerResetNext) {
-        return NextResponse.redirect(`${origin}${next.startsWith("/") ? next : "/signin?mode=reset"}`);
-      }
-      return NextResponse.redirect(resetUrl);
+      return NextResponse.redirect(
+        `${origin}${next.startsWith("/") ? next : "/signin?mode=reset"}`,
+      );
     } catch (error) {
       logOps("auth_failure", {
         route: "auth-callback",
         error: error instanceof Error ? error.message : "recovery verify failed",
       });
-      return NextResponse.redirect(`${resetUrl}?error=invalid`);
+      return NextResponse.redirect(`${origin}/signin?error=auth`);
     }
   }
 
   if (!code) {
-    if (isStaffRecovery) {
-      return NextResponse.redirect(`${resetUrl}?error=missing`);
-    }
     return NextResponse.redirect(`${origin}/signin?error=auth`);
   }
 
@@ -66,14 +69,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error || !data.user) {
       logOps("auth_failure", { error: error?.message ?? "no user" });
-      if (isStaffRecovery) {
-        return NextResponse.redirect(`${resetUrl}?error=invalid`);
-      }
       return NextResponse.redirect(`${origin}/signin?error=auth`);
-    }
-
-    if (isStaffRecovery) {
-      return NextResponse.redirect(resetUrl);
     }
 
     const cookieHeader = request.headers.get("cookie") ?? "";
@@ -98,9 +94,6 @@ export async function GET(request: Request) {
     logOps("auth_failure", {
       error: error instanceof Error ? error.message : "callback failed",
     });
-    if (isStaffRecovery) {
-      return NextResponse.redirect(`${resetUrl}?error=invalid`);
-    }
     return NextResponse.redirect(`${origin}/signin?error=auth`);
   }
 }

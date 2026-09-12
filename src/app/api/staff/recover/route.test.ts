@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(),
+vi.mock("@/lib/supabase/implicit", () => ({
+  createImplicitAuthClient: vi.fn(),
 }));
 vi.mock("@/lib/supabase/helpers", () => ({
   tryCreateAdminClient: vi.fn(),
 }));
 
-import { createClient } from "@/lib/supabase/server";
+import { createImplicitAuthClient } from "@/lib/supabase/implicit";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
 
 describe("staff recover API", () => {
   beforeEach(() => {
-    vi.mocked(createClient).mockReset();
+    vi.mocked(createImplicitAuthClient).mockReset();
     vi.mocked(tryCreateAdminClient).mockReset();
   });
 
-  it("sends a generic message and uses the staff reset redirect", async () => {
+  it("sends implicit-flow recovery to the staff reset page, not PKCE cookies", async () => {
     vi.mocked(tryCreateAdminClient).mockReturnValue({
       ok: true,
       client: {
@@ -44,7 +44,7 @@ describe("staff recover API", () => {
       },
     } as never);
     const resetPasswordForEmail = vi.fn(async () => ({ error: null }));
-    vi.mocked(createClient).mockResolvedValue({
+    vi.mocked(createImplicitAuthClient).mockReturnValue({
       auth: { resetPasswordForEmail },
     } as never);
 

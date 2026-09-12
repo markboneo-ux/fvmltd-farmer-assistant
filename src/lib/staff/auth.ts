@@ -12,6 +12,7 @@ import {
   authorizeStaffRecord,
   type StaffProfileRow,
 } from "./authorize";
+import { classifyStaffLookupError } from "./lookup-error";
 import type { StaffUser } from "./types";
 
 export type StaffRow = {
@@ -135,20 +136,26 @@ export async function getStaffSession(): Promise<
     };
   }
 
-  const lookup = await lookupStaffRowForAuthUser(admin.client, authUserId);
+  let lookup = await lookupStaffRowForAuthUser(admin.client, authUserId);
   if (!lookup.ok) {
-    logStaffGate("staff_lookup_failed", {
-      supabaseHost,
-      vercelEnv,
-      authUserId,
-      error: lookup.error,
-    });
-    return {
-      ok: false,
-      status: 503,
-      stage: "staff_lookup_failed",
-      error: "Could not verify staff access.",
-    };
+    const sessionClient = await createClient();
+    const sessionLookup = await lookupStaffRowForAuthUser(sessionClient, authUserId);
+    if (sessionLookup.ok) {
+      lookup = sessionLookup;
+    } else {
+      logStaffGate("staff_lookup_failed", {
+        supabaseHost,
+        vercelEnv,
+        error: lookup.error,
+        lookupErrorClass: classifyStaffLookupError(lookup.error),
+      });
+      return {
+        ok: false,
+        status: 503,
+        stage: "staff_lookup_failed",
+        error: "Could not verify staff access.",
+      };
+    }
   }
 
   const classified = classifyStaffRow(lookup.row, authUserId);

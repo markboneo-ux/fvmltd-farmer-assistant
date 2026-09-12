@@ -19,6 +19,9 @@ type StaffLoginResponse = {
     stage?: StaffLoginStage;
     supabaseHost?: string | null;
     vercelEnv?: string | null;
+    lookupErrorClass?: string | null;
+    serviceRoleRef?: string | null;
+    urlProjectRef?: string | null;
   };
 };
 
@@ -84,8 +87,12 @@ export function StaffLoginForm({
       const nextStage = payload?.stage ?? payload?.debug?.stage ?? null;
       const debugBits = [
         nextStage,
+        payload?.debug?.lookupErrorClass,
         payload?.debug?.supabaseHost,
         payload?.debug?.vercelEnv,
+        payload?.debug?.serviceRoleRef && payload?.debug?.urlProjectRef
+          ? `keyRef=${payload.debug.serviceRoleRef}`
+          : null,
       ].filter(Boolean);
       if (debugBits.length > 0) {
         setStageLine(debugBits.join(" · "));

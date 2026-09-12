@@ -81,6 +81,18 @@ Required `case_messages` extra columns: `conversation_intent`, `question_categor
 
 This agent **cannot** apply SQL to `gcojtfrdjczrvzieynzj` (Management API 403; the access token only sees Production `qzycpoivwwecooscnnju`).
 
+### Preview staff login (`staff_lookup_failed`)
+
+`/admin/login` authenticates against **this** Preview project, then reads `staff_profiles` with the server service-role client. A live Preview failure of `staff_lookup_failed · gcojtfrdjczrvzieynzj.supabase.co · preview` means Auth succeeded and the table/query failed — not that Production is missing the row.
+
+Do **not** copy a Production `auth.users.id` into Preview. Run **`docs/preview-staff-mapping.sql`** in the SQL editor for `gcojtfrdjczrvzieynzj`. That script:
+
+1. Grants `staff_profiles` to `service_role` / `authenticated` and reloads PostgREST.
+2. Looks up `info@fvmltd.com` in **this** project's `auth.users`.
+3. Upserts an active `staff_profiles` row whose `auth_user_id` equals that Auth UUID.
+
+Also confirm Vercel Preview `SUPABASE_SERVICE_ROLE_KEY` is the service-role key for `gcojtfrdjczrvzieynzj`, not Production. After deploy, `GET /api/staff/preview-diagnostics` with header `x-fvm-debug: 1` reports whether the Auth user, staff row, grants, and JWT `ref` match — still against Preview, never Production.
+
 ### Compatibility shim
 
 The app still retries unknown optional columns if PostgREST returns `PGRST204`. That is defensive only. After Preview is aligned, `x-fvm-debug: 1` must return `schemaCompatUsed=false` and `schemaCompatDroppedColumns=[]`.
