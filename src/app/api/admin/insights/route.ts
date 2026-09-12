@@ -5,6 +5,12 @@ import type { InsightsFilters } from "@/lib/admin/insights";
 import { CasePersistenceError } from "@/lib/cases/store";
 import { logOps } from "@/lib/security/ops-log";
 import { upsertTrustedSources } from "@/lib/research/persist";
+import {
+  getInsightsSourceFailures,
+  loadInsightsSource,
+  resetInsightsSourceFailures,
+} from "@/lib/admin/insights-sources";
+import { sanitizeLookupError } from "@/lib/staff/lookup-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,16 +58,42 @@ export async function GET(request: Request) {
   };
 
   try {
-    void upsertTrustedSources();
+    resetInsightsSourceFailures();
+    await loadInsightsSource("trusted_sources", () => upsertTrustedSources(), undefined);
+    const insights = await buildInsights(filters);
+    const trends = await detectTrends(filters);
+    const warnings = getInsightsSourceFailures();
     return NextResponse.json({
-      insights: await buildInsights(filters),
-      trends: await detectTrends(filters),
+      insights,
+      trends,
+      warnings,
     });
   } catch (error) {
-    if (error instanceof CasePersistenceError) {
-      logOps("database_failure", { route: "admin/insights" });
-      return NextResponse.json({ error: "Insights are temporarily unavailable." }, { status: 503 });
-    }
-    throw error;
+    const table =
+      error instanceof CasePersistenceError
+        ? error.table
+        : error &&
+            typeof error === "object" &&
+            "table" in error &&
+            typeof (error as { table?: unknown }).table === "string"
+          ? (error as { table: string }).table
+          : null;
+    const detail =
+      error instanceof Error
+        ? sanitizeLookupError(error.message)
+        : "insights query failed";
+    logOps("database_failure", {
+      route: "admin/insights",
+      table,
+      error: detail,
+    });
+    return NextResponse.json(
+      {
+        error: "Insights are temporarily unavailable.",
+        table,
+        detail,
+      },
+      { status: 503 },
+    );
   }
 }

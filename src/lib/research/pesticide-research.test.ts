@@ -524,7 +524,7 @@ describe("sources stay collapsed and persistence is unchanged", () => {
         persistenceFailed: true,
         caseId: null,
       }),
-    ).toMatch(/Saving this chat for later failed/i);
+    ).toMatch(/couldn’t save this conversation/i);
   });
 });
 

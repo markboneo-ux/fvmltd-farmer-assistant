@@ -34,6 +34,8 @@ import { logStageFailure } from "@/lib/errors/correlation";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
 import { countUsage, recordUsageEvent } from "./usage-store";
+import { countPersistedUsage } from "./persist-usage";
+import { maybeStoreFarmerContextHints } from "@/lib/auth/complete-farmer-auth";
 
 export type ConversationGate = UsageDecision & {
   used: ReturnType<typeof countUsage>;
@@ -43,10 +45,21 @@ export async function evaluateConversationGate(options: {
   identity: AppIdentity;
   next: "message" | "case" | "image_analysis";
 }): Promise<ConversationGate> {
-  const used = countUsage({
+  const persisted = await countPersistedUsage({
     guestSessionId: options.identity.guestSessionId,
     authUserId: options.identity.authUserId,
   });
+  const memoryUsed = countUsage({
+    guestSessionId: options.identity.guestSessionId,
+    authUserId: options.identity.authUserId,
+  });
+  const used = persisted
+    ? {
+        messages: Math.max(persisted.messages, memoryUsed.messages),
+        cases: Math.max(persisted.cases, memoryUsed.cases),
+        imageAnalyses: Math.max(persisted.imageAnalyses, memoryUsed.imageAnalyses),
+      }
+    : memoryUsed;
   const activeCaseInProgress = await hasActiveCase({
     userId: options.identity.authUserId,
     anonymousSessionId: options.identity.guestSessionId,
@@ -233,6 +246,7 @@ export async function persistConversationTurn(options: {
     createdNewCase,
     options,
     profile,
+    identity,
   });
 
   return { caseId: record.id, createdNewCase };
@@ -243,14 +257,25 @@ async function persistConversationEnrichment(input: {
   classified: ReturnType<typeof resolveConversationIntent>;
   createdNewCase: boolean;
   profile: { country?: string | null; district?: string | null };
+  identity: AppIdentity;
   options: {
     userMessage: string;
     payload?: AgronomicCasePayload | null;
     correlationId?: string;
   };
 }) {
-  const { record, options, classified, createdNewCase, profile } = input;
+  const { record, options, classified, createdNewCase, profile, identity } = input;
   try {
+    await maybeStoreFarmerContextHints({
+      farmerProfileId: identity.farmerProfileId,
+      authUserId: identity.authUserId,
+      country:
+        options.payload?.regionalContext?.country || profile.country || null,
+      district:
+        options.payload?.regionalContext?.district || profile.district || null,
+      crops: record.crop ? [record.crop] : undefined,
+      farmSizeText: options.userMessage,
+    });
     await updateCaseFromConversation(record.id, options.userMessage, {
       country:
         options.payload?.regionalContext?.country || profile.country || undefined,

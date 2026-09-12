@@ -1,15 +1,25 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { staffLoginPathFor } from "@/lib/staff/login-path";
 
 export function StaffSignOutButton() {
   const router = useRouter();
 
   async function signOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.replace("/staff/login");
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } catch {
+      // Redirect to login even if the logout request fails.
+    }
+    const nextLogin =
+      typeof window !== "undefined"
+        ? staffLoginPathFor(window.location.pathname)
+        : "/staff/login";
+    router.replace(nextLogin);
     router.refresh();
   }
 

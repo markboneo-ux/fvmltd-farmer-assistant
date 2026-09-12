@@ -14,6 +14,7 @@ import {
   sliceHistoryForCurrentIntent,
 } from "@/lib/assistant/context";
 import {
+  ASK_COUNTRY_QUESTION,
   farmerContextFromText,
   farmerContextSummary,
   mergeFarmerContext,
@@ -1197,7 +1198,7 @@ export async function runAgronomicCase(options: {
     rankedCausesForPrompt(rankedCauses),
     research ? researchNotesForPrompt(research) : "",
     askForCountry
-      ? 'Country is required for this local question. Ask: "What country are you farming in?" Give general agronomy only until the country is known. Do not use Trinidad information for another country.'
+      ? `Location is needed for this local question. Ask: "${ASK_COUNTRY_QUESTION}" Give general agronomy only until the area is known. Do not use Trinidad information for another country.`
       : "",
     weatherRelevance === "omit" || weatherRelevance === "none"
       ? "WEATHER GATE: Weather is not central to this question. Do not make weather or disease-pressure the main answer. Do not mention tomato early blight, late blight, or whitefly pressure unless the farmer named tomato and those pests."

@@ -21,10 +21,12 @@ import { farmerHistoryContent } from "@/lib/chat/visible-reply";
 import { getMainWebsiteUrl, MAIN_WEBSITE_LABEL } from "@/lib/config/urls";
 import {
   FARMER_GENERIC_ERROR,
-  GUEST_LIMIT_MESSAGE,
   REGISTERED_LIMIT_HEADING,
   UPGRADE_COMING_SOON,
 } from "@/lib/beta/limits";
+import { farmerFacingError } from "@/lib/beta/farmer-error";
+import { USAGE_LIMIT_MESSAGE } from "@/lib/beta/usage-notice";
+import { FarmerAccountMenu, type AccountIdentity } from "@/components/FarmerAccountMenu";
 import { farmerPersistenceBanner } from "@/lib/chat/persistence-warning";
 import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
 import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
@@ -146,9 +148,12 @@ export function FarmerCaseChat({
   const recordTimerRef = useRef<number | null>(null);
   const recordStartedAtRef = useRef<number>(0);
   const [mainWebsiteUrl] = useState(() => getMainWebsiteUrl());
-  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [accountIdentity, setAccountIdentity] = useState<AccountIdentity | null>(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [usageNotice, setUsageNotice] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(true);
 
-  const showWelcome = messages.length === 0 && !loading;
+  const showWelcome = messages.length === 0 && !loading && !restoring;
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({
@@ -161,37 +166,85 @@ export function FarmerCaseChat({
     void (async () => {
       try {
         const response = await fetch("/api/session");
-        if (!response.ok) return;
-        const payload = (await response.json()) as {
-          identity?: { access?: string; email?: string | null };
-          approaching?: boolean;
-          limitReached?: boolean;
-        };
-        if (payload.identity?.access) setAccess(payload.identity.access);
-        if (payload.identity?.email) setAccountEmail(payload.identity.email);
-        if (payload.limitReached) {
-          setLimitBanner(
-            payload.identity?.access === "guest"
-              ? GUEST_LIMIT_MESSAGE
-              : REGISTERED_LIMIT_HEADING,
-          );
+        if (response.ok) {
+          const payload = (await response.json()) as {
+            identity?: {
+              access?: string;
+              email?: string | null;
+              signedIn?: boolean;
+              displayName?: string | null;
+              initials?: string;
+              avatarUrl?: string | null;
+            };
+            approaching?: boolean;
+            limitReached?: boolean;
+            usageNotice?: { level?: string; message?: string } | null;
+          };
+          if (payload.identity?.access) setAccess(payload.identity.access);
+          setAccountIdentity({
+            signedIn: Boolean(payload.identity?.signedIn),
+            email: payload.identity?.email ?? null,
+            displayName: payload.identity?.displayName ?? null,
+            initials: payload.identity?.initials || "F",
+            avatarUrl: payload.identity?.avatarUrl ?? null,
+            access: payload.identity?.access,
+          });
+          if (payload.limitReached) {
+            setLimitBanner(USAGE_LIMIT_MESSAGE);
+          } else if (payload.usageNotice?.message) {
+            setUsageNotice(payload.usageNotice.message);
+          }
         }
       } catch {
         // Guest chat still works if session lookup fails.
       }
       try {
         const due = await fetch("/api/followups?due=1");
-        if (!due.ok) return;
-        const body = (await due.json()) as {
-          prompt?: string;
-          due?: { id: string; caseId: string } | null;
-        };
-        if (body.due?.id) {
-          setFollowup({ id: body.due.id, caseId: body.due.caseId });
-          if (body.prompt) setFollowupPrompt(body.prompt);
+        if (due.ok) {
+          const body = (await due.json()) as {
+            prompt?: string;
+            due?: { id: string; caseId: string } | null;
+          };
+          if (body.due?.id) {
+            setFollowup({ id: body.due.id, caseId: body.due.caseId });
+            if (body.prompt) setFollowupPrompt(body.prompt);
+          }
         }
       } catch {
         // Follow-up is optional when the farmer returns.
+      }
+      try {
+        const restored = await fetch("/api/cases/active");
+        if (restored.ok) {
+          const body = (await restored.json()) as {
+            caseId?: string | null;
+            country?: string | null;
+            district?: string | null;
+            messages?: Array<{
+              id: string;
+              role: ChatRole;
+              text: string;
+              casePayload?: AgronomicCasePayload | null;
+            }>;
+          };
+          if (body.caseId) setCaseId(body.caseId);
+          if (body.country) setSessionCountry(body.country);
+          if (body.district) setSessionDistrict(body.district);
+          if (body.messages && body.messages.length > 0) {
+            setMessages(
+              body.messages.map((item) => ({
+                id: item.id,
+                role: item.role,
+                text: item.text,
+                casePayload: item.casePayload ?? undefined,
+              })),
+            );
+          }
+        }
+      } catch {
+        // A fresh welcome screen is fine if recovery fails.
+      } finally {
+        setRestoring(false);
       }
     })();
   }, []);
@@ -231,8 +284,6 @@ export function FarmerCaseChat({
     setLoading(true);
     setAnalyzingPhotos(attachedImages.length > 0);
     setError(null);
-    setDraft("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
 
     const imagePreviews: ChatImagePreview[] = attachedImages.map((image) => ({
       id: image.id,
@@ -262,6 +313,8 @@ export function FarmerCaseChat({
       }));
 
     setMessages((prev) => [...prev, userMessage]);
+    setDraft("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
 
     const imagesSnapshot = [...attachedImages];
     const largestBytes = imagesSnapshot.reduce(
@@ -316,7 +369,8 @@ export function FarmerCaseChat({
       try {
         payload = (await response.json()) as CaseApiPayload;
       } catch {
-        setAttachedImages([]);
+        setDraft(trimmed);
+        setMessages((prev) => prev.filter((item) => item.id !== userMessage.id));
         if (response.status === 413) {
           setError(FARMER_PHOTO_TOO_LARGE);
         } else if (imagesSnapshot.length > 0) {
@@ -332,8 +386,6 @@ export function FarmerCaseChat({
         payload.diagnosticCode || "OPENAI_REQUEST_FAILED";
       const model = payload.model || "unknown";
 
-      setAttachedImages([]);
-
       if (casePayload?.mode) {
         setMode(casePayload.mode);
       }
@@ -345,22 +397,21 @@ export function FarmerCaseChat({
       if (payload.caseId) setCaseId(payload.caseId);
       if (payload.access) setAccess(payload.access);
       if (payload.limitReached) {
-        setLimitBanner(
-          payload.reason === "guest_limit" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
-        );
+        setLimitBanner(USAGE_LIMIT_MESSAGE);
         if (payload.reason !== "guest_limit") setUpgradeOpen(true);
       }
 
       if (!response.ok || !casePayload) {
         clearQuickReplies();
-        const rawError = payload.error || "";
+        const rawError = farmerFacingError(payload.error);
+        setDraft(trimmed);
+        setMessages((prev) => prev.filter((item) => item.id !== userMessage.id));
         if (payload.limitReached) {
-          setError(rawError || limitBanner);
+          setLimitBanner(USAGE_LIMIT_MESSAGE);
+          setError(rawError || USAGE_LIMIT_MESSAGE);
           return;
         }
-        if (/openai_api_key|openai is not configured/i.test(rawError)) {
-          setError(FARMER_GENERIC_ERROR);
-        } else if (response.status === 413) {
+        if (response.status === 413) {
           setError(rawError || FARMER_PHOTO_TOO_LARGE);
         } else if (imagesSnapshot.length > 0) {
           setError(rawError || FARMER_PHOTO_UPLOAD_FAILED);
@@ -369,6 +420,8 @@ export function FarmerCaseChat({
         }
         return;
       }
+
+      setAttachedImages([]);
 
       if (payload.responseId) {
         setPreviousResponseId(payload.responseId);
@@ -420,6 +473,8 @@ export function FarmerCaseChat({
           largestBytes,
         }),
       );
+      setDraft(trimmed);
+      setMessages((prev) => prev.filter((item) => item.id !== userMessage.id));
     } finally {
       setLoading(false);
       setAnalyzingPhotos(false);
@@ -573,6 +628,7 @@ export function FarmerCaseChat({
     setMode("quick_help");
     setMenuOpen(false);
     setAttachMenuOpen(false);
+    void fetch("/api/cases/new", { method: "POST" });
     inputRef.current?.focus();
   }
 
@@ -612,20 +668,33 @@ export function FarmerCaseChat({
               </a>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setAttachMenuOpen(false);
-              setMenuOpen((open) => !open);
-            }}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-canopy hover:bg-sky"
-            aria-expanded={menuOpen}
-            aria-label="Open menu"
-          >
-            <span aria-hidden className="text-lg leading-none">
-              ☰
-            </span>
-          </button>
+          <div className="flex min-w-0 items-center gap-2">
+            <FarmerAccountMenu
+              identity={accountIdentity}
+              open={accountMenuOpen}
+              onToggle={() => {
+                setMenuOpen(false);
+                setAttachMenuOpen(false);
+                setAccountMenuOpen((open) => !open);
+              }}
+              onClose={() => setAccountMenuOpen(false)}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setAttachMenuOpen(false);
+                setAccountMenuOpen(false);
+                setMenuOpen((open) => !open);
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-full text-canopy hover:bg-sky"
+              aria-expanded={menuOpen}
+              aria-label="Open menu"
+            >
+              <span aria-hidden className="text-lg leading-none">
+                ☰
+              </span>
+            </button>
+          </div>
         </div>
 
         {menuOpen ? (
@@ -661,11 +730,11 @@ export function FarmerCaseChat({
                 </button>
               ) : null}
               <Link
-                href="/signin"
+                href={accountIdentity?.signedIn ? "/account/profile" : "/signin"}
                 className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-ink hover:bg-sky"
                 onClick={() => setMenuOpen(false)}
               >
-                {accountEmail ? "Account" : "Create a free account"}
+                {accountIdentity?.signedIn ? "My Profile" : "Create a free account"}
               </Link>
               <Link
                 href="/privacy"
@@ -873,16 +942,36 @@ export function FarmerCaseChat({
 
       <div className="z-20 shrink-0 bg-sky/90 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md">
         <div className="mx-auto w-full max-w-3xl space-y-2">
+          {usageNotice && !limitBanner ? (
+            <p className="px-1 text-xs text-muted" role="status">
+              {usageNotice}
+            </p>
+          ) : null}
           {limitBanner ? (
             <div className="rounded-2xl bg-surface px-3 py-3 text-sm text-ink shadow-sm ring-1 ring-line">
               <p className="font-medium">{limitBanner}</p>
               {access === "guest" ? (
-                <Link
-                  href="/signin"
-                  className="mt-2 inline-flex min-h-11 items-center rounded-full bg-canopy px-4 text-sm font-semibold text-white"
-                >
-                  Create a free account
-                </Link>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link
+                    href="/signin"
+                    className="inline-flex min-h-11 items-center rounded-full bg-canopy px-4 text-sm font-semibold text-white"
+                  >
+                    Create Account
+                  </Link>
+                  <Link
+                    href="/signin?mode=login"
+                    className="inline-flex min-h-11 items-center rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+                  >
+                    Log In
+                  </Link>
+                  <button
+                    type="button"
+                    className="inline-flex min-h-11 items-center rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
+                    onClick={() => setUpgradeOpen(true)}
+                  >
+                    Enter Access Code
+                  </button>
+                </div>
               ) : (
                 <div className="mt-3 space-y-2">
                   <button
@@ -904,7 +993,7 @@ export function FarmerCaseChat({
                     className="min-h-11 rounded-full bg-surface px-4 text-sm font-medium text-canopy ring-1 ring-line"
                     onClick={() => setUpgradeOpen(true)}
                   >
-                    Enter promotional code
+                    Enter Access Code
                   </button>
                 </div>
               )}
@@ -940,7 +1029,7 @@ export function FarmerCaseChat({
                 <input
                   value={promoCode}
                   onChange={(event) => setPromoCode(event.target.value)}
-                  placeholder="Promotional code"
+                  placeholder="Access code"
                   className="min-h-11 flex-1 rounded-full bg-sky px-3 text-sm ring-1 ring-line"
                   autoComplete="off"
                 />

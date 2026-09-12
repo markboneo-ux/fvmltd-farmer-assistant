@@ -3,9 +3,19 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
-import type { StaffRole, StaffUser } from "./types";
+import { logOps } from "@/lib/security/ops-log";
+import {
+  supabaseHostFromUrl,
+  type StaffLoginStage,
+} from "./login-stages";
+import {
+  authorizeStaffRecord,
+  type StaffProfileRow,
+} from "./authorize";
+import { classifyStaffLookupError, isMissingStaffColumnError } from "./lookup-error";
+import type { StaffUser } from "./types";
 
-type StaffRow = {
+export type StaffRow = {
   id: string;
   auth_user_id: string | null;
   full_name: string;
@@ -14,25 +24,107 @@ type StaffRow = {
   is_active: boolean;
 };
 
+const STAFF_SELECT = "id, auth_user_id, full_name, email, role, is_active";
+const STAFF_SELECT_FALLBACKS = [
+  STAFF_SELECT,
+  "id, auth_user_id, full_name, role, is_active",
+  "id, auth_user_id, role, is_active",
+  "id, auth_user_id, is_active",
+  "id, auth_user_id",
+];
+
+export function normalizeStaffRow(row: {
+  id?: string | null;
+  auth_user_id?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+  role?: string | null;
+  is_active?: boolean | null;
+} | null): StaffRow | null {
+  if (!row?.id) return null;
+  return {
+    id: row.id,
+    auth_user_id: row.auth_user_id ?? null,
+    full_name: row.full_name?.trim() || "FVMLTD Staff",
+    email: row.email?.trim() || "",
+    role: row.role?.trim() || "admin",
+    is_active: row.is_active !== false,
+  };
+}
+
 export function mapStaffUser(
   row: StaffRow,
   sessionAuthUserId: string,
 ): StaffUser | null {
-  if (!row.is_active) return null;
-  const linkedAuthId = row.auth_user_id ?? row.id;
-  if (linkedAuthId !== sessionAuthUserId) return null;
-  const role = row.role as StaffRole;
-  if (role !== "admin" && role !== "agronomist" && role !== "reviewer") {
-    return null;
+  const classified = classifyStaffRow(row, sessionAuthUserId);
+  return classified.ok ? classified.staff : null;
+}
+
+export function classifyStaffRow(
+  row: StaffRow | null,
+  sessionAuthUserId: string,
+):
+  | { ok: true; staff: StaffUser }
+  | { ok: false; reason: "staff_inactive" | "staff_not_linked" } {
+  const authorized = authorizeStaffRecord(
+    sessionAuthUserId,
+    (row as StaffProfileRow | null) ?? null,
+  );
+  if (authorized.ok) return authorized;
+  if (authorized.reason === "inactive_staff") {
+    return { ok: false, reason: "staff_inactive" };
   }
-  return {
-    id: row.id,
-    authUserId: linkedAuthId,
-    fullName: row.full_name,
-    email: row.email,
-    role,
-    isActive: row.is_active,
+  return { ok: false, reason: "staff_not_linked" };
+}
+
+function staffProfiles(client: { from: (table: string) => unknown }) {
+  return client.from("staff_profiles") as {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        maybeSingle: () => PromiseLike<{
+          data: {
+            id?: string | null;
+            auth_user_id?: string | null;
+            full_name?: string | null;
+            email?: string | null;
+            role?: string | null;
+            is_active?: boolean | null;
+          } | null;
+          error: { message: string } | null;
+        }>;
+      };
+    };
   };
+}
+
+/**
+ * Resolve staff by auth_user_id only (confirmed mapping).
+ * Does not filter is_active in SQL so inactive rows can be diagnosed.
+ * Does not treat staff_profiles.id as an Auth user id.
+ */
+export async function lookupStaffRowForAuthUser(
+  client: { from: (table: string) => unknown },
+  authUserId: string,
+): Promise<
+  | { ok: true; row: StaffRow | null }
+  | { ok: false; error: string }
+> {
+  let lastError = "staff lookup failed";
+  for (const columns of STAFF_SELECT_FALLBACKS) {
+    const { data: byAuth, error: byAuthError } = await staffProfiles(client)
+      .select(columns)
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
+
+    if (!byAuthError) {
+      return { ok: true, row: normalizeStaffRow(byAuth) };
+    }
+    lastError = byAuthError.message;
+    if (!isMissingStaffColumnError(byAuthError.message)) {
+      return { ok: false, error: byAuthError.message };
+    }
+  }
+  return { ok: false, error: lastError };
 }
 
 /**
@@ -41,8 +133,11 @@ export function mapStaffUser(
  */
 export async function getStaffSession(): Promise<
   | { ok: true; staff: StaffUser }
-  | { ok: false; status: 401 | 403 | 503; error: string }
+  | { ok: false; status: 401 | 403 | 503; error: string; stage?: StaffLoginStage }
 > {
+  const supabaseHost = supabaseHostFromUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const vercelEnv = process.env.VERCEL_ENV ?? null;
+
   let authUserId: string;
   try {
     const supabase = await createClient();
@@ -51,6 +146,7 @@ export async function getStaffSession(): Promise<
       return {
         ok: false,
         status: 401,
+        stage: "redirect_session_hydration",
         error: "Sign in with your FVMLTD staff account to continue.",
       };
     }
@@ -59,6 +155,7 @@ export async function getStaffSession(): Promise<
     return {
       ok: false,
       status: 503,
+      stage: "supabase_not_configured",
       error:
         "Supabase is not configured on the server. Add the environment variables and try again.",
     };
@@ -66,35 +163,70 @@ export async function getStaffSession(): Promise<
 
   const admin = tryCreateAdminClient();
   if (!admin.ok) {
-    return { ok: false, status: 503, error: admin.error };
-  }
-
-  const { data, error } = await admin.client
-    .from("staff_profiles")
-    .select("id, auth_user_id, full_name, email, role, is_active")
-    .eq("is_active", true)
-    .or(`auth_user_id.eq.${authUserId},id.eq.${authUserId}`)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Staff session lookup failed:", error);
+    logStaffGate("supabase_not_configured", {
+      supabaseHost,
+      vercelEnv,
+      authUserId,
+    });
     return {
       ok: false,
       status: 503,
-      error: "Could not verify staff access.",
+      stage: "supabase_not_configured",
+      error: admin.error,
     };
   }
 
-  const staff = data ? mapStaffUser(data, authUserId) : null;
-  if (!staff) {
+  let lookup = await lookupStaffRowForAuthUser(admin.client, authUserId);
+  if (!lookup.ok) {
+    const sessionClient = await createClient();
+    const sessionLookup = await lookupStaffRowForAuthUser(sessionClient, authUserId);
+    if (sessionLookup.ok) {
+      lookup = sessionLookup;
+    } else {
+      logStaffGate("staff_lookup_failed", {
+        supabaseHost,
+        vercelEnv,
+        error: lookup.error,
+        lookupErrorClass: classifyStaffLookupError(lookup.error),
+      });
+      return {
+        ok: false,
+        status: 503,
+        stage: "staff_lookup_failed",
+        error: "Could not verify staff access.",
+      };
+    }
+  }
+
+  const classified = classifyStaffRow(lookup.row, authUserId);
+  if (!classified.ok) {
+    logStaffGate(classified.reason, {
+      supabaseHost,
+      vercelEnv,
+      authUserId,
+      staffRowAuthUserId: lookup.row?.auth_user_id ?? null,
+      staffActive: lookup.row?.is_active ?? null,
+    });
     return {
       ok: false,
       status: 403,
+      stage: classified.reason,
       error: "This account is not an active FVMLTD staff member.",
     };
   }
 
-  return { ok: true, staff };
+  return { ok: true, staff: classified.staff };
+}
+
+function logStaffGate(
+  stage: StaffLoginStage,
+  extra?: Record<string, string | boolean | null | undefined>,
+) {
+  logOps("auth_failure", {
+    route: "getStaffSession",
+    stage,
+    ...extra,
+  });
 }
 
 export async function requireStaffApi() {
@@ -103,7 +235,7 @@ export async function requireStaffApi() {
     return {
       ok: false as const,
       response: NextResponse.json(
-        { error: session.error },
+        { error: session.error, stage: session.stage ?? null },
         { status: session.status },
       ),
     };

@@ -11,7 +11,7 @@ type PageProps = {
 export default async function AdminCaseReviewPage({ params }: PageProps) {
   const session = await getStaffSession();
   if (!session.ok) {
-    redirect("/staff/login?next=/admin/insights");
+    redirect("/admin/login?next=/admin/insights");
   }
   const { id } = await params;
   return (

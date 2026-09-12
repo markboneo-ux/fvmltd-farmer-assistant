@@ -29,6 +29,10 @@ type CaseRow = {
 };
 
 type InsightsPayload = {
+  error?: string;
+  table?: string | null;
+  detail?: string | null;
+  warnings?: Array<{ table: string; error: string }>;
   insights?: {
     users: {
       total: number;
@@ -70,21 +74,47 @@ type InsightsPayload = {
       photos: number;
       voiceNotes: number;
       webResearchedAnswers: number;
+      newRegisteredFarmers?: number;
     };
     last7Days?: {
       uniqueFarmers: number;
       returningFarmers: number;
       messages: number;
       cropCases: number;
+      photos?: number;
+      voiceNotes?: number;
+      followUps?: number;
+      solved?: number;
+    };
+    last30Days?: {
+      uniqueFarmers: number;
+      returningFarmers: number;
+      messages: number;
+      cropCases: number;
+      photos?: number;
+      voiceNotes?: number;
+      followUps?: number;
+      solved?: number;
     };
     cropIntelligence?: {
-      topCrops: Array<{ crop: string; cases: number; farmers: number }>;
+      topCrops: Array<{ crop: string; cases: number; farmers: number; changeVsPrevious?: string }>;
       topIssues: {
         symptoms: CountRow[];
         suspectedProblems: CountRow[];
         confirmedProblems: CountRow[];
       };
+      severity?: CountRow[];
+      outcomes?: CountRow[];
     };
+    researchCoverage?: Array<{
+      country: string;
+      pesticideRegistry: string;
+      weather: string;
+      marketData: string;
+      officialAgriculture: string;
+      lastVerifiedDate: string | null;
+      status: string;
+    }>;
     pesticideIntelligence?: {
       pesticideQuestions: number;
       productsSearched: CountRow[];
@@ -168,7 +198,6 @@ type InsightsPayload = {
     };
   };
   trends?: Array<{ label: string; count: number; classification: string }>;
-  error?: string;
 };
 
 function Bars({ rows }: { rows: CountRow[] }) {
@@ -208,9 +237,10 @@ function Card({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-export function AdminInsightsView() {
+export function AdminInsightsView({ section = "overview" }: { section?: string }) {
   const [data, setData] = useState<InsightsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [country, setCountry] = useState("");
   const [region, setRegion] = useState("");
   const [crop, setCrop] = useState("");
@@ -261,9 +291,13 @@ export function AdminInsightsView() {
       const payload = (await response.json()) as InsightsPayload;
       if (!response.ok) {
         setError(payload.error || "Could not load insights.");
+        setErrorDetail(
+          [payload.table, payload.detail].filter(Boolean).join(" · ") || null,
+        );
         return;
       }
       setError(null);
+      setErrorDetail(null);
       setData(payload);
     })();
   }, [query]);
@@ -405,18 +439,37 @@ export function AdminInsightsView() {
           />
         </label>
       </form>
-      {error ? <p className="mt-4 text-danger">{error}</p> : null}
+      {error ? (
+        <div className="mt-4 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">
+          <p>{error}</p>
+          {errorDetail ? <p className="mt-1 text-xs text-muted">Query: {errorDetail}</p> : null}
+        </div>
+      ) : null}
+      {data?.warnings && data.warnings.length > 0 ? (
+        <div className="mt-3 rounded-xl bg-surface px-3 py-2 text-sm ring-1 ring-line">
+          <p className="font-medium text-canopy">Some insight tables could not be read</p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-muted">
+            {data.warnings.map((item) => (
+              <li key={`${item.table}:${item.error}`}>
+                {item.table}: {item.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {insights && agronomy && summary ? (
         <div className="mt-6 space-y-6">
+          {section === "overview" ? (
+          <>
           <section>
             <h2 className="mb-2 font-semibold">Today</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              <Card label="Farmers / users" value={insights.today?.farmers ?? 0} />
+              <Card label="Unique farmers" value={insights.today?.farmers ?? 0} />
               <Card label="Messages" value={insights.today?.messages ?? 0} />
               <Card label="Cases" value={insights.today?.cases ?? 0} />
               <Card label="Photos" value={insights.today?.photos ?? 0} />
               <Card label="Voice notes" value={insights.today?.voiceNotes ?? 0} />
-              <Card label="Web-researched answers" value={insights.today?.webResearchedAnswers ?? 0} />
+              <Card label="New registered farmers" value={insights.today?.newRegisteredFarmers ?? 0} />
             </div>
           </section>
           <section>
@@ -425,38 +478,46 @@ export function AdminInsightsView() {
               <Card label="Unique farmers" value={insights.last7Days?.uniqueFarmers ?? 0} />
               <Card label="Returning farmers" value={insights.last7Days?.returningFarmers ?? 0} />
               <Card label="Messages" value={insights.last7Days?.messages ?? 0} />
-              <Card label="Crop cases" value={insights.last7Days?.cropCases ?? 0} />
+              <Card label="Cases" value={insights.last7Days?.cropCases ?? 0} />
+              <Card label="Photos" value={insights.last7Days?.photos ?? 0} />
+              <Card label="Voice notes" value={insights.last7Days?.voiceNotes ?? 0} />
+              <Card label="Follow-ups" value={insights.last7Days?.followUps ?? 0} />
+              <Card label="Solved cases" value={insights.last7Days?.solved ?? 0} />
             </div>
           </section>
+          <section>
+            <h2 className="mb-2 font-semibold">Last 30 days</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card label="Unique farmers" value={insights.last30Days?.uniqueFarmers ?? 0} />
+              <Card label="Returning farmers" value={insights.last30Days?.returningFarmers ?? 0} />
+              <Card label="Messages" value={insights.last30Days?.messages ?? 0} />
+              <Card label="Cases" value={insights.last30Days?.cropCases ?? 0} />
+              <Card label="Photos" value={insights.last30Days?.photos ?? 0} />
+              <Card label="Voice notes" value={insights.last30Days?.voiceNotes ?? 0} />
+              <Card label="Follow-ups" value={insights.last30Days?.followUps ?? 0} />
+              <Card label="Solved cases" value={insights.last30Days?.solved ?? 0} />
+            </div>
+          </section>
+          </>
+          ) : null}
+          {section === "overview" ? (
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Card label="Total messages" value={summary.totalMessages} />
             <Card label="Total crop cases" value={summary.totalCropCases} />
             <Card label="Unique guest sessions" value={summary.uniqueGuestSessions} />
             <Card label="Registered users" value={summary.registeredUsers} />
-            <Card label="Photos uploaded" value={summary.photosUploaded} />
-            <Card label="Active users today" value={summary.activeUsersToday} />
-            <Card label="Active users this week" value={summary.activeUsersThisWeek} />
-            <Card label="Avg messages / user" value={summary.averageMessagesPerUser} />
           </section>
+          ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Question types</h2>
+            {section === "questions" ? (
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
+              <h2 className="font-semibold">What farmers are asking</h2>
               <Bars rows={insights.questionTypes ?? []} />
             </section>
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Outcomes</h2>
-              <ul className="mt-2 space-y-1 text-sm">
-                <li>Confirmed diagnoses: {agronomy.confirmedDiagnoses ?? 0}</li>
-                <li>Agronomist reviewed: {agronomy.agronomistReviewed ?? 0}</li>
-                <li>Solved: {agronomy.problemSolved}</li>
-                <li>Unresolved: {agronomy.unresolved}</li>
-                <li>Improved: {agronomy.casesImproved}</li>
-                <li>Unchanged: {agronomy.casesUnchanged}</li>
-                <li>Worsened: {agronomy.casesWorsened}</li>
-                <li>Human escalations: {agronomy.humanEscalations}</li>
-              </ul>
-            </section>
+            ) : null}
+            {section === "overview" || section === "trends" ? (
+            <>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Top crops</h2>
               {(insights.cropIntelligence?.topCrops ?? []).length === 0 ? (
@@ -465,20 +526,37 @@ export function AdminInsightsView() {
                 <ul className="mt-2 space-y-1 text-sm">
                   {(insights.cropIntelligence?.topCrops ?? []).map((row) => (
                     <li key={row.crop}>
-                      {row.crop || "unknown"} — {row.farmers} farmers, {row.cases} cases
+                      {row.crop || "Unknown"} — {row.farmers} farmers, {row.cases} cases
+                      {row.changeVsPrevious ? ` · ${row.changeVsPrevious}` : ""}
                     </li>
                   ))}
                 </ul>
               )}
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Top symptoms</h2>
+              <h2 className="font-semibold">Top reported symptoms</h2>
               <Bars rows={agronomy.topSymptoms ?? []} />
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Top suspected issues</h2>
+              <h2 className="font-semibold">Top suspected problems</h2>
               <Bars rows={agronomy.topSuspectedIssues ?? []} />
             </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+              <h2 className="font-semibold">Confirmed problems</h2>
+              <Bars rows={insights.cropIntelligence?.topIssues.confirmedProblems ?? []} />
+            </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+              <h2 className="font-semibold">Severity</h2>
+              <Bars rows={insights.cropIntelligence?.severity ?? []} />
+            </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+              <h2 className="font-semibold">Outcomes</h2>
+              <Bars rows={insights.cropIntelligence?.outcomes ?? []} />
+            </section>
+            </>
+            ) : null}
+            {section === "countries" ? (
+            <>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Cases by country</h2>
               <Bars rows={agronomy.casesByCountry ?? agronomy.problemsByCountry} />
@@ -487,14 +565,38 @@ export function AdminInsightsView() {
               <h2 className="font-semibold">Cases by region</h2>
               <Bars rows={agronomy.casesByRegion ?? agronomy.problemsByDistrict} />
             </section>
+            </>
+            ) : null}
+            {section === "farmers" ? (
+            <>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Farmer level</h2>
+              <h2 className="font-semibold">Farmer type</h2>
               <Bars rows={agronomy.casesByFarmerLevel ?? []} />
             </section>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Guest vs registered</h2>
               <Bars rows={insights.usage?.guestVsRegistered ?? []} />
             </section>
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
+              <h2 className="font-semibold">Farmer engagement</h2>
+              <ul className="mt-2 space-y-1 text-sm">
+                <li>Guest: {insights.engagement?.guest ?? 0}</li>
+                <li>Registered: {insights.engagement?.registered ?? 0}</li>
+                <li>Messages / farmer: {insights.engagement?.messagesPerFarmer ?? 0}</li>
+                <li>Avg conversation length: {insights.engagement?.averageConversationLength ?? 0}</li>
+                <li>Returning farmers: {insights.engagement?.returningUsers ?? 0}</li>
+                <li>Photo usage: {insights.engagement?.photoUsage ?? 0}</li>
+                <li>Voice usage: {insights.engagement?.voiceUsage ?? 0}</li>
+                <li>Follow-up response rate: {insights.engagement?.followupResponseRate ?? 0}%</li>
+                <li>Solved: {insights.engagement?.casesSolved ?? 0}</li>
+                <li>Improved: {insights.engagement?.casesImproved ?? 0}</li>
+                <li>Unresolved: {insights.engagement?.unresolved ?? 0}</li>
+              </ul>
+            </section>
+            </>
+            ) : null}
+            {section === "overview" ? (
+            <>
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
               <h2 className="font-semibold">Messages per day</h2>
               <Bars rows={insights.usage?.messagesPerDay ?? []} />
@@ -503,31 +605,13 @@ export function AdminInsightsView() {
               <h2 className="font-semibold">Cases per day</h2>
               <Bars rows={insights.usage?.casesPerDay ?? []} />
             </section>
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Photos per day</h2>
-              <Bars rows={insights.usage?.photosPerDay ?? []} />
-            </section>
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Most active times</h2>
-              <Bars rows={insights.usage?.mostActiveTimes ?? []} />
-            </section>
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Web research</h2>
-              <ul className="mt-2 space-y-1 text-sm">
-                <li>Answers using web data: {insights.webResearch?.answersUsingWeb ?? 0}</li>
-                <li>Research calls: {insights.webResearch?.totalResearchCalls ?? 0}</li>
-              </ul>
-              <p className="mt-3 text-xs font-medium text-muted">Most-used sources</p>
-              <Bars rows={insights.webResearch?.mostUsedSources ?? []} />
-              <p className="mt-3 text-xs font-medium text-muted">Source failures</p>
-              <Bars rows={insights.webResearch?.sourceFailures ?? []} />
-              <p className="mt-3 text-xs font-medium text-muted">Outdated source alerts</p>
-              <Bars rows={insights.webResearch?.outdatedSourceAlerts ?? []} />
-            </section>
+            </>
+            ) : null}
+            {section === "trends" ? (
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
               <h2 className="font-semibold">Emerging crop problems</h2>
               <p className="mt-1 text-xs text-muted">
-                Trends need several unique farmers. Identities are not shown here.
+                Trends count unique farmers, not messages from one person. Never labelled as an outbreak until reviewed.
               </p>
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -550,7 +634,7 @@ export function AdminInsightsView() {
                         <td>{trend.firstSeen?.slice(0, 10) ?? "—"}</td>
                         <td>{trend.lastSeen?.slice(0, 10) ?? "—"}</td>
                         <td>
-                          {[trend.country, trend.region].filter(Boolean).join(" / ") || "—"}
+                          {[trend.country, trend.region].filter(Boolean).join(" / ") || "Unknown"}
                         </td>
                         <td>{trend.confidence ?? "—"}</td>
                         <td>{trend.reviewed ? "Reviewed" : "Not reviewed"}</td>
@@ -563,77 +647,57 @@ export function AdminInsightsView() {
                 ) : null}
               </div>
             </section>
+            ) : null}
+            {section === "research" ? (
             <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
-              <h2 className="font-semibold">Product / pesticide intelligence</h2>
-              <ul className="mt-2 space-y-1 text-sm">
-                <li>Pesticide questions: {insights.pesticideIntelligence?.pesticideQuestions ?? 0}</li>
-                <li>
-                  Failed verification searches:{" "}
-                  {insights.pesticideIntelligence?.failedVerificationSearches ?? 0}
-                </li>
-              </ul>
-              <p className="mt-3 text-xs font-medium text-muted">Verified regulatory coverage</p>
-              <p className="text-sm">
-                {(insights.pesticideIntelligence?.countriesWithVerifiedCoverage ?? []).join(", ") ||
-                  "No data"}
+              <h2 className="font-semibold">Research coverage by country</h2>
+              <p className="mt-1 text-xs text-muted">
+                Verified means an official source is configured. Missing does not invent coverage.
               </p>
-              <p className="mt-3 text-xs font-medium text-muted">Missing regulatory coverage</p>
-              <p className="text-sm">
-                {(insights.pesticideIntelligence?.countriesWithMissingCoverage ?? []).join(", ") ||
-                  "No data"}
-              </p>
-              <p className="mt-3 text-xs font-medium text-muted">Products searched</p>
-              <Bars rows={insights.pesticideIntelligence?.productsSearched ?? []} />
-              <p className="mt-3 text-xs font-medium text-muted">Active ingredients searched</p>
-              <Bars rows={insights.pesticideIntelligence?.activeIngredientsSearched ?? []} />
-              <p className="mt-3 text-xs font-medium text-muted">Treatment requests</p>
-              <Bars rows={insights.pesticideIntelligence?.mostCommonTreatmentRequests ?? []} />
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted">
+                      <th className="py-1">Country</th>
+                      <th>Pesticide registry</th>
+                      <th>Weather</th>
+                      <th>Market data</th>
+                      <th>Official agriculture</th>
+                      <th>Last verified</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(insights.researchCoverage ?? []).map((row) => (
+                      <tr key={row.country} className="border-t border-line">
+                        <td className="py-2">{row.country}</td>
+                        <td>{row.pesticideRegistry}</td>
+                        <td>{row.weather}</td>
+                        <td>{row.marketData}</td>
+                        <td>{row.officialAgriculture}</td>
+                        <td>{row.lastVerifiedDate?.slice(0, 10) ?? "—"}</td>
+                        <td>{row.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line">
-              <h2 className="font-semibold">Farmer engagement</h2>
+            ) : null}
+            {section === "follow-ups" ? (
+            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
+              <h2 className="font-semibold">Follow-ups</h2>
               <ul className="mt-2 space-y-1 text-sm">
-                <li>Guest: {insights.engagement?.guest ?? 0}</li>
-                <li>Registered: {insights.engagement?.registered ?? 0}</li>
-                <li>Messages / farmer: {insights.engagement?.messagesPerFarmer ?? 0}</li>
-                <li>Avg conversation length: {insights.engagement?.averageConversationLength ?? 0}</li>
-                <li>Returning users: {insights.engagement?.returningUsers ?? 0}</li>
                 <li>Cases with follow-up: {insights.engagement?.casesWithFollowUp ?? 0}</li>
                 <li>Follow-up response rate: {insights.engagement?.followupResponseRate ?? 0}%</li>
                 <li>Solved: {insights.engagement?.casesSolved ?? 0}</li>
                 <li>Improved: {insights.engagement?.casesImproved ?? 0}</li>
                 <li>Unresolved: {insights.engagement?.unresolved ?? 0}</li>
-                <li>Photo usage: {insights.engagement?.photoUsage ?? 0}</li>
-                <li>Voice usage: {insights.engagement?.voiceUsage ?? 0}</li>
               </ul>
               <p className="mt-3 text-xs font-medium text-muted">Follow-up status</p>
               <Bars rows={insights.engagement?.followupByStatus ?? []} />
             </section>
-            <section className="rounded-2xl bg-surface p-4 ring-1 ring-line md:col-span-2">
-              <h2 className="font-semibold">Cases</h2>
-              <p className="mt-1 text-xs text-muted">
-                Aggregate list — no farmer names or emails.
-              </p>
-              <ul className="mt-3 divide-y divide-line text-sm">
-                {(insights.cases ?? []).map((item) => (
-                  <li key={item.id} className="py-2">
-                    <Link
-                      href={`/admin/insights/cases/${item.id}`}
-                      className="font-medium text-leaf hover:text-canopy"
-                    >
-                      {(item.crop || "Unknown crop") + " · " + (item.issue || "unspecified")}
-                    </Link>
-                    <p className="text-xs text-muted">
-                      {item.country || "Unknown"}
-                      {item.region ? ` / ${item.region}` : ""} · {item.status} ·{" "}
-                      {item.guest ? "guest" : "registered"} · {item.questionType}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-              {(insights.cases ?? []).length === 0 ? (
-                <p className="mt-2 text-sm text-muted">No data</p>
-              ) : null}
-            </section>
+            ) : null}
           </div>
         </div>
       ) : null}

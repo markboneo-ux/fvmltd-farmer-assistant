@@ -142,7 +142,7 @@ const UNSAFE_MIX =
   /\b(mix|mixing|cocktail|tank\s*mix)\b.{0,40}\b(pesticide|insecticide|fungicide|herbicide|chemical)/i;
 
 const LOCATION_QUESTION =
-  /\b(which\s+)?(country|island|district|parish|region|where\s+are\s+you|where\s+is\s+the\s+(farm|field))\b/i;
+  /\b(which\s+)?(country|island|district|parish|region|area|where\s+are\s+you|where\s+is\s+the\s+(farm|field)|farming\s+in)\b/i;
 
 const CROP_QUESTION =
   /\b(what\s+crop|which\s+crop|is\s+it\s+tomato|pepper\s+or|what\s+are\s+you\s+growing)\b/i;
@@ -555,7 +555,7 @@ export function applyCommercialSafetyGuards(
     !options.knownFacts.country &&
     !LOCATION_QUESTION.test(nextQuestion)
   ) {
-    nextQuestion = "What country are you farming in?";
+    nextQuestion = ASK_COUNTRY_QUESTION;
     stage = isGuidanceStage(stage) ? stage : "assessment";
   }
 
@@ -563,7 +563,7 @@ export function applyCommercialSafetyGuards(
     options.questionsAskedBeforeThisTurn +
     (isInterviewStage(stage) && nextQuestion ? 1 : 0);
 
-  // Quick Help hard cap: after 3 questions, force preliminary guidance.
+  // Quick Help hard cap: after the first material follow-up, give guidance.
   if (
     mode === "quick_help" &&
     (options.questionsAskedBeforeThisTurn >= QUICK_HELP_MAX_QUESTIONS ||
@@ -844,7 +844,7 @@ function buildForcedQuickGuidance(
 
   if (facts.suddenWilt) {
     return {
-      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — treat it as urgent triage.`,
+      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — treat it as urgent and check the stem and roots first.`,
       severity: "high",
       checksToday: [
         "Cut a wilted stem lengthwise and check for brown streaks inside",
@@ -892,7 +892,7 @@ function buildForcedQuickGuidance(
 
   if (facts.stuntedWholeField || facts.distributionHint === "most of field") {
     return {
-      preliminaryAssessment: `Preliminary guidance: Whole-field ${issue} on ${crop} needs cautious triage. Check water, drainage and roots before adding fertilizer. This is not a confirmed diagnosis.`,
+      preliminaryAssessment: `Preliminary guidance: Whole-field ${issue} on ${crop} needs a careful first look. Check water, drainage and roots before adding fertilizer. This is not a confirmed diagnosis.`,
       severity: "high",
       checksToday: [
         "Compare low spots and higher ground for wet or dry soil",

@@ -81,6 +81,35 @@ Required `case_messages` extra columns: `conversation_intent`, `question_categor
 
 This agent **cannot** apply SQL to `gcojtfrdjczrvzieynzj` (Management API 403; the access token only sees Production `qzycpoivwwecooscnnju`).
 
+### Preview staff login (`staff_lookup_failed`)
+
+`/admin/login` authenticates against **this** Preview project, then reads `staff_profiles` with the server service-role client. A live Preview failure of `staff_lookup_failed · gcojtfrdjczrvzieynzj.supabase.co · preview` was reproduced after deploy:
+
+- Auth user `info@fvmltd.com` **exists** in `gcojtfrdjczrvzieynzj`.
+- Vercel `SUPABASE_SERVICE_ROLE_KEY` JWT `ref` **matches** that project (not Production).
+- `staff_profiles` query failed with `column staff_profiles.email does not exist`.
+
+The app now retries the lookup without optional columns. Still run **`docs/preview-staff-mapping.sql`** in the SQL editor for `gcojtfrdjczrvzieynzj` so the Preview table has `email` / `auth_user_id` / `is_active` and a mapped staff row. Do **not** copy a Production `auth.users.id`.
+
+1. Grants `staff_profiles` to `service_role` / `authenticated` and reloads PostgREST.
+2. Looks up `info@fvmltd.com` in **this** project's `auth.users`.
+3. Upserts an active `staff_profiles` row whose `auth_user_id` equals that Auth UUID.
+
+Also confirm Vercel Preview `SUPABASE_SERVICE_ROLE_KEY` is the service-role key for `gcojtfrdjczrvzieynzj`, not Production. After deploy, `GET /api/staff/preview-diagnostics` with header `x-fvm-debug: 1` reports whether the Auth user, staff row, grants, and JWT `ref` match — still against Preview, never Production.
+
+### Preview dashboard insights (`Insights are temporarily unavailable`)
+
+Cases (`GET /api/admin/cases` → `crop_cases`) can succeed while Overview fails. `/api/admin/insights` also reads `case_messages`, `case_photos`, `case_followups`, `case_outcomes`, `case_trends`, `usage_events`, `web_research_events`, `trusted_sources`, and `farmer_profiles`. A missing table or `service_role` grant on any of those used to 503 the whole Overview.
+
+The app now keeps Overview up from `crop_cases`, records each optional table failure in Vercel logs (`database_failure`) and in the JSON `warnings` array, and only 503s when `crop_cases` itself cannot be read. Crop-check queue (`/staff`) retries without the nested `farmer_profiles!inner` embed if PostgREST cannot find that relationship.
+
+Still run **`docs/preview-dashboard-tables.sql`** on `gcojtfrdjczrvzieynzj` so the optional tables/grants exist. Live Preview probes after this deploy showed:
+
+- Present: `crop_cases`, `case_messages`, `case_photos`, `case_followups`, `case_outcomes`, `farmer_profiles`, `usage_events`
+- Missing from PostgREST: `case_trends`, `web_research_events`, `trusted_sources`, `crop_checks`, `farms`, `crop_cycles`, `assessment_results`
+
+That missing `case_trends` table is why Overview 503'd while Cases still worked. After deploy, Overview loads from `crop_cases` and lists remaining table errors as warnings until the SQL is applied. Do not retarget Preview at Production.
+
 ### Compatibility shim
 
 The app still retries unknown optional columns if PostgREST returns `PGRST204`. That is defensive only. After Preview is aligned, `x-fvm-debug: 1` must return `schemaCompatUsed=false` and `schemaCompatDroppedColumns=[]`.

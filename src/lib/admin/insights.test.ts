@@ -160,7 +160,16 @@ describe("admin dashboard metrics", () => {
     expect(insights.today.photos).toBe(0);
     expect(insights.today.voiceNotes).toBe(0);
     expect(insights.today.webResearchedAnswers).toBe(0);
+    expect(insights.today.newRegisteredFarmers).toBe(0);
+    expect(insights.last7Days.photos).toBe(0);
+    expect(insights.last7Days.voiceNotes).toBe(0);
+    expect(insights.last7Days.followUps).toBe(0);
+    expect(insights.last7Days.solved).toBe(0);
+    expect(insights.last30Days.uniqueFarmers).toBe(0);
+    expect(insights.last30Days.cropCases).toBe(0);
     expect(insights.cropIntelligence.topCrops).toEqual([]);
+    expect(insights.researchCoverage.length).toBeGreaterThan(0);
+    expect(insights.researchCoverage.every((row) => row.country !== "")).toBe(true);
     expect(insights.engagement.voiceUsage).toBe(0);
   });
 

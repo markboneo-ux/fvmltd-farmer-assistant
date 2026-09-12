@@ -6,6 +6,7 @@ import { getStaffSession } from "@/lib/staff/auth";
 import { listStaffQueueCases } from "@/lib/staff/cases";
 import type { StaffCaseFilter } from "@/lib/staff/types";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
+import { sanitizeLookupError } from "@/lib/staff/lookup-error";
 
 type PageProps = {
   searchParams: Promise<{ filter?: string }>;
@@ -49,7 +50,11 @@ export default async function StaffReviewPage({ searchParams }: PageProps) {
     const result = await listStaffQueueCases(admin.client, filter);
     cases = result.cases;
     stats = result.stats;
-  } catch {
+  } catch (error) {
+    const detail =
+      sanitizeLookupError(
+        error instanceof Error ? error.message : "staff_queue_unavailable",
+      ) ?? "Could not load the review queue.";
     return (
       <StaffShell
         title="Staff review dashboard"
@@ -58,8 +63,7 @@ export default async function StaffReviewPage({ searchParams }: PageProps) {
         actions={<StaffSignOutButton />}
       >
         <p className="rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">
-          Could not load the review queue. Apply the latest migrations and try
-          again.
+          Could not load the review queue. Query: {detail}
         </p>
       </StaffShell>
     );

@@ -6,6 +6,8 @@ import { CASE_PHOTO_BUCKET } from "@/lib/crop-check/photos";
 import { CROP_CASE_SELECT, mapCropCaseRow } from "@/lib/crop-check/map";
 import type { CropCaseRecord } from "@/lib/crop-check/types";
 import { STAFF_ASSESSMENT_SELECT, mapStaffAssessmentRow } from "./assessmentMap";
+import { logOps } from "@/lib/security/ops-log";
+import { classifyStaffLookupError } from "@/lib/staff/lookup-error";
 import type {
   CaseMessageRecord,
   LabTestRequestRecord,
@@ -90,10 +92,32 @@ type QueueRow = {
   percent_affected: number | string | null;
   submitted_at: string;
   completed_at: string | null;
-  farmer_profiles: NestedFarmer | NestedFarmer[];
-  farms: NestedFarm | NestedFarm[];
-  crop_cycles: NestedCycle | NestedCycle[];
-  assessment_results: NestedAssessment[] | null;
+  farmer_id?: string | null;
+  farmer_profiles?: NestedFarmer | NestedFarmer[] | null;
+  farms?: NestedFarm | NestedFarm[] | null;
+  crop_cycles?: NestedCycle | NestedCycle[] | null;
+  assessment_results?: NestedAssessment[] | null;
+};
+
+const FLAT_QUEUE_SELECT = `
+  id,
+  crop_name,
+  status,
+  is_urgent,
+  awaiting_farmer_reply,
+  percent_affected,
+  submitted_at,
+  completed_at,
+  farmer_id
+`;
+
+const UNKNOWN_FARMER: NestedFarmer = {
+  full_name: "Unknown farmer",
+  farmer_code: "",
+  phone: null,
+  village: null,
+  region: null,
+  country: null,
 };
 
 function one<T>(value: T | T[] | null | undefined): T | null {
@@ -122,10 +146,10 @@ function latestAssessment(
 }
 
 function mapQueueRow(row: QueueRow): StaffQueueCase {
-  const farmer = one(row.farmer_profiles)!;
+  const farmer = one(row.farmer_profiles) ?? UNKNOWN_FARMER;
   const farm = one(row.farms);
   const cycle = one(row.crop_cycles);
-  const assessment = latestAssessment(row.assessment_results);
+  const assessment = latestAssessment(row.assessment_results ?? null);
   const confidence = Number(
     assessment?.confidence_score ?? assessment?.confidence ?? NaN,
   );
@@ -213,19 +237,45 @@ export async function listStaffQueueCases(
   client: SupabaseClient,
   filter: StaffCaseFilter = "in_review",
 ): Promise<{ cases: StaffQueueCase[]; stats: StaffQueueStats }> {
-  const { data, error } = await client
+  const nested = await client
     .from("crop_checks")
     .select(QUEUE_CASE_SELECT)
     .neq("status", "draft")
     .order("submitted_at", { ascending: false })
     .limit(200);
 
-  if (error) {
-    console.error("Staff queue list failed:", error);
-    throw new Error("Could not load the staff review queue.");
+  let rows: QueueRow[];
+  if (nested.error) {
+    logOps("database_failure", {
+      route: "staff-queue",
+      table: "crop_checks",
+      error: nested.error.message,
+      query: "nested_farmer_profiles",
+    });
+    const flat = await client
+      .from("crop_checks")
+      .select(FLAT_QUEUE_SELECT)
+      .neq("status", "draft")
+      .order("submitted_at", { ascending: false })
+      .limit(200);
+    if (flat.error) {
+      logOps("database_failure", {
+        route: "staff-queue",
+        table: "crop_checks",
+        error: flat.error.message,
+        query: "flat",
+      });
+      throw new Error(nested.error.message);
+    }
+    rows = await hydrateQueueFarmers(
+      client,
+      (flat.data ?? []) as unknown as QueueRow[],
+    );
+  } else {
+    rows = (nested.data ?? []) as unknown as QueueRow[];
   }
 
-  const all = ((data ?? []) as unknown as QueueRow[]).map(mapQueueRow);
+  const all = rows.map(mapQueueRow);
   const active = all.filter(
     (item) => item.status !== "closed" && item.status !== "resolved",
   );
@@ -240,6 +290,43 @@ export async function listStaffQueueCases(
 
   const cases = all.filter((item) => matchesFilter(item, filter));
   return { cases, stats };
+}
+
+async function hydrateQueueFarmers(
+  client: SupabaseClient,
+  rows: QueueRow[],
+): Promise<QueueRow[]> {
+  const ids = [
+    ...new Set(
+      rows
+        .map((row) => row.farmer_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (ids.length === 0) return rows;
+  const { data, error } = await client
+    .from("farmer_profiles")
+    .select("id, full_name, farmer_code, phone, village, region, country")
+    .in("id", ids);
+  if (error) {
+    logOps("database_failure", {
+      route: "staff-queue",
+      table: "farmer_profiles",
+      error: error.message,
+      errorClass: classifyStaffLookupError(error.message),
+    });
+    return rows;
+  }
+  const byId = new Map(
+    ((data ?? []) as Array<NestedFarmer & { id: string }>).map((row) => [
+      row.id,
+      row,
+    ]),
+  );
+  return rows.map((row) => ({
+    ...row,
+    farmer_profiles: (row.farmer_id && byId.get(row.farmer_id)) || UNKNOWN_FARMER,
+  }));
 }
 
 async function withPreviewUrls(

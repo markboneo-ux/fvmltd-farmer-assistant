@@ -9,7 +9,7 @@ export default async function AdminCaseDetailPage({
 }) {
   const session = await getStaffSession();
   if (!session.ok) {
-    redirect("/staff/login?next=/admin/cases");
+    redirect("/admin/login?next=/admin/cases");
   }
   const { id } = await params;
   return <AdminCaseReviewView caseId={id} />;

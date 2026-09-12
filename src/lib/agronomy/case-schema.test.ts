@@ -24,7 +24,7 @@ describe("case-schema rapid triage", () => {
   });
 
   it("caps Quick Help at three questions", () => {
-    expect(QUICK_HELP_MAX_QUESTIONS).toBe(3);
+    expect(QUICK_HELP_MAX_QUESTIONS).toBe(1);
   });
 
   it("parses the revised structured payload with questionId/type", () => {

@@ -42,7 +42,8 @@ export type FarmerContext = {
   commonRecurringIssues: string[];
 };
 
-export const ASK_COUNTRY_QUESTION = "What country are you farming in?";
+export const ASK_AREA_QUESTION = "What area are you farming in?";
+export const ASK_COUNTRY_QUESTION = ASK_AREA_QUESTION;
 
 export const LOCATION_CONFIDENCE = [
   "explicit",
@@ -87,6 +88,7 @@ const COUNTRY_ALIASES: Array<{ pattern: RegExp; name: string }> = [
 
 /** Districts/regions unique enough to imply a country. */
 const REGION_TO_COUNTRY: Array<{ pattern: RegExp; region: string; country: string }> = [
+  { pattern: /\bcaroni\b/i, region: "Caroni", country: "Trinidad and Tobago" },
   { pattern: /\b(central|north|south|east|west)\s+trinidad\b/i, region: "Central Trinidad", country: "Trinidad and Tobago" },
   { pattern: /\bcouva\b/i, region: "Couva", country: "Trinidad and Tobago" },
   { pattern: /\bchaguanas\b/i, region: "Chaguanas", country: "Trinidad and Tobago" },

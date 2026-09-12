@@ -84,6 +84,32 @@ async function applyReview(request: Request, id: string) {
     await ingestCaseForTrends(next);
   }
 
+  const action =
+    body.diagnosisConfirmed === true
+      ? "confirm"
+      : body.diagnosisIncorrect === true
+        ? "incorrect"
+        : body.needsReview === true
+          ? "needs_review"
+          : body.resolved === true
+            ? "solved"
+            : body.excludeFromLearning === true
+              ? "exclude_from_learning"
+              : body.includeInTrendLearning === true
+                ? "include_in_trend"
+                : "review";
+  try {
+    await staff.client.from("staff_review_events").insert({
+      case_id: id,
+      staff_id: staff.staff.id,
+      staff_auth_user_id: staff.staff.authUserId,
+      action,
+      notes: typeof body.reviewNotes === "string" ? body.reviewNotes : null,
+    });
+  } catch {
+    // Audit trail is best-effort; the review itself already saved.
+  }
+
   return NextResponse.json({ case: next });
 }
 

@@ -27,6 +27,13 @@ describe("farmer country and region", () => {
     );
   });
 
+  it("extracts Caroni as an area in Trinidad and Tobago", () => {
+    expect(extractRegionAndCountry("My hot peppers in Caroni have spots")).toMatchObject({
+      region: "Caroni",
+      country: "Trinidad and Tobago",
+    });
+  });
+
   it("uses region when it changes the location", () => {
     expect(extractRegionAndCountry("Central Trinidad celery")).toMatchObject({
       region: "Central Trinidad",
@@ -137,7 +144,7 @@ describe("farmer country and region", () => {
         asksForProducts: true,
       }),
     ).toBe(false);
-    expect(ASK_COUNTRY_QUESTION).toMatch(/country/i);
+    expect(ASK_COUNTRY_QUESTION).toMatch(/area/i);
   });
 });
 

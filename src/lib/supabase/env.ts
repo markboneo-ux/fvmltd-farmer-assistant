@@ -19,8 +19,15 @@ export function readProcessEnv(name: string): string {
 }
 
 export function getSupabasePublicEnv() {
-  const url = readProcessEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const anonKey = readProcessEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  // Dot access is required for Next.js to inline NEXT_PUBLIC_ values into the
+  // browser bundle. Bracket-only reads stay undefined in Client Components and
+  // make browser auth (staff login, OAuth) throw a configuration error.
+  const url = stripQuotes(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || readProcessEnv("NEXT_PUBLIC_SUPABASE_URL"),
+  );
+  const anonKey = stripQuotes(
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || readProcessEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+  );
 
   if (!url) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
@@ -31,6 +38,26 @@ export function getSupabasePublicEnv() {
   }
 
   return { url, anonKey };
+}
+
+function stripQuotes(raw: string): string {
+  let value = raw.trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+}
+
+export function supabaseProjectHost(): string {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || readProcessEnv("NEXT_PUBLIC_SUPABASE_URL");
+    return url ? new URL(url).host : "unset";
+  } catch {
+    return "invalid";
+  }
 }
 
 /**

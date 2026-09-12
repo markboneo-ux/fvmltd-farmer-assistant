@@ -134,7 +134,7 @@ export function ChatAssistantMessage({
           className="rounded-xl bg-sun/15 px-3 py-2 text-sm font-medium text-warn ring-1 ring-sun/40"
           role="status"
         >
-          This looks urgent. Treat the next steps as cautious triage, not a
+          This looks urgent. Take the next steps carefully — this is not a
           confirmed diagnosis.
         </div>
       ) : null}
@@ -180,7 +180,7 @@ export function ChatAssistantMessage({
           {payload.safeActionsNow.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to do now
+                What you should do now
               </h3>
               <BulletList items={payload.safeActionsNow} />
             </section>
@@ -219,7 +219,7 @@ export function ChatAssistantMessage({
           {payload.monitorNext ? (
             <p className="text-sm text-muted">
               <span className="block text-xs font-semibold tracking-wide text-canopy uppercase">
-                What to watch over the next 2–3 days
+                What to watch
               </span>
               {payload.monitorNext}
             </p>
