@@ -30,6 +30,9 @@ describe("staff lookup error classification", () => {
     ).toBe("missing_column");
     expect(classifyStaffLookupError("Invalid API key")).toBe("invalid_api_key");
     expect(
+      classifyStaffLookupError("column staff_profiles.email does not exist"),
+    ).toBe("missing_column");
+    expect(
       sanitizeLookupError("JWT eyJhbGciOiJIUzI1NiJ9.aaa for info@fvmltd.com"),
     ).not.toMatch(/info@fvmltd.com|eyJ/);
   });
@@ -80,6 +83,11 @@ describe("preview staff diagnostics probe", () => {
             select() {
               return {
                 limit: async () => ({ data: [], error: null }),
+                eq() {
+                  return {
+                    maybeSingle: async () => ({ data: null, error: null }),
+                  };
+                },
                 ilike() {
                   return {
                     maybeSingle: async () => ({ data: null, error: null }),
@@ -117,6 +125,19 @@ describe("preview staff diagnostics probe", () => {
             select() {
               return {
                 limit: async () => ({ data: [], error: null }),
+                eq() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: {
+                        id: "row-1",
+                        auth_user_id: "auth-1",
+                        email: "info@fvmltd.com",
+                        is_active: true,
+                      },
+                      error: null,
+                    }),
+                  };
+                },
                 ilike() {
                   return {
                     maybeSingle: async () => ({
@@ -146,6 +167,60 @@ describe("preview staff diagnostics probe", () => {
     });
     expect(result.staffRowExists).toBe(true);
     expect(result.staffRowActive).toBe(true);
+    expect(result.authUserIdMatchesStaffRow).toBe(true);
+  });
+
+  it("looks up the staff row by auth_user_id when the email column is missing", async () => {
+    const result = await probeStaffPreview({
+      supabaseUrl: "https://gcojtfrdjczrvzieynzj.supabase.co",
+      serviceRoleKey: jwtWithRef("gcojtfrdjczrvzieynzj"),
+      client: {
+        from() {
+          return {
+            select(columns: string) {
+              return {
+                limit: async () => {
+                  if (columns.includes("email")) {
+                    return {
+                      data: null,
+                      error: { message: "column staff_profiles.email does not exist" },
+                    };
+                  }
+                  return { data: [], error: null };
+                },
+                eq() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: { id: "row-1", auth_user_id: "auth-1", is_active: true },
+                      error: null,
+                    }),
+                  };
+                },
+                ilike() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: null,
+                      error: { message: "column staff_profiles.email does not exist" },
+                    }),
+                  };
+                },
+              };
+            },
+          };
+        },
+        auth: {
+          admin: {
+            listUsers: async () => ({
+              data: { users: [{ id: "auth-1", email: "info@fvmltd.com" }] },
+              error: null,
+            }),
+          },
+        },
+      },
+    });
+    expect(result.authUserExists).toBe(true);
+    expect(result.hasEmailColumn).toBe(false);
+    expect(result.staffRowExists).toBe(true);
     expect(result.authUserIdMatchesStaffRow).toBe(true);
   });
 });

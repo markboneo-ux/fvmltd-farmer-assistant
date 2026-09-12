@@ -12,7 +12,7 @@ import {
   authorizeStaffRecord,
   type StaffProfileRow,
 } from "./authorize";
-import { classifyStaffLookupError } from "./lookup-error";
+import { classifyStaffLookupError, isMissingStaffColumnError } from "./lookup-error";
 import type { StaffUser } from "./types";
 
 export type StaffRow = {
@@ -25,6 +25,32 @@ export type StaffRow = {
 };
 
 const STAFF_SELECT = "id, auth_user_id, full_name, email, role, is_active";
+const STAFF_SELECT_FALLBACKS = [
+  STAFF_SELECT,
+  "id, auth_user_id, full_name, role, is_active",
+  "id, auth_user_id, role, is_active",
+  "id, auth_user_id, is_active",
+  "id, auth_user_id",
+];
+
+export function normalizeStaffRow(row: {
+  id?: string | null;
+  auth_user_id?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+  role?: string | null;
+  is_active?: boolean | null;
+} | null): StaffRow | null {
+  if (!row?.id) return null;
+  return {
+    id: row.id,
+    auth_user_id: row.auth_user_id ?? null,
+    full_name: row.full_name?.trim() || "FVMLTD Staff",
+    email: row.email?.trim() || "",
+    role: row.role?.trim() || "admin",
+    is_active: row.is_active !== false,
+  };
+}
 
 export function mapStaffUser(
   row: StaffRow,
@@ -56,7 +82,14 @@ function staffProfiles(client: { from: (table: string) => unknown }) {
     select: (columns: string) => {
       eq: (column: string, value: string) => {
         maybeSingle: () => PromiseLike<{
-          data: StaffRow | null;
+          data: {
+            id?: string | null;
+            auth_user_id?: string | null;
+            full_name?: string | null;
+            email?: string | null;
+            role?: string | null;
+            is_active?: boolean | null;
+          } | null;
           error: { message: string } | null;
         }>;
       };
@@ -76,15 +109,22 @@ export async function lookupStaffRowForAuthUser(
   | { ok: true; row: StaffRow | null }
   | { ok: false; error: string }
 > {
-  const { data: byAuth, error: byAuthError } = await staffProfiles(client)
-    .select(STAFF_SELECT)
-    .eq("auth_user_id", authUserId)
-    .maybeSingle();
+  let lastError = "staff lookup failed";
+  for (const columns of STAFF_SELECT_FALLBACKS) {
+    const { data: byAuth, error: byAuthError } = await staffProfiles(client)
+      .select(columns)
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
 
-  if (byAuthError) {
-    return { ok: false, error: byAuthError.message };
+    if (!byAuthError) {
+      return { ok: true, row: normalizeStaffRow(byAuth) };
+    }
+    lastError = byAuthError.message;
+    if (!isMissingStaffColumnError(byAuthError.message)) {
+      return { ok: false, error: byAuthError.message };
+    }
   }
-  return { ok: true, row: byAuth ?? null };
+  return { ok: false, error: lastError };
 }
 
 /**

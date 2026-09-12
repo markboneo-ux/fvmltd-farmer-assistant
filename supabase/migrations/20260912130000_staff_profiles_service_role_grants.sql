@@ -4,6 +4,14 @@
 
 alter table public.staff_profiles
   add column if not exists auth_user_id uuid;
+alter table public.staff_profiles
+  add column if not exists email text;
+alter table public.staff_profiles
+  add column if not exists full_name text;
+alter table public.staff_profiles
+  add column if not exists role text;
+alter table public.staff_profiles
+  add column if not exists is_active boolean default true;
 
 grant all on table public.staff_profiles to postgres, service_role;
 grant select on table public.staff_profiles to authenticated;

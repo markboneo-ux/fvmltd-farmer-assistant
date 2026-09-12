@@ -178,6 +178,50 @@ describe("staff row mapping", () => {
       ),
     ).toEqual({ ok: false, reason: "staff_not_linked" });
   });
+
+  it("retries staff lookup without the email column when Preview schema is older", async () => {
+    const calls: string[] = [];
+    const client = {
+      from() {
+        return {
+          select(columns: string) {
+            calls.push(columns);
+            return {
+              eq() {
+                return {
+                  maybeSingle: async () => {
+                    if (columns.includes("email")) {
+                      return {
+                        data: null,
+                        error: { message: "column staff_profiles.email does not exist" },
+                      };
+                    }
+                    return {
+                      data: {
+                        id: "row-1",
+                        auth_user_id: "staff-user",
+                        role: "admin",
+                        is_active: true,
+                      },
+                      error: null,
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    const { lookupStaffRowForAuthUser } = await import("@/lib/staff/auth");
+    const lookup = await lookupStaffRowForAuthUser(client, "staff-user");
+    expect(lookup.ok).toBe(true);
+    if (!lookup.ok) throw new Error("expected lookup ok");
+    expect(lookup.row?.auth_user_id).toBe("staff-user");
+    expect(lookup.row?.email).toBe("");
+    expect(calls[0]).toMatch(/email/);
+    expect(calls.some((columns) => !columns.includes("email"))).toBe(true);
+  });
 });
 
 describe("staff login route wiring", () => {

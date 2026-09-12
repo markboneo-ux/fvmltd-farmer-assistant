@@ -83,9 +83,13 @@ This agent **cannot** apply SQL to `gcojtfrdjczrvzieynzj` (Management API 403; t
 
 ### Preview staff login (`staff_lookup_failed`)
 
-`/admin/login` authenticates against **this** Preview project, then reads `staff_profiles` with the server service-role client. A live Preview failure of `staff_lookup_failed · gcojtfrdjczrvzieynzj.supabase.co · preview` means Auth succeeded and the table/query failed — not that Production is missing the row.
+`/admin/login` authenticates against **this** Preview project, then reads `staff_profiles` with the server service-role client. A live Preview failure of `staff_lookup_failed · gcojtfrdjczrvzieynzj.supabase.co · preview` was reproduced after deploy:
 
-Do **not** copy a Production `auth.users.id` into Preview. Run **`docs/preview-staff-mapping.sql`** in the SQL editor for `gcojtfrdjczrvzieynzj`. That script:
+- Auth user `info@fvmltd.com` **exists** in `gcojtfrdjczrvzieynzj`.
+- Vercel `SUPABASE_SERVICE_ROLE_KEY` JWT `ref` **matches** that project (not Production).
+- `staff_profiles` query failed with `column staff_profiles.email does not exist`.
+
+The app now retries the lookup without optional columns. Still run **`docs/preview-staff-mapping.sql`** in the SQL editor for `gcojtfrdjczrvzieynzj` so the Preview table has `email` / `auth_user_id` / `is_active` and a mapped staff row. Do **not** copy a Production `auth.users.id`.
 
 1. Grants `staff_profiles` to `service_role` / `authenticated` and reloads PostgREST.
 2. Looks up `info@fvmltd.com` in **this** project's `auth.users`.

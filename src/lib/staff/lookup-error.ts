@@ -25,7 +25,7 @@ export function classifyStaffLookupError(message: string | null | undefined): St
     return "missing_table";
   }
   if (
-    /pgrst204|could not find the 'auth_user_id' column|column .*auth_user_id.* does not exist|42703/.test(
+    /pgrst204|could not find the '.+' column|column [\w.]+ does not exist|42703/.test(
       m,
     )
   ) {
@@ -35,6 +35,10 @@ export function classifyStaffLookupError(message: string | null | undefined): St
     return "multiple_rows";
   }
   return "query_failed";
+}
+
+export function isMissingStaffColumnError(message: string | null | undefined): boolean {
+  return classifyStaffLookupError(message) === "missing_column";
 }
 
 export function sanitizeLookupError(message: string | null | undefined): string | null {

@@ -1,4 +1,8 @@
-import { classifyStaffLookupError, sanitizeLookupError } from "@/lib/staff/lookup-error";
+import {
+  classifyStaffLookupError,
+  isMissingStaffColumnError,
+  sanitizeLookupError,
+} from "@/lib/staff/lookup-error";
 import {
   projectRefFromJwt,
   projectRefFromSupabaseUrl,
@@ -16,6 +20,7 @@ export type StaffPreviewDiagnostics = {
   staffProfilesError: string | null;
   staffProfilesErrorClass: string | null;
   hasAuthUserIdColumn: boolean | null;
+  hasEmailColumn: boolean | null;
   authUserExists: boolean | null;
   authAdminError: string | null;
   staffRowExists: boolean | null;
@@ -24,25 +29,36 @@ export type StaffPreviewDiagnostics = {
   authUserIdMatchesStaffRow: boolean | null;
 };
 
+type StaffRowProbe = {
+  id?: string;
+  auth_user_id?: string | null;
+  email?: string | null;
+  is_active?: boolean | null;
+};
+
 type AdminLike = {
   from: (table: string) => {
     select: (columns: string) => {
       limit: (n: number) => PromiseLike<{
         data: unknown[] | null;
-        error: { message: string; code?: string } | null;
+        error: { message: string } | null;
       }>;
+      eq: (
+        column: string,
+        value: string,
+      ) => {
+        maybeSingle: () => PromiseLike<{
+          data: StaffRowProbe | null;
+          error: { message: string } | null;
+        }>;
+      };
       ilike: (
         column: string,
         value: string,
       ) => {
         maybeSingle: () => PromiseLike<{
-          data: {
-            id?: string;
-            auth_user_id?: string | null;
-            email?: string | null;
-            is_active?: boolean | null;
-          } | null;
-          error: { message: string; code?: string } | null;
+          data: StaffRowProbe | null;
+          error: { message: string } | null;
         }>;
       };
     };
@@ -68,6 +84,7 @@ export function emptyDiagnostics(partial?: Partial<StaffPreviewDiagnostics>): St
     staffProfilesError: null,
     staffProfilesErrorClass: null,
     hasAuthUserIdColumn: null,
+    hasEmailColumn: null,
     authUserExists: null,
     authAdminError: null,
     staffRowExists: null,
@@ -93,40 +110,42 @@ export async function probeStaffPreview(options: {
       urlProjectRef && serviceRoleRef ? urlProjectRef === serviceRoleRef : null,
   });
 
-  const columnProbe = await options.client
+  const emailProbe = await options.client
     .from("staff_profiles")
     .select("id, auth_user_id, email, is_active")
     .limit(0);
-  if (columnProbe.error) {
-    result.staffProfilesError = sanitizeLookupError(columnProbe.error.message);
-    result.staffProfilesErrorClass = classifyStaffLookupError(columnProbe.error.message);
-    result.hasAuthUserIdColumn =
-      classifyStaffLookupError(columnProbe.error.message) === "missing_column" ? false : null;
+  if (emailProbe.error) {
+    result.hasEmailColumn = !isMissingStaffColumnError(emailProbe.error.message)
+      ? null
+      : !/email/i.test(emailProbe.error.message);
+    result.staffProfilesError = sanitizeLookupError(emailProbe.error.message);
+    result.staffProfilesErrorClass = classifyStaffLookupError(emailProbe.error.message);
   } else {
+    result.hasEmailColumn = true;
     result.staffProfilesReadable = true;
-    result.hasAuthUserIdColumn = true;
   }
 
-  const rowProbe = await options.client
+  const authColProbe = await options.client
     .from("staff_profiles")
-    .select("id, auth_user_id, email, is_active")
-    .ilike("email", PREVIEW_STAFF_EMAIL)
-    .maybeSingle();
-  if (rowProbe.error) {
+    .select("id, auth_user_id, is_active")
+    .limit(0);
+  if (authColProbe.error) {
+    result.hasAuthUserIdColumn = isMissingStaffColumnError(authColProbe.error.message)
+      ? !/auth_user_id/i.test(authColProbe.error.message)
+      : null;
     result.staffProfilesError =
-      result.staffProfilesError ?? sanitizeLookupError(rowProbe.error.message);
+      result.staffProfilesError ?? sanitizeLookupError(authColProbe.error.message);
     result.staffProfilesErrorClass =
-      result.staffProfilesErrorClass ?? classifyStaffLookupError(rowProbe.error.message);
-    if (classifyStaffLookupError(rowProbe.error.message) === "missing_column") {
-      result.hasAuthUserIdColumn = false;
-    }
+      result.staffProfilesErrorClass ?? classifyStaffLookupError(authColProbe.error.message);
   } else {
+    result.hasAuthUserIdColumn = true;
     result.staffProfilesReadable = true;
-    result.staffRowExists = Boolean(rowProbe.data);
-    result.staffRowActive = rowProbe.data?.is_active ?? null;
-    result.staffRowHasAuthUserId = Boolean(rowProbe.data?.auth_user_id);
+    if (emailProbe.error) {
+      result.hasEmailColumn = false;
+    }
   }
 
+  let authUserId: string | null = null;
   try {
     const listed = await options.client.auth.admin.listUsers({ page: 1, perPage: 200 });
     if (listed.error) {
@@ -136,16 +155,32 @@ export async function probeStaffPreview(options: {
         (user) => (user.email ?? "").toLowerCase() === PREVIEW_STAFF_EMAIL,
       );
       result.authUserExists = Boolean(authUser);
-      if (authUser && rowProbe.data?.auth_user_id) {
-        result.authUserIdMatchesStaffRow = rowProbe.data.auth_user_id === authUser.id;
-      } else if (authUser && rowProbe.data && !rowProbe.error) {
-        result.authUserIdMatchesStaffRow = false;
-      }
+      authUserId = authUser?.id ?? null;
     }
   } catch (error) {
     result.authAdminError = sanitizeLookupError(
       error instanceof Error ? error.message : "auth admin failed",
     );
+  }
+
+  if (authUserId) {
+    const byAuth = await options.client
+      .from("staff_profiles")
+      .select("id, auth_user_id, is_active")
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
+    if (byAuth.error) {
+      result.staffProfilesError =
+        result.staffProfilesError ?? sanitizeLookupError(byAuth.error.message);
+      result.staffProfilesErrorClass =
+        result.staffProfilesErrorClass ?? classifyStaffLookupError(byAuth.error.message);
+    } else {
+      result.staffProfilesReadable = true;
+      result.staffRowExists = Boolean(byAuth.data);
+      result.staffRowActive = byAuth.data?.is_active ?? null;
+      result.staffRowHasAuthUserId = Boolean(byAuth.data?.auth_user_id);
+      result.authUserIdMatchesStaffRow = byAuth.data?.auth_user_id === authUserId;
+    }
   }
 
   return result;
