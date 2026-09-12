@@ -1,4 +1,4 @@
-import { funnelStats, listUsageEvents } from "@/lib/beta/usage-store";
+import { funnelStats, listUsageEvents, type UsageEvent } from "@/lib/beta/usage-store";
 import {
   listAllCaseMessages,
   listAllCasePhotos,
@@ -19,6 +19,7 @@ import { trendCountryKey } from "@/lib/trends/types";
 import { buildResearchCoverage } from "./research-coverage";
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
 import { isTestRuntime } from "@/lib/cases/persistence";
+import { loadInsightsSource } from "./insights-sources";
 
 export type InsightsFilters = {
   from?: string | null;
@@ -156,10 +157,31 @@ function hourKey(iso: string): string {
 
 export async function buildInsights(filters: InsightsFilters = {}) {
   logCasePersistenceBackend();
-  const allCases = (await listCropCases()).filter((item) => matchesFilters(item, filters));
-  const allMessages = (await listAllCaseMessages()).filter((row) => inRange(row.createdAt, filters));
-  const allPhotos = (await listAllCasePhotos()).filter((row) => inRange(row.createdAt, filters));
-  const usage = listUsageEvents().filter((event) => inRange(event.createdAt, filters));
+  const allCases = (await loadInsightsSource("crop_cases", () => listCropCases(), [], true)).filter(
+    (item) => matchesFilters(item, filters),
+  );
+  const allMessages = (
+    await loadInsightsSource("case_messages", () => listAllCaseMessages(), [])
+  ).filter((row) => inRange(row.createdAt, filters));
+  const allPhotos = (
+    await loadInsightsSource("case_photos", () => listAllCasePhotos(), [])
+  ).filter((row) => inRange(row.createdAt, filters));
+  const persistedUsage = isTestRuntime()
+    ? []
+    : await loadInsightsSource(
+        "usage_events",
+        async () => {
+          const { listPersistedUsageEvents } = await import("@/lib/beta/persist-usage");
+          return listPersistedUsageEvents();
+        },
+        [] as UsageEvent[],
+      );
+  const usageById = new Map<string, UsageEvent>();
+  for (const event of [...listUsageEvents(), ...persistedUsage]) {
+    if (!inRange(event.createdAt, filters)) continue;
+    usageById.set(event.id, event);
+  }
+  const usage = [...usageById.values()];
 
   const guests = new Set<string>();
   const registered = new Set<string>();
@@ -243,15 +265,15 @@ export async function buildInsights(filters: InsightsFilters = {}) {
     else registeredCases += 1;
   }
 
-  const outcomes = (await listOutcomes()).filter((row) =>
-    allCases.some((item) => item.id === row.caseId),
-  );
+  const outcomes = (
+    await loadInsightsSource("case_outcomes", () => listOutcomes(), [])
+  ).filter((row) => allCases.some((item) => item.id === row.caseId));
   const improved = outcomes.filter((row) => row.outcome === "improved").length;
   const unchanged = outcomes.filter((row) => row.outcome === "about_the_same").length;
   const worsened = outcomes.filter((row) => row.outcome === "worse").length;
   const solved = outcomes.filter((row) => row.outcome === "problem_solved").length;
 
-  const followups = await listFollowups();
+  const followups = await loadInsightsSource("case_followups", () => listFollowups(), []);
   const caseFollowups = followups.filter((row) => allCases.some((item) => item.id === row.caseId));
   const photoAssisted = allCases.filter((item) =>
     followups.some((row) => row.caseId === item.id && row.followUpPhotoId),
@@ -287,13 +309,24 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   for (const item of allCases) increment(newUsersByDay, dayKey(item.createdAt));
 
   const funnel = funnelStats();
-  const trends = (await listCaseTrends()).filter(canExposeTrend);
+  const trends = (
+    await loadInsightsSource("case_trends", () => listCaseTrends(), [])
+  ).filter(canExposeTrend);
   const businessIntents = ["farm_business", "cashflow", "costing", "pricing"];
   const nonDiagnostic = allCases.filter(
     (item) => item.caseType && item.caseType !== "crop_problem",
   );
   const web = researchUsageStats();
-  const persistedWeb = await loadWebResearchDashboardStats();
+  const persistedWeb = await loadInsightsSource(
+    "web_research_events",
+    () => loadWebResearchDashboardStats(),
+    {
+      answersThatUsedWebResearch: 0,
+      sourceFailures: 0,
+      staleSourceWarnings: 0,
+      topSources: [] as Array<{ label: string; count: number }>,
+    },
+  );
   const startOfToday = `${today}T00:00:00.000Z`;
   const usageMessageEvents = usage.filter((event) => event.kind === "message");
   const messagesToday = usageMessageEvents.filter(
@@ -466,17 +499,21 @@ export async function buildInsights(filters: InsightsFilters = {}) {
   const newRegisteredToday = [...firstSeenByRegistered.values()].filter(
     (iso) => iso.slice(0, 10) === today,
   ).length;
-  let newRegisteredFarmersDb: number | null = null;
-  if (!isTestRuntime()) {
-    const admin = tryCreateAdminClient();
-    if (admin.ok) {
-      const { count } = await admin.client
+  const newRegisteredFarmersDb = await loadInsightsSource(
+    "farmer_profiles",
+    async () => {
+      if (isTestRuntime()) return null;
+      const admin = tryCreateAdminClient();
+      if (!admin.ok) return null;
+      const { count, error } = await admin.client
         .from("farmer_profiles")
         .select("id", { count: "exact", head: true })
         .gte("created_at", startOfToday);
-      if (typeof count === "number") newRegisteredFarmersDb = count;
-    }
-  }
+      if (error) throw new Error(error.message);
+      return typeof count === "number" ? count : null;
+    },
+    null as number | null,
+  );
 
   const researchCoverage = buildResearchCoverage();
   return {

@@ -33,6 +33,16 @@ describe("staff lookup error classification", () => {
       classifyStaffLookupError("column staff_profiles.email does not exist"),
     ).toBe("missing_column");
     expect(
+      classifyStaffLookupError(
+        "Could not find the table 'public.case_trends' in the schema cache",
+      ),
+    ).toBe("missing_table");
+    expect(
+      classifyStaffLookupError(
+        "Could not find a relationship between 'crop_checks' and 'farmer_profiles'",
+      ),
+    ).toBe("missing_table");
+    expect(
       sanitizeLookupError("JWT eyJhbGciOiJIUzI1NiJ9.aaa for info@fvmltd.com"),
     ).not.toMatch(/info@fvmltd.com|eyJ/);
   });

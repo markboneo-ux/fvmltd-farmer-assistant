@@ -97,6 +97,14 @@ The app now retries the lookup without optional columns. Still run **`docs/previ
 
 Also confirm Vercel Preview `SUPABASE_SERVICE_ROLE_KEY` is the service-role key for `gcojtfrdjczrvzieynzj`, not Production. After deploy, `GET /api/staff/preview-diagnostics` with header `x-fvm-debug: 1` reports whether the Auth user, staff row, grants, and JWT `ref` match — still against Preview, never Production.
 
+### Preview dashboard insights (`Insights are temporarily unavailable`)
+
+Cases (`GET /api/admin/cases` → `crop_cases`) can succeed while Overview fails. `/api/admin/insights` also reads `case_messages`, `case_photos`, `case_followups`, `case_outcomes`, `case_trends`, `usage_events`, `web_research_events`, `trusted_sources`, and `farmer_profiles`. A missing table or `service_role` grant on any of those used to 503 the whole Overview.
+
+The app now keeps Overview up from `crop_cases`, records each optional table failure in Vercel logs (`database_failure`) and in the JSON `warnings` array, and only 503s when `crop_cases` itself cannot be read. Crop-check queue (`/staff`) retries without the nested `farmer_profiles!inner` embed if PostgREST cannot find that relationship.
+
+Still run **`docs/preview-dashboard-tables.sql`** on `gcojtfrdjczrvzieynzj` so the optional tables/grants exist. After deploy, `GET /api/staff/preview-diagnostics` with `x-fvm-debug: 1` includes `dashboardTables` with the exact PostgREST error per table. Do not retarget Preview at Production.
+
 ### Compatibility shim
 
 The app still retries unknown optional columns if PostgREST returns `PGRST204`. That is defensive only. After Preview is aligned, `x-fvm-debug: 1` must return `schemaCompatUsed=false` and `schemaCompatDroppedColumns=[]`.

@@ -20,7 +20,9 @@ export function classifyStaffLookupError(message: string | null | undefined): St
     return "permission_denied";
   }
   if (
-    /could not find the table|relation .*staff_profiles.* does not exist|42p01/.test(m)
+    /could not find the table|could not find a relationship|relation .* does not exist|42p01|pgrst200/.test(
+      m,
+    )
   ) {
     return "missing_table";
   }

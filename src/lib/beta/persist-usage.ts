@@ -1,7 +1,11 @@
 import "server-only";
 
 import { tryCreateAdminClient } from "@/lib/supabase/helpers";
-import { isTestRuntime, resolveCasePersistenceMode } from "@/lib/cases/persistence";
+import {
+  CasePersistenceError,
+  isTestRuntime,
+  resolveCasePersistenceMode,
+} from "@/lib/cases/persistence";
 import type { UsageEvent } from "./usage-store";
 import { logOps } from "@/lib/security/ops-log";
 
@@ -51,4 +55,38 @@ export async function countPersistedUsage(owner: {
     if (row.kind === "image_analysis") snapshot.imageAnalyses += 1;
   }
   return snapshot;
+}
+
+export async function listPersistedUsageEvents(): Promise<UsageEvent[]> {
+  if (isTestRuntime()) return [];
+  if (resolveCasePersistenceMode() !== "supabase") return [];
+  const admin = tryCreateAdminClient();
+  if (!admin.ok) {
+    throw new CasePersistenceError(admin.error, "usage_events");
+  }
+  const { data, error } = await admin.client
+    .from("usage_events")
+    .select("id, guest_session_id, auth_user_id, kind, case_id, created_at, meta")
+    .order("created_at", { ascending: true })
+    .limit(8000);
+  if (error) {
+    throw new CasePersistenceError(error.message, "usage_events");
+  }
+  return ((data ?? []) as Array<{
+    id: string;
+    guest_session_id: string | null;
+    auth_user_id: string | null;
+    kind: UsageEvent["kind"];
+    case_id: string | null;
+    created_at: string;
+    meta: UsageEvent["meta"];
+  }>).map((row) => ({
+    id: row.id,
+    guestSessionId: row.guest_session_id,
+    authUserId: row.auth_user_id,
+    kind: row.kind,
+    caseId: row.case_id,
+    createdAt: row.created_at,
+    meta: row.meta,
+  }));
 }

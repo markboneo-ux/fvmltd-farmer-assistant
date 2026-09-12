@@ -29,6 +29,10 @@ type CaseRow = {
 };
 
 type InsightsPayload = {
+  error?: string;
+  table?: string | null;
+  detail?: string | null;
+  warnings?: Array<{ table: string; error: string }>;
   insights?: {
     users: {
       total: number;
@@ -194,7 +198,6 @@ type InsightsPayload = {
     };
   };
   trends?: Array<{ label: string; count: number; classification: string }>;
-  error?: string;
 };
 
 function Bars({ rows }: { rows: CountRow[] }) {
@@ -237,6 +240,7 @@ function Card({ label, value }: { label: string; value: number | string }) {
 export function AdminInsightsView({ section = "overview" }: { section?: string }) {
   const [data, setData] = useState<InsightsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [country, setCountry] = useState("");
   const [region, setRegion] = useState("");
   const [crop, setCrop] = useState("");
@@ -287,9 +291,13 @@ export function AdminInsightsView({ section = "overview" }: { section?: string }
       const payload = (await response.json()) as InsightsPayload;
       if (!response.ok) {
         setError(payload.error || "Could not load insights.");
+        setErrorDetail(
+          [payload.table, payload.detail].filter(Boolean).join(" · ") || null,
+        );
         return;
       }
       setError(null);
+      setErrorDetail(null);
       setData(payload);
     })();
   }, [query]);
@@ -431,7 +439,24 @@ export function AdminInsightsView({ section = "overview" }: { section?: string }
           />
         </label>
       </form>
-      {error ? <p className="mt-4 text-danger">{error}</p> : null}
+      {error ? (
+        <div className="mt-4 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">
+          <p>{error}</p>
+          {errorDetail ? <p className="mt-1 text-xs text-muted">Query: {errorDetail}</p> : null}
+        </div>
+      ) : null}
+      {data?.warnings && data.warnings.length > 0 ? (
+        <div className="mt-3 rounded-xl bg-surface px-3 py-2 text-sm ring-1 ring-line">
+          <p className="font-medium text-canopy">Some insight tables could not be read</p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-muted">
+            {data.warnings.map((item) => (
+              <li key={`${item.table}:${item.error}`}>
+                {item.table}: {item.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {insights && agronomy && summary ? (
         <div className="mt-6 space-y-6">
           {section === "overview" ? (
