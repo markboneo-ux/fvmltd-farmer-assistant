@@ -135,6 +135,65 @@ alter table public.web_research_events
   add column if not exists source_names text[] not null default '{}',
   add column if not exists correlation_id text;
 
+-- Crop-check queue tables (Preview never received the guided crop_checks schema)
+create table if not exists public.farms (
+  id uuid primary key default gen_random_uuid(),
+  farmer_id uuid not null references public.farmer_profiles (id) on delete cascade,
+  name text not null,
+  village text,
+  district text,
+  region text,
+  country text,
+  location_description text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.crop_cycles (
+  id uuid primary key default gen_random_uuid(),
+  farm_id uuid not null references public.farms (id) on delete cascade,
+  crop_name text not null,
+  variety text,
+  status text not null default 'active',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.crop_checks (
+  id uuid primary key default gen_random_uuid(),
+  farmer_id uuid not null references public.farmer_profiles (id) on delete cascade,
+  farm_id uuid references public.farms (id) on delete set null,
+  crop_cycle_id uuid references public.crop_cycles (id) on delete set null,
+  crop_name text not null,
+  status text not null default 'draft',
+  is_urgent boolean not null default false,
+  awaiting_farmer_reply boolean not null default false,
+  percent_affected numeric(5, 2),
+  submitted_at timestamptz,
+  completed_at timestamptz,
+  severity text,
+  staff_notes text,
+  closed_reason text,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.assessment_results (
+  id uuid primary key default gen_random_uuid(),
+  crop_check_id uuid not null references public.crop_checks (id) on delete cascade,
+  farmer_id uuid not null references public.farmer_profiles (id) on delete cascade,
+  confidence numeric(5, 2),
+  confidence_score numeric(5, 2),
+  urgency_level text,
+  human_review_required boolean not null default true,
+  missing_information jsonb not null default '[]'::jsonb,
+  raw_response jsonb,
+  assessed_at timestamptz not null default timezone('utc', now()),
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
 -- Crop-check queue FK so PostgREST can embed farmer_profiles
 do $$
 begin

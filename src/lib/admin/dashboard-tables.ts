@@ -65,7 +65,7 @@ function probeResult(
 export async function probeDashboardTables(client: LimitClient): Promise<DashboardTableProbe[]> {
   const results: DashboardTableProbe[] = [];
   for (const table of DASHBOARD_PROBE_TABLES) {
-    const { error } = await client.from(table).select("*").limit(0);
+    const { error } = await client.from(table).select("id").limit(0);
     results.push(probeResult(table, error));
   }
   const nested = await client

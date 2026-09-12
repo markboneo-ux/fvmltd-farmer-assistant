@@ -103,7 +103,12 @@ Cases (`GET /api/admin/cases` → `crop_cases`) can succeed while Overview fails
 
 The app now keeps Overview up from `crop_cases`, records each optional table failure in Vercel logs (`database_failure`) and in the JSON `warnings` array, and only 503s when `crop_cases` itself cannot be read. Crop-check queue (`/staff`) retries without the nested `farmer_profiles!inner` embed if PostgREST cannot find that relationship.
 
-Still run **`docs/preview-dashboard-tables.sql`** on `gcojtfrdjczrvzieynzj` so the optional tables/grants exist. After deploy, `GET /api/staff/preview-diagnostics` with `x-fvm-debug: 1` includes `dashboardTables` with the exact PostgREST error per table. Do not retarget Preview at Production.
+Still run **`docs/preview-dashboard-tables.sql`** on `gcojtfrdjczrvzieynzj` so the optional tables/grants exist. Live Preview probes after this deploy showed:
+
+- Present: `crop_cases`, `case_messages`, `case_photos`, `case_followups`, `case_outcomes`, `farmer_profiles`, `usage_events`
+- Missing from PostgREST: `case_trends`, `web_research_events`, `trusted_sources`, `crop_checks`, `farms`, `crop_cycles`, `assessment_results`
+
+That missing `case_trends` table is why Overview 503'd while Cases still worked. After deploy, Overview loads from `crop_cases` and lists remaining table errors as warnings until the SQL is applied. Do not retarget Preview at Production.
 
 ### Compatibility shim
 
