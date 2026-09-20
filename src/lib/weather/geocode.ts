@@ -4,9 +4,8 @@
  */
 
 import type { WeatherCoordinates } from "./provider";
-import { ASK_FARMING_AREA_QUESTION as AREA_QUESTION } from "@/lib/assistant/farmer-context";
 
-export const ASK_FARMING_AREA_QUESTION = AREA_QUESTION;
+export const ASK_FARMING_AREA_QUESTION = "What area are you farming in?";
 
 export type GeocodedFarmingArea = {
   farmingArea: string;
@@ -121,6 +120,21 @@ export function inCaribbeanBounds(coords: WeatherCoordinates): boolean {
     coords.longitude >= CARIBBEAN_LON.min &&
     coords.longitude <= CARIBBEAN_LON.max
   );
+}
+
+export function farmingAreaUniquelyImpliesCountry(
+  farmingArea: string | null | undefined,
+): string | null {
+  const needle = (farmingArea ?? "").trim().toLowerCase();
+  if (!needle) return null;
+  const countries = new Set<string>();
+  for (const area of AREAS) {
+    if (area.label.toLowerCase() === needle || area.aliases.includes(needle)) {
+      countries.add(area.country);
+    }
+  }
+  if (countries.size === 1) return [...countries][0];
+  return null;
 }
 
 export function lookupFarmingArea(

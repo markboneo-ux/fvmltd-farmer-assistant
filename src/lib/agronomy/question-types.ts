@@ -10,6 +10,8 @@ export const QUESTION_TYPES = [
   "production_system",
   "symptom_location",
   "lesion_appearance",
+  "insect_presence",
+  "leaf_age_pattern",
   "recent_spray",
   "photo_request",
   "guidance_followup",
@@ -70,6 +72,18 @@ export const QUICK_REPLIES_BY_TYPE: Record<QuestionType, string[]> = {
     "Something else",
     "Not sure",
   ],
+  insect_presence: [
+    "Yes, insects under leaves",
+    "No insects seen",
+    "Sticky residue only",
+    "Not sure",
+  ],
+  leaf_age_pattern: [
+    "Worse on old leaves",
+    "Worse on new growth",
+    "Both",
+    "Not sure",
+  ],
   recent_spray: [
     "No sprays",
     "Insecticide",
@@ -96,6 +110,14 @@ export function inferQuestionType(question: string): QuestionType {
     /\b(spots?|lesions?)\b/.test(q)
   ) {
     return "lesion_appearance";
+  }
+
+  if (/\binsects? present under|under the curled|underside of.{0,40}(curled|new)/.test(q)) {
+    return "insect_presence";
+  }
+
+  if (/\bworse on (old|older|new)|old leaves or new growth/.test(q)) {
+    return "leaf_age_pattern";
   }
 
   if (

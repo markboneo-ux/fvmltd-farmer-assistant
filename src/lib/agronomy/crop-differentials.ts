@@ -154,9 +154,8 @@ const SEEDS: CauseSeed[] = [
     match: (text, evidence) => {
       if (evidence.symptoms.includes("spots") && !/\bwilt/.test(text)) return false;
       return (
-        /\b(wilt|waterlog|drain)\b/.test(text) ||
-        (evidence.wetFromFarmer && !evidence.symptoms.includes("spots")) ||
-        (evidence.symptoms.includes("yellowing") && !evidence.symptoms.includes("spots"))
+        /\b(wilt|waterlog|drain|puddle|flood|soggy)\b/.test(text) ||
+        evidence.wetFromFarmer
       );
     },
   },
@@ -245,6 +244,44 @@ const SEEDS: CauseSeed[] = [
     decreasesIf: "Undersides are clean and no insects are found after a careful check.",
     base: 12,
     match: (_text, evidence) => evidence.observedPest === "whiteflies",
+  },
+  {
+    crops: ["pepper", "tomato"],
+    category: "insects",
+    label: "Aphids or other sucking insects",
+    why: "Curled or yellowing new leaves on pepper often start with aphids, whiteflies, or mites under the leaves.",
+    increasesIf: "You find insects, cast skins, or sticky residue under curled new leaves.",
+    decreasesIf: "Undersides are clean after a careful check of several plants.",
+    base: 7,
+    match: (text, evidence) =>
+      (evidence.symptoms.includes("leaf curl") || /\bcurl/.test(text)) &&
+      !evidence.symptoms.includes("spots"),
+  },
+  {
+    crops: ["pepper", "tomato"],
+    category: "nutrition",
+    label: "Nutrient shortage or uneven feeding",
+    why: "Even yellowing, especially on older leaves, can be nutrition or watering rather than a virus or a leaf spot.",
+    increasesIf: "Yellowing is worse on older leaves and new growth is otherwise normal.",
+    decreasesIf: "Only new leaves are cupped, mottled, or twisted.",
+    base: 6,
+    match: (text, evidence) =>
+      evidence.symptoms.includes("yellowing") &&
+      !evidence.symptoms.includes("spots") &&
+      !evidence.observedPest,
+  },
+  {
+    crops: ["pepper", "tomato"],
+    category: "viral disease",
+    label: "Virus risk if new leaves stay curled",
+    why: "Persistent curling, mosaic, or stunting on new pepper growth can be a virus, often after sucking insects, but a photo or one plant does not prove it.",
+    increasesIf: "New leaves stay cupped or mottled and affected plants are scattered.",
+    decreasesIf: "Only older leaves yellow evenly and new growth is normal.",
+    base: 5,
+    match: (text, evidence) =>
+      (evidence.symptoms.includes("leaf curl") || /\bcurl/.test(text)) &&
+      !evidence.symptoms.includes("spots") &&
+      evidence.observedPest !== "whiteflies",
   },
   {
     crops: ["pepper", "tomato"],
@@ -347,6 +384,14 @@ export function cropPlaybookFor(options: {
 
   if (crop === "pepper" && options.evidence.symptoms.includes("spots")) {
     return pepperSpotPlaybook(labels, options.evidence, options.farmerLevel, options.facts);
+  }
+
+  if (
+    crop === "pepper" &&
+    (options.evidence.symptoms.includes("leaf curl") ||
+      (options.evidence.symptoms.includes("yellowing") && !options.evidence.symptoms.includes("spots")))
+  ) {
+    return pepperCurlYellowPlaybook(labels, options.farmerLevel, options.facts);
   }
 
   if ((crop === "lettuce" || crop === "celery") && /\b(burn|burning|burnt|brown (tips?|edges?)|scorch)\b/.test(text)) {
@@ -533,6 +578,55 @@ function pepperSpotPlaybook(
         : weatherWet
           ? "Leaf spots on pepper usually mean a leaf disease. Recent conditions have been wet. We should tell fungal spots from bacterial spots before you buy a spray."
           : "Leaf spots on pepper usually mean a leaf disease. We should tell fungal spots from bacterial spots before you buy a spray.",
+    },
+  });
+}
+
+function pepperCurlYellowPlaybook(
+  labels: string[],
+  farmerLevel: FarmerLevel | null,
+  facts: KnownFarmerFacts,
+): CropPlaybook {
+  const causes =
+    labels.length >= 2
+      ? labels.filter((label) => !/\b(cercospora|bacterial leaf spot|frogeye)\b/i.test(label)).slice(0, 3)
+      : [
+          "Aphids or other sucking insects",
+          "Nutrient shortage or uneven feeding",
+          "Virus risk if new leaves stay curled",
+        ];
+  void facts;
+  return levelTone(farmerLevel, {
+    base: {
+      id: "pepper_curl_yellow",
+      likelyCauses: causes.slice(0, 3),
+      why: "On sweet pepper, curling with yellowing usually ranks sucking insects under new leaves, a nutrient pattern if older leaves are worse, and a virus risk if new growth stays cupped. Drainage only rises if plants sit wet.",
+      checks: [
+        "Turn over curled new leaves and look for insects, cast skins, or sticky residue",
+        "Compare whether yellowing is worse on old leaves or new growth",
+        "Note whether affected plants are scattered, in patches, or field-wide",
+      ],
+      actionsToday: [
+        "Scout the underside of curled new leaves before changing fertilizer or sprays",
+        "Hold extra fertilizer until you know whether old or new leaves are worse",
+        "Keep notes on how many plants are affected",
+      ],
+      avoid: [
+        "Do not jump to a spray until insects, old versus new leaves, and spread are checked",
+        "Do not remove whole plants for an unconfirmed virus",
+      ],
+      whatWouldChange: [
+        "Insects or sticky residue under new leaves would raise aphids or whiteflies",
+        "Yellowing only on oldest leaves would raise a nutrient pattern",
+        "Scattered plants with mosaic or severe new-leaf curl would raise a virus concern",
+      ],
+      monitor: "Watch whether new growth stays curled and whether more plants join in over 2–3 days.",
+      oneQuestion: "Are insects present under the curled new leaves?",
+      photoHelpful: true,
+    },
+    HOME_GARDENER: {
+      id: "pepper_curl_yellow_home",
+      why: "Your sweet peppers are curling and yellowing. Check under the new leaves for insects before you change fertilizer or think about a spray.",
     },
   });
 }

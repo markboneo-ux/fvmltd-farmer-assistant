@@ -37,4 +37,23 @@ describe("crop-health case state", () => {
     expect(next.farmingArea).toBe("St Catherine");
     expect(next.crop).toBe("tomato");
   });
+
+  it("keeps observed symptoms and unanswered diagnostic questions across turns", () => {
+    const first = mergeCropHealthState(emptyCropHealthState(), {
+      crop: "pepper",
+      farmingArea: "Couva",
+      country: "Trinidad and Tobago",
+      observedSymptoms: ["leaf curl", "yellowing"],
+      notReportedSymptoms: ["spots"],
+      lastDiagnosticQuestion: "Are insects present under the curled new leaves?",
+    });
+    const next = mergeCropHealthState(first, {
+      farmerIntent: "reassurance_same_case",
+      answeredDiagnosticQuestions: [],
+    });
+    expect(next.observedSymptoms).toEqual(["leaf curl", "yellowing"]);
+    expect(next.notReportedSymptoms).toContain("spots");
+    expect(next.lastDiagnosticQuestion).toMatch(/insects/);
+    expect(next.crop).toBe("pepper");
+  });
 });

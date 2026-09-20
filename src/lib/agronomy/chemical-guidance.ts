@@ -72,7 +72,9 @@ function fungalBacterialSplit(options: {
   pestOrDisease?: string | null;
   likelyCauses?: string[];
   crop?: string | null;
+  spotsObserved?: boolean;
 }): boolean {
+  if (options.spotsObserved === false) return false;
   const blob = `${options.pestOrDisease ?? ""} ${(options.likelyCauses ?? []).join(" ")}`.toLowerCase();
   const fungal = /\b(cercospora|septoria|early blight|alternaria|fungal|frogeye|anthracnose)\b/.test(
     blob,
@@ -92,8 +94,10 @@ export function generalClassesFor(options: {
   asksForSpray?: boolean;
   likelyCauses?: string[];
   crop?: string | null;
+  spotsObserved?: boolean;
 }): string[] {
   if (isWhitefly(options)) return WHITEFLY_CLASSES;
+  if (options.spotsObserved === false && !isWhitefly(options)) return [];
   if (fungalBacterialSplit(options)) {
     return [...FUNGAL_LEAF_SPOT_CLASSES, ...BACTERIAL_LEAF_SPOT_CLASSES];
   }
@@ -122,6 +126,7 @@ export function buildSprayGuidance(options: {
   verifiedInputs?: VerifiedInputDisplay[];
   pesticideChecks?: PesticideCheck[];
   likelyCauses?: string[];
+  spotsObserved?: boolean;
 }): SprayGuidance | null {
   if (!options.asksForSpray) return null;
 
@@ -155,6 +160,7 @@ export function buildSprayGuidance(options: {
     pestOrDisease: options.target,
     likelyCauses: options.likelyCauses,
     crop: options.crop,
+    spotsObserved: options.spotsObserved,
   });
   const whitefly = isWhitefly({
     pestOrDisease: options.target,
@@ -169,6 +175,7 @@ export function buildSprayGuidance(options: {
         asksForSpray: true,
         likelyCauses: options.likelyCauses,
         crop: options.crop,
+        spotsObserved: options.spotsObserved,
       });
 
   const parts: string[] = [];
@@ -205,7 +212,9 @@ export function buildSprayGuidance(options: {
     if (!whitefly) parts.push(NARROW_SPRAY_TARGET);
   } else if (!localRegistrationVerified && unverifiedClasses.length === 0) {
     parts.push(
-      "I cannot name a product class yet. I need a closer look at the spots — pale centre versus greasy water-soaked — before choosing between fungal and bacterial management.",
+      options.spotsObserved === false
+        ? "I cannot name a product class yet. I need a closer look at the curled and yellowing leaves — insects underneath versus an even nutrient pattern — before choosing a product."
+        : "I cannot name a product class yet. I need a closer look at the spots — pale centre versus greasy water-soaked — before choosing between fungal and bacterial management.",
     );
     parts.push(NARROW_SPRAY_TARGET);
   }

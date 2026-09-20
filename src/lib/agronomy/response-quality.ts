@@ -21,12 +21,21 @@ import {
   extractSymptomAttributes,
   hasStaleSymptomWording,
 } from "./symptom-consistency";
+import {
+  applyAuthoritativeCaseValidation,
+  highestValueCurlYellowQuestion,
+  isDiagnosticContinuityFollowUp,
+  isGenericCareQuestion,
+  spotsAreObserved,
+  sprayDiscussionJustified,
+} from "./case-continuity";
+import type { CropHealthCaseState } from "./crop-health-state";
 
 const GENERIC_DIAGNOSIS =
   /\b(could be heat|heat, nutrient|heat, watering|may be a disease|monitor it|check your plants|could be many things|looks like stress)\b/i;
 
 const DESCRIBED_PROBLEM =
-  /\b(burn|burning|scorch|wilt|yellow|spot|lesion|hole|stunt|disease|pest|whitefl|blight|rot|mould|mold|chloros|necrosis|tip\s*burn|leaf\s+edges?|crispy)\b/i;
+  /\b(burn|burning|scorch|wilt|yellow|spot|lesion|hole|stunt|disease|pest|whitefl|blight|rot|mould|mold|chloros|necrosis|tip\s*burn|leaf\s+edges?|crispy|curl)\b/i;
 
 const PHOTO_INSUFFICIENT =
   /\b(photo is (a bit )?distant|blurry|too far|insufficient|first look only|cannot see|image is (unclear|too distant))\b/i;
@@ -290,12 +299,16 @@ export function applyQualityCorrection(
     facts: KnownFarmerFacts;
     weatherSignals?: AgronomicWeatherSignal[];
     ranked?: RankedCause[];
+    hasPhotos?: boolean;
+    previousState?: CropHealthCaseState | null;
   },
 ): AgronomicCasePayload {
   const facts = options.facts;
   const evidence = extractObservedEvidence({
     facts,
     text: facts.rawText,
+    hasPhotos: options.hasPhotos,
+    photoFindings: options.previousState?.photoFindings,
     weatherSignals: options.weatherSignals,
   });
   const mode = agronomicModeFor({ evidence, facts });
@@ -348,11 +361,24 @@ export function applyQualityCorrection(
   }
 
   if (
-    playbook?.why &&
-    (/could be heat|root-zone stress|nutrient imbalance or watering/i.test(next.preliminaryAssessment) ||
-      next.preliminaryAssessment.trim().length < 80)
+    playbook &&
+    !spotsAreObserved(evidence, options.previousState, facts) &&
+    likely.some((label) => /\b(cercospora|frogeye|bacterial leaf spot|waterlog)\b/i.test(label))
   ) {
-    next = { ...next, preliminaryAssessment: playbook.why };
+    likely = playbook.likelyCauses;
+    rankedCauses = ranked.slice(0, 3);
+  }
+
+  if (
+    playbook?.why &&
+    (/could be heat|root-zone stress|nutrient imbalance or watering|water regularly|balanced fertilizer|generic pepper|pots or in the ground/i.test(
+      next.preliminaryAssessment,
+    ) ||
+      next.preliminaryAssessment.trim().length < 80 ||
+      (!spotsAreObserved(evidence, options.previousState, facts) &&
+        /pale centre|water-soaked|cercospora|if a spray is needed/i.test(next.preliminaryAssessment)))
+  ) {
+    next = { ...next, preliminaryAssessment: playbook.why, diagnosisWhy: playbook.why };
   }
 
   if (!shouldShowRankedCauses(mode, evidence)) {
@@ -441,7 +467,15 @@ export function applyQualityCorrection(
     next = { ...next, weatherBrief: null };
   }
 
-  if (facts.asksForProducts) {
+  const spotsObserved = spotsAreObserved(evidence, options.previousState, facts);
+  const sprayJustified = sprayDiscussionJustified({
+    asksForSpray: facts.asksForProducts,
+    evidence,
+    diagnosisConfidence: next.diagnosisConfidence,
+    mode: mode,
+    state: options.previousState,
+  });
+  if (sprayJustified) {
     const spray = buildSprayGuidance({
       country: facts.country,
       crop: facts.crop,
@@ -452,10 +486,38 @@ export function applyQualityCorrection(
       verifiedInputs: next.verifiedInputOptions,
       pesticideChecks: next.pesticideChecks,
       likelyCauses: likely,
+      spotsObserved,
     });
     if (spray) {
       next = { ...next, sprayGuidanceText: spray.farmerText };
     }
+  } else {
+    next = { ...next, sprayGuidanceText: null };
+  }
+
+  if (
+    !spotsObserved &&
+    (facts.suspectedIssue === "leaf curl and yellowing" ||
+      facts.suspectedIssue === "leaf curl" ||
+      evidence.symptoms.includes("leaf curl"))
+  ) {
+    const curlQuestion = highestValueCurlYellowQuestion(options.previousState);
+    if (
+      !next.nextQuestion.trim() ||
+      /spots?|pale centre|water-soaked|country|just to confirm/i.test(next.nextQuestion) ||
+      isGenericCareQuestion(next.nextQuestion) ||
+      isDiagnosticContinuityFollowUp(facts.rawText)
+    ) {
+      next = { ...next, nextQuestion: curlQuestion };
+    }
+  }
+
+  if (
+    playbook &&
+    !spotsObserved &&
+    next.checksToday.some((item) => /pale centre|water-soaked|cercospora|if a spray is needed/i.test(item))
+  ) {
+    next = { ...next, checksToday: playbook.checks };
   }
 
   next = {
@@ -503,6 +565,24 @@ export function applyQualityCorrection(
     weatherBrief: next.weatherBrief
       ? alignNarrativeToObservedSymptoms(next.weatherBrief, attrs)
       : next.weatherBrief,
+  };
+
+  next = applyAuthoritativeCaseValidation(next, {
+    facts,
+    evidence,
+    state: options.previousState,
+    hasPhotos: options.hasPhotos,
+  });
+
+  const finalReplies = reconcileQuickReplies({
+    question: next.nextQuestion,
+    quickReplies: next.quickReplies,
+    questionType: next.questionType,
+  });
+  next = {
+    ...next,
+    questionType: finalReplies.questionType,
+    quickReplies: finalReplies.quickReplies,
   };
 
   return next;

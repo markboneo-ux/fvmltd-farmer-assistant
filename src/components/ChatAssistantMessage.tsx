@@ -103,9 +103,9 @@ export function ChatAssistantMessage({
     (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
   const supportingNote =
     relevance === "supporting" ? payload.weatherBrief || null : null;
-  const showProducts = payload.verifiedInputOptions.length > 0;
   const sprayGuidance = payload.sprayGuidanceText?.trim() || "";
-  const showSpraySection = Boolean(sprayGuidance) || showProducts;
+  const showSpraySection = Boolean(sprayGuidance);
+  const showProducts = false;
   const uniqueSources: WebSourceCitation[] =
     payload.webSources && payload.webSources.length > 0
       ? payload.webSources

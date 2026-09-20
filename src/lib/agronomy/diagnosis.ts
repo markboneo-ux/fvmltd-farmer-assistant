@@ -24,6 +24,7 @@ import { shouldAskFarmingArea } from "@/lib/weather/geocode";
 import { extractObservedEvidence, genericCauseList } from "./evidence-hierarchy";
 import { cropPlaybookFor, rankCropCauses } from "./crop-differentials";
 import { agronomicModeFor } from "./case-modes";
+import { isGenericCareQuestion, spotsAreObserved } from "./case-continuity";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -433,12 +434,14 @@ export function pickHighestValueFollowUp(options: {
       confidence: facts.locationConfidence,
       asksForProducts: facts.asksForProducts,
       researchNeed: options.researchNeed,
+      farmingArea: facts.district,
     })
   ) {
     return `Just to confirm, are you farming in ${facts.country}?`;
   }
 
   const working = extractWorkingCase(facts);
+  const evidence = extractObservedEvidence({ facts, text: facts.rawText });
   const playbook = playbookFor(facts, options.farmerLevel ?? null);
   if (playbook?.id.startsWith("celery") && playbook.oneQuestion) {
     if (
@@ -450,10 +453,18 @@ export function pickHighestValueFollowUp(options: {
   }
 
   const existing = payload.nextQuestion.trim();
+  const spotsObserved = spotsAreObserved(evidence, null, facts);
+  const staleSpotQuestion =
+    !spotsObserved &&
+    /\b(pale centre|water-soaked|separate spots|true (leaf )?spots|greasy)\b/i.test(existing) &&
+    !/\b(photo|photograph|image)\b/i.test(existing);
   if (
     existing &&
     !questionAsksForKnownFact(existing, facts) &&
-    !/\bcountry\b/i.test(existing)
+    !/\bcountry\b/i.test(existing) &&
+    !/just to confirm, are you farming in/i.test(existing) &&
+    !isGenericCareQuestion(existing) &&
+    !staleSpotQuestion
   ) {
     return existing;
   }

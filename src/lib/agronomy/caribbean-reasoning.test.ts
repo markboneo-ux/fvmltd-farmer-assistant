@@ -504,3 +504,143 @@ describe("preview remaining live-case gaps", () => {
     );
   });
 });
+
+describe("Couva sweet pepper curling/yellowing case continuity", () => {
+  const turn1 =
+    "My sweet pepper plants in Couva have some leaves curling and yellowing. It started a few days ago.";
+  const turn2 = "I really want to make sure my sweet peppers survive.";
+
+  function rendered(result: Awaited<ReturnType<typeof runAgronomicCase>>): string {
+    if (!result.ok) return "";
+    return farmerRenderedAnswer(result.case);
+  }
+
+  it("resolves Couva, keeps diagnosis, and never invents spots or a spray section", async () => {
+    const first = await runAgronomicCase({
+      message: turn1,
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "couva-pepper-1",
+        output_text: mockJson({
+          preliminaryAssessment:
+            "If a spray is needed I need a closer look at the spots — pale centre versus greasy water-soaked. Waterlogging is the main cause.",
+          sprayGuidanceText:
+            "If a spray is needed\nI need a closer look at the spots — pale centre versus greasy water-soaked.",
+          likelyCauses: ["Waterlogging", "Cercospora / frogeye leaf spot"],
+          nextQuestion: "Just to confirm, are you farming in Trinidad and Tobago?",
+          diagnosisConfidence: "possible",
+        }),
+      }),
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.case.cropHealthState?.crop).toMatch(/pepper/);
+    expect(first.case.cropHealthState?.farmingArea?.toLowerCase()).toBe("couva");
+    expect(first.case.cropHealthState?.country).toBe("Trinidad and Tobago");
+    expect(first.case.cropHealthState?.observedSymptoms.join(" ")).toMatch(/curl|yellow/i);
+    expect(first.case.cropHealthState?.notReportedSymptoms).toEqual(
+      expect.arrayContaining(["spots"]),
+    );
+    const firstText = rendered(first).toLowerCase();
+    expect(firstText).not.toMatch(/just to confirm, are you farming in trinidad/);
+    expect(firstText).not.toMatch(/pale centre versus greasy water-soaked/);
+    expect(firstText).not.toMatch(/cercospora/);
+    expect((firstText.match(/if a spray is needed/g) ?? []).length).toBe(0);
+    expect(first.case.sprayGuidanceText).toBeFalsy();
+    expect(first.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/waterlog/);
+    expect(first.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient|virus/);
+    expect(first.case.nextQuestion.toLowerCase()).toMatch(/insect|old leaves or new|scattered|patches/);
+    expect((first.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
+
+    const second = await runAgronomicCase({
+      message: turn2,
+      history: [
+        { role: "user", content: turn1 },
+        { role: "assistant", content: rendered(first) },
+      ],
+      activeCase: {
+        crop: "pepper",
+        conversationIntent: "crop_problem",
+        farmerProblemText: turn1,
+        country: "Trinidad and Tobago",
+        district: "Couva",
+        cropHealthState: first.case.cropHealthState,
+      },
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "couva-pepper-2",
+        output_text: mockJson({
+          preliminaryAssessment:
+            "To keep sweet peppers healthy, water regularly, feed with a balanced fertilizer, and prune for airflow.",
+          likelyCauses: [],
+          nextQuestion: "Are you growing them in pots or in the ground?",
+        }),
+      }),
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.case.cropHealthState?.crop).toMatch(/pepper/);
+    expect(second.case.agronomicMode).not.toBe("GENERAL_CROP_MANAGEMENT");
+    const secondText = rendered(second).toLowerCase();
+    expect(secondText).toMatch(/curl|yellow/);
+    expect(secondText).not.toMatch(/water regularly, feed with a balanced fertilizer/);
+    expect(secondText).not.toMatch(/pale centre versus greasy water-soaked/);
+    expect((secondText.match(/if a spray is needed/g) ?? []).length).toBe(0);
+    expect(second.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient|virus/);
+    expect(second.case.nextQuestion.toLowerCase()).toMatch(/insect|old leaves or new|scattered|patches/);
+    expect(second.case.cropHealthState?.farmerIntent).toBe("reassurance_same_case");
+
+    const third = await runAgronomicCase({
+      message: "Here is a photo of the leaves.",
+      images: [{ mimeType: "image/jpeg", base64: "aaaa", fileName: "leaf.jpg" }],
+      history: [
+        { role: "user", content: turn1 },
+        { role: "assistant", content: rendered(first) },
+        { role: "user", content: turn2 },
+        { role: "assistant", content: rendered(second) },
+      ],
+      activeCase: {
+        crop: "pepper",
+        conversationIntent: "crop_problem",
+        farmerProblemText: turn1,
+        country: "Trinidad and Tobago",
+        district: "Couva",
+        cropHealthState: {
+          ...second.case.cropHealthState!,
+          photoFindings: ["cupped new leaves", "uneven yellowing", "no discrete spots visible"],
+          suspectedCauses: second.case.cropHealthState?.suspectedCauses ?? [],
+        },
+      },
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "couva-pepper-3",
+        output_text: mockJson({
+          preliminaryAssessment:
+            "The photo shows a nutrient deficiency, a virus, and aphids. Suspected virus may require removing affected plants.",
+          likelyCauses: [
+            "Nutrient shortage or uneven feeding",
+            "Virus risk if new leaves stay curled",
+            "Aphids or other sucking insects",
+          ],
+          safeActionsNow: ["Remove affected plants because this may be a virus"],
+          diagnosisConfidence: "possible",
+          nextQuestion:
+            "Are insects present under the curled new leaves? Is yellowing worse on old leaves or new growth?",
+        }),
+      }),
+    });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+    const thirdText = rendered(third).toLowerCase();
+    expect(third.case.cropHealthState?.crop).toMatch(/pepper/);
+    expect(third.case.cropHealthState?.observedSymptoms.join(" ")).toMatch(/curl|yellow/i);
+    expect(thirdText).toMatch(/the photo makes/);
+    expect(thirdText).not.toMatch(/pale centre versus greasy water-soaked/);
+    expect((thirdText.match(/if a spray is needed/g) ?? []).length).toBe(0);
+    expect(thirdText).not.toMatch(/remove affected plants/);
+    expect(thirdText).toMatch(/do not remove whole plants|inspect vectors|staff review/);
+    expect((third.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
+    expect(third.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient|virus/);
+    expect(third.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/cercospora|waterlog/);
+  });
+});

@@ -66,6 +66,22 @@ describe("location confidence", () => {
     ).toBe(true);
   });
 
+  it("does not ask country confirmation when Couva uniquely implies Trinidad and Tobago", () => {
+    const facts = extractKnownFacts(
+      "My sweet pepper plants in Couva have some leaves curling and yellowing.",
+    );
+    expect(facts.district?.toLowerCase()).toBe("couva");
+    expect(facts.country).toBe("Trinidad and Tobago");
+    expect(
+      shouldConfirmCountry({
+        country: facts.country,
+        confidence: facts.locationConfidence,
+        asksForProducts: true,
+        farmingArea: facts.district,
+      }),
+    ).toBe(false);
+  });
+
   it("treats a registered profile country as confirmed for local facts", () => {
     const facts = extractKnownFacts("My celery is burning up.", {
       country: "Guyana",

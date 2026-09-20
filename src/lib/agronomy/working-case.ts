@@ -6,7 +6,7 @@ import {
   countryReliableForLocalFacts,
   type LocationConfidence,
 } from "@/lib/assistant/farmer-context";
-import { shouldAskFarmingArea } from "@/lib/weather/geocode";
+import { farmingAreaUniquelyImpliesCountry, shouldAskFarmingArea } from "@/lib/weather/geocode";
 
 export type WorkingCaseFacts = {
   crop: string | null;
@@ -83,7 +83,8 @@ export function highestValueMissingQuestion(options: {
 
   if (
     options.asksForProducts &&
-    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown")
+    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown") &&
+    !farmingAreaUniquelyImpliesCountry(working.region)
   ) {
     if (working.country) {
       return `Just to confirm, are you farming in ${working.country}?`;
@@ -106,7 +107,10 @@ export function highestValueMissingQuestion(options: {
   const skipPatternQuestion =
     working.symptom === "whiteflies" ||
     working.symptom === "wilt" ||
-    working.symptom === "stunting";
+    working.symptom === "stunting" ||
+    working.symptom === "leaf curl" ||
+    working.symptom === "leaf curl and yellowing" ||
+    working.symptom === "yellowing";
 
   if (
     options.diagnostic &&
@@ -123,7 +127,8 @@ export function highestValueMissingQuestion(options: {
 
   if (
     options.asksForProducts &&
-    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown")
+    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown") &&
+    !farmingAreaUniquelyImpliesCountry(working.region)
   ) {
     return working.country
       ? `Just to confirm, are you farming in ${working.country}?`

@@ -15,7 +15,9 @@ export function buildFarmerVisibleReply(payload: AgronomicCasePayload): string {
   const question = payload.nextQuestion.trim();
   const spray = payload.sprayGuidanceText?.trim() || "";
   const sprayBlock = spray
-    ? `${SPRAY_NEEDED_HEADING}\n${spray}`
+    ? (assessment.toLowerCase().includes("if a spray is needed")
+        ? ""
+        : `${SPRAY_NEEDED_HEADING}\n${spray}`)
     : "";
 
   const parts = [assessment];
@@ -50,12 +52,10 @@ export function farmerRenderedAnswer(payload: AgronomicCasePayload): string {
   if (payload.safeActionsNow.length > 0) parts.push(payload.safeActionsNow.join("\n"));
   if (payload.actionsToAvoid.length > 0) parts.push(payload.actionsToAvoid.join("\n"));
   const spray = payload.sprayGuidanceText?.trim() || "";
-  if (spray || payload.verifiedInputOptions.length > 0) {
-    parts.push(SPRAY_NEEDED_HEADING);
-    if (spray) parts.push(spray);
-    for (const option of payload.verifiedInputOptions.slice(0, 2)) {
-      parts.push(option.activeIngredientOrNutrient);
-    }
+  if (spray) {
+    const already = parts.join("\n").toLowerCase().includes("if a spray is needed");
+    if (!already) parts.push(SPRAY_NEEDED_HEADING);
+    if (!parts.join("\n").includes(spray)) parts.push(spray);
   }
   if ((payload.whatWouldChangeDiagnosis ?? []).length > 0) {
     parts.push((payload.whatWouldChangeDiagnosis ?? []).join("\n"));
@@ -100,15 +100,11 @@ export function farmerHistoryContent(payload: AgronomicCasePayload): string {
       `What would change this: ${(payload.whatWouldChangeDiagnosis ?? []).join("; ")}`,
     );
   }
-  if (payload.verifiedInputOptions.length > 0) {
-    lines.push(
-      `Verified local options: ${payload.verifiedInputOptions
-        .map((option) => option.activeIngredientOrNutrient)
-        .join("; ")}`,
-    );
-  }
   if (payload.sprayGuidanceText?.trim()) {
-    lines.push(`${SPRAY_NEEDED_HEADING}: ${payload.sprayGuidanceText.trim()}`);
+    const blob = lines.join("\n");
+    if (!/if a spray is needed/i.test(blob)) {
+      lines.push(`${SPRAY_NEEDED_HEADING}: ${payload.sprayGuidanceText.trim()}`);
+    }
   }
 
   return lines.filter(Boolean).join("\n");

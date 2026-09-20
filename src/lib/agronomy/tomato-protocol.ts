@@ -5,7 +5,7 @@
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
 import { extractCountryFromText } from "@/lib/research/countries";
-import { lookupFarmingArea } from "@/lib/weather/geocode";
+import { farmingAreaUniquelyImpliesCountry, lookupFarmingArea } from "@/lib/weather/geocode";
 import {
   ASK_COUNTRY_QUESTION,
   ASK_FARMING_AREA_QUESTION,
@@ -144,7 +144,7 @@ const UNSAFE_MIX =
   /\b(mix|mixing|cocktail|tank\s*mix)\b.{0,40}\b(pesticide|insecticide|fungicide|herbicide|chemical)/i;
 
 const LOCATION_QUESTION =
-  /\b(which\s+)?(country|island|district|parish|region|area)\b|\bwhere\s+are\s+you\s+farming\b|\bwhat area are you farming in\b/i;
+  /\b(which\s+)?(country|island|district|parish|region|area)\b|\bwhere\s+are\s+you\s+farming\b|\bwhat area are you farming in\b|\bjust to confirm, are you farming in\b/i;
 
 const CROP_QUESTION =
   /\b(what\s+crop|which\s+crop|is\s+it\s+tomato|pepper\s+or|what\s+are\s+you\s+growing)\b/i;
@@ -197,6 +197,12 @@ export function extractKnownFacts(
   else if (/\bstunt(ed|ing)?\b/.test(lower)) suspectedIssue = "stunting";
   else if (/\b(blight|leaf\s+spot|fungal|cercospora)\b/.test(lower)) {
     suspectedIssue = "foliar fungal disease";
+  } else if (/\bcurl/.test(lower) && /\byellow/.test(lower)) {
+    suspectedIssue = "leaf curl and yellowing";
+  } else if (/\bcurl/.test(lower)) {
+    suspectedIssue = "leaf curl";
+  } else if (/\byellow(ing)?\b/.test(lower) && !/\bspots?\b/.test(lower)) {
+    suspectedIssue = "yellowing";
   }
 
   const problemCategory =
@@ -349,7 +355,8 @@ export function questionAsksForKnownFact(
     if (
       /just to confirm/i.test(question) &&
       facts.locationConfidence !== "explicit" &&
-      facts.locationConfidence !== "profile_confirmed"
+      facts.locationConfidence !== "profile_confirmed" &&
+      !farmingAreaUniquelyImpliesCountry(facts.district)
     ) {
       return false;
     }
@@ -548,6 +555,7 @@ export function applyCommercialSafetyGuards(
       confidence: options.knownFacts.locationConfidence,
       asksForProducts: options.knownFacts.asksForProducts,
       researchNeed: options.researchNeed,
+      farmingArea: options.knownFacts.district,
     });
     if (options.knownFacts.country && !needsCountry && !needsConfirm) {
       nextQuestion = "";

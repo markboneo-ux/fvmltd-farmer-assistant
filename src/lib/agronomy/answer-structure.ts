@@ -15,7 +15,7 @@ Use this order, skipping any heading that adds no value. Plain sentences, no mar
 3. OTHER POSSIBILITIES — only if genuinely unresolved. Skip this when the farmer already reported a pest and there is no second unexplained symptom.
 4. CHECK THIS NOW
 5. WHAT TO DO TODAY — low-risk actions first. Do not automatically say to remove leaves or plants.
-6. IF A SPRAY IS NEEDED — only if the farmer asked or a spray is justified. Separate VERIFIED FOR THIS COUNTRY/CROP from GENERAL ACTIVE-INGREDIENT CLASSES NOT YET VERIFIED LOCALLY. Never invent registration.
+6. IF A SPRAY IS NEEDED — only if the farmer asked about spraying/treatment/chemical control, or a pesticide discussion is materially justified by evidence. Never invent a spray section. Never duplicate this section. Never discuss fungal-vs-bacterial spot sprays unless spots were reported or seen.
 7. WEATHER EFFECT — only if weather changes a ranking or a decision (wetness, spray timing, heat, dry). Do not append a generic "wet weather increases disease pressure" line.
 8. WHAT WOULD CHANGE MY ASSESSMENT
 9. ONE NEXT QUESTION or ONE SPECIFIC PHOTO REQUEST

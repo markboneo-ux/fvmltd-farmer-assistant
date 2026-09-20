@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lookupFarmingArea, shouldAskFarmingArea } from "./geocode";
+import { lookupFarmingArea, shouldAskFarmingArea, farmingAreaUniquelyImpliesCountry } from "./geocode";
 import { resolveCoordinates } from "./provider";
 import { buildMockHumidRainyForecast, splitRecentAndForecast } from "./get-forecast";
 import { summarizeAgronomicWeather } from "@/lib/agronomy/agronomic-weather";
@@ -10,6 +10,9 @@ describe("farming area geocoding", () => {
     expect(couva?.farmingArea).toBe("Couva");
     expect(couva?.country).toBe("Trinidad and Tobago");
     expect(lookupFarmingArea("My celery is burning")).toBeNull();
+    expect(farmingAreaUniquelyImpliesCountry("Couva")).toBe("Trinidad and Tobago");
+    expect(farmingAreaUniquelyImpliesCountry("Berbice")).toBe("Guyana");
+    expect(farmingAreaUniquelyImpliesCountry("unknown village")).toBeNull();
   });
 
   it("resolves Berbice as Guyana, not Trinidad", () => {

@@ -45,6 +45,13 @@ export function agronomicModeFor(options: {
   }
 
   if (
+    evidence.symptoms.includes("leaf curl") ||
+    /\bcurl/.test(text)
+  ) {
+    return "UNKNOWN_CAUSE_DIAGNOSIS";
+  }
+
+  if (
     /\b(yellow|chloros|pale)\b/.test(text) &&
     !evidence.symptoms.includes("spots") &&
     !evidence.observedPest

@@ -130,14 +130,16 @@ export function rankDiagnosticCauses(
       "Plants pull easily, roots are brown or smell sour, or the soil stays wet.",
       "Roots are white and the soil drains in a few hours.",
     );
-    add(
-      "drainage",
-      6,
-      "Wet soil / poor drainage",
-      "Waterlogging yellows leaves without making leaf spots.",
-      "Low spots in the field are worse after rain.",
-      "The same yellowing happens on raised, well-drained beds.",
-    );
+    if (wet) {
+      add(
+        "drainage",
+        6,
+        "Wet soil / poor drainage",
+        "Waterlogging yellows leaves without making leaf spots.",
+        "Low spots in the field are worse after rain.",
+        "The same yellowing happens on raised, well-drained beds.",
+      );
+    }
     add(
       "age/senescence",
       5,

@@ -56,7 +56,7 @@ import type { ResearchResult, WebResearchResult } from "@/lib/research/types";
 import { newCorrelationId, logStageFailure } from "@/lib/errors/correlation";
 import { logOps } from "@/lib/security/ops-log";
 import { getForecast } from "@/lib/weather/get-forecast";
-import { resolveFarmingArea, shouldAskFarmingArea } from "@/lib/weather/geocode";
+import { resolveFarmingArea, shouldAskFarmingArea, farmingAreaUniquelyImpliesCountry } from "@/lib/weather/geocode";
 import { summarizeAgronomicWeather } from "./agronomic-weather";
 import type { AgronomicWeatherSignal } from "./agronomic-weather";
 import { emptyWeatherDebug, logWeatherDebug, type WeatherRetrievalDebug } from "./weather-debug";
@@ -67,6 +67,7 @@ import {
   type CropHealthCaseState,
 } from "./crop-health-state";
 import { extractObservedEvidence } from "./evidence-hierarchy";
+import { farmerIntentFromMessage, photoUnknownLine } from "./case-continuity";
 import { agronomicModeFor, modeAnswerGuide, shouldShowRankedCauses } from "./case-modes";
 import { specificPhotoRequest, sanitizePhotoQuestion } from "./photo-request";
 import {
@@ -317,6 +318,7 @@ export type CaseActiveContext = {
   country?: string | null;
   district?: string | null;
   farmerLevel?: string | null;
+  cropHealthState?: CropHealthCaseState | null;
 };
 
 export function parseCaseRequestBody(body: unknown): {
@@ -436,6 +438,7 @@ function summarizeKnownFacts(
           country: activeCase.country ?? profile?.country ?? null,
           district: activeCase.district ?? profile?.district ?? null,
           farmerLevel: activeCase.farmerLevel ?? null,
+          cropHealthState: activeCase.cropHealthState ?? null,
         }
       : null,
   });
@@ -456,6 +459,16 @@ function knownFactsSummary(facts: KnownFarmerFacts): string {
     lines.push("- country: unknown — do not assume Trinidad and Tobago");
   }
   if (facts.district) lines.push(`- district/region: ${facts.district}`);
+  if (facts.district && facts.country && farmingAreaUniquelyImpliesCountry(facts.district) === facts.country) {
+    lines.push(
+      `- farming area ${facts.district} uniquely implies ${facts.country}; do not ask for country confirmation`,
+    );
+  }
+  if (facts.suspectedIssue && !/\bspot/.test(facts.suspectedIssue) && !/\bspots?\b/i.test(facts.rawText)) {
+    lines.push("- observed symptoms do not include leaf spots; do not mention spots, pale centres, or fungal-vs-bacterial spray guidance");
+  }
+  lines.push("- Follow-up reassurance such as wanting plants to survive continues THIS case. Do not switch to generic crop-care advice.");
+  lines.push("- Ask exactly one highest-value diagnostic question. Do not recommend removing whole plants at low/moderate confidence.");
   if (facts.recentFertilizer) lines.push("- recent fertilizer: mentioned");
   if (facts.recentPesticide) lines.push("- recent pesticide: mentioned");
   if (facts.irrigationType) lines.push(`- irrigation: ${facts.irrigationType}`);
@@ -508,11 +521,14 @@ function attachCropHealthState(
   facts: KnownFarmerFacts,
   hasPhotos: boolean,
   photoAlreadyRequested: boolean,
+  previousState?: CropHealthCaseState | null,
+  currentMessage?: string,
 ): AgronomicCasePayload {
   const evidence = extractObservedEvidence({
     facts,
-    text: facts.rawText,
+    text: [facts.rawText, ...(previousState?.observedSymptoms ?? [])].filter(Boolean).join(" "),
     hasPhotos,
+    photoFindings: previousState?.photoFindings,
   });
   const mode = agronomicModeFor({ evidence, facts });
   const differential = buildDifferentialDiagnosis({
@@ -551,20 +567,50 @@ function attachCropHealthState(
     payload = { ...payload, escalationRecommended: true };
   }
 
-  const state: CropHealthCaseState = mergeCropHealthState(payload.cropHealthState, {
+  const observed = [...new Set([...evidence.symptoms, ...(previousState?.observedSymptoms ?? [])])];
+  const notReported = ["spots", "waterlogging", "wilting"].filter(
+    (item) => !observed.some((symptom) => symptom.includes(item.replace(/ing$/, ""))),
+  );
+  const answered = [...(previousState?.answeredDiagnosticQuestions ?? [])];
+  if (previousState?.lastDiagnosticQuestion && previousState.lastDiagnosticQuestion !== payload.nextQuestion) {
+    answered.push(previousState.lastDiagnosticQuestion);
+  }
+
+  const state: CropHealthCaseState = mergeCropHealthState(previousState ?? payload.cropHealthState, {
     country: facts.country,
     farmingArea: facts.district,
     crop: facts.crop,
     variety: facts.variety,
     growthStage: facts.plantAge,
-    symptoms: facts.suspectedIssue ? [facts.suspectedIssue] : [],
-    observedSymptoms: facts.suspectedIssue ? [facts.suspectedIssue] : [],
-    symptomLocation: payload.cropHealthState?.symptomLocation ?? null,
+    symptoms: observed,
+    observedSymptoms: observed,
+    notReportedSymptoms: notReported,
+    symptomLocation: payload.cropHealthState?.symptomLocation ?? previousState?.symptomLocation ?? evidence.symptomLocation,
     spread: facts.distributionHint,
     irrigation: facts.irrigationType,
     recentFertilizer: facts.recentFertilizer ? "mentioned" : null,
     recentSprays: facts.recentPesticide ? "mentioned" : null,
-    suspectedCauses: suspectedCausesFromRanked((payload.rankedCauses ?? []).slice(0, 3)),
+    photoFindings: hasPhotos
+      ? [...(previousState?.photoFindings ?? []), ...(payload.cropHealthState?.photoFindings ?? evidence.photoEvidence)]
+      : previousState?.photoFindings,
+    suspectedCauses:
+      (payload.rankedCauses ?? []).length > 0
+        ? suspectedCausesFromRanked((payload.rankedCauses ?? []).slice(0, 3))
+        : (payload.likelyCauses ?? []).slice(0, 3).map((label, index) => ({
+            label,
+            category: /aphid|insect|whitefl|mite/i.test(label)
+              ? "insects"
+              : /nutrient|fertilizer|feeding/i.test(label)
+                ? "nutrition"
+                : /virus/i.test(label)
+                  ? "viral disease"
+                  : /waterlog|drain/i.test(label)
+                    ? "drainage"
+                    : "environmental stress",
+            evidenceFor: [],
+            evidenceAgainst: [],
+            rank: index + 1,
+          })),
     diagnosticConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
     missingInformation: payload.internalMissingInformation,
     recommendedActions: payload.safeActionsNow,
@@ -573,8 +619,17 @@ function attachCropHealthState(
     suspectedCause: differential.suspectedCause,
     confirmedDiagnosis: null,
     nextDistinguishingCheck: payload.nextQuestion || differential.nextObservation,
-    requestedPhotoView: photo?.view ?? null,
+    requestedPhotoView: photo?.view ?? previousState?.requestedPhotoView ?? null,
     agronomicMode: mode,
+    farmerIntent: farmerIntentFromMessage(currentMessage || facts.rawText, facts.asksForProducts),
+    lastDiagnosticQuestion: payload.nextQuestion || null,
+    answeredDiagnosticQuestions: answered,
+    caseNarrative: facts.rawText,
+    photoSupports: hasPhotos ? (payload.likelyCauses ?? []).slice(0, 2) : previousState?.photoSupports,
+    photoWeakens: hasPhotos ? ["a drainage problem that was not described"] : previousState?.photoWeakens,
+    photoUnknown: hasPhotos
+      ? [photoUnknownLine()]
+      : previousState?.photoUnknown,
   });
 
   return {
@@ -584,6 +639,7 @@ function attachCropHealthState(
     diagnosisConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
     agronomicMode: mode,
     cropHealthState: state,
+    locationConfidence: facts.locationConfidence,
   };
 }
 
@@ -1131,13 +1187,15 @@ export async function runAgronomicCase(options: {
     asksForProducts: knownFacts.asksForProducts,
     asksAboutWeather: knownFacts.asksAboutWeather,
   });
+  const previousState = options.activeCase?.cropHealthState ?? null;
   const turnEvidence = extractObservedEvidence({
     facts: knownFacts,
-    text: effectiveMessage,
+    text: knownFacts.rawText || effectiveMessage,
+    photoFindings: previousState?.photoFindings,
   });
   const turnMode = agronomicModeFor({ evidence: turnEvidence, facts: knownFacts });
   let rankedCauses: ReturnType<typeof rankDiagnosticCauses> = isDiagnosticIntent(classified.intent)
-    ? rankDiagnosticCauses(effectiveMessage, {
+    ? rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
         crop: knownFacts.crop,
         facts: knownFacts,
         evidence: turnEvidence,
@@ -1602,13 +1660,14 @@ export async function runAgronomicCase(options: {
         if (retrievedWeatherSignals.length > 0 && isDiagnosticIntent(classified.intent)) {
           const evidenceWithWeather = extractObservedEvidence({
             facts: knownFacts,
-            text: effectiveMessage,
+            text: knownFacts.rawText || effectiveMessage,
             weatherSignals: retrievedWeatherSignals,
+            photoFindings: previousState?.photoFindings,
           });
           rankedCauses.splice(
             0,
             rankedCauses.length,
-            ...rankDiagnosticCauses(effectiveMessage, {
+            ...rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
               crop: knownFacts.crop,
               facts: knownFacts,
               evidence: evidenceWithWeather,
@@ -1705,6 +1764,8 @@ export async function runAgronomicCase(options: {
         facts: knownFacts,
         weatherSignals,
         ranked: rankedCauses,
+        hasPhotos: images.length > 0,
+        previousState,
       },
     );
     const farmerFacing = attachCropHealthState(
@@ -1712,6 +1773,8 @@ export async function runAgronomicCase(options: {
       knownFacts,
       images.length > 0,
       photoAlreadyRequested,
+      previousState,
+      message,
     );
     const usedRetrievedWeather =
       weatherDebug.providerResult === "success" &&

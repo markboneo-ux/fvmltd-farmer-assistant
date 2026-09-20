@@ -305,7 +305,12 @@ export function mergeCaseFacts(
     district: pick(current.district, incoming.district),
     farm: pick(current.farm, incoming.farm),
     area: pick(current.area, incoming.area),
-    farmerProblemText: incoming.farmerProblemText || current.farmerProblemText,
+    farmerProblemText:
+      incoming.farmerProblemText &&
+      extractSymptoms(incoming.farmerProblemText).length > 0 &&
+      incoming.farmerProblemText !== current.farmerProblemText
+        ? [current.farmerProblemText, incoming.farmerProblemText].filter(Boolean).join("\n")
+        : current.farmerProblemText || incoming.farmerProblemText,
     problemCategory: pick(current.problemCategory, incoming.problemCategory),
     symptoms: [
       ...new Set([...(current.symptoms ?? []), ...(incoming.symptoms ?? [])]),

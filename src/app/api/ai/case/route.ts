@@ -41,6 +41,7 @@ import {
 import { recordUsageEvent } from "@/lib/beta/usage-store";
 import { persistPrivateCaseImages } from "@/lib/cases/photo-persist";
 import { farmerHistoryContent } from "@/lib/chat/visible-reply";
+import { cropHealthStateFromMetadata } from "@/lib/agronomy/crop-health-state";
 import {
   CASE_IMAGE_MAX_COUNT,
   FARMER_PHOTO_TOO_LARGE,
@@ -424,8 +425,9 @@ export async function POST(request: Request) {
               conversationIntent: continuingCase.conversationIntent,
               farmerProblemText: continuingCase.farmerProblemText,
               country: continuingCase.country,
-              district: continuingCase.district,
+              district: continuingCase.district ?? continuingCase.farmingArea,
               farmerLevel: continuingCase.userLevel,
+              cropHealthState: cropHealthStateFromMetadata(continuingCase.businessMetadata),
             }
           : null,
     });

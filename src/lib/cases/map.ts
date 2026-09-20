@@ -8,6 +8,12 @@ import type {
   CasePhotoRecord,
   CropCaseRecord,
 } from "./types";
+import {
+  cropHealthStateFromMetadata,
+  emptyCropHealthState,
+  mergeCropHealthState,
+  withCropHealthState,
+} from "@/lib/agronomy/crop-health-state";
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -183,10 +189,19 @@ export function rowToCropCase(row: Record<string, unknown>): CropCaseRecord {
     caseType: (asNullableString(row.case_type) as CropCaseRecord["caseType"]) ?? null,
     knowledgeState:
       (asNullableString(row.knowledge_state) as CropCaseRecord["knowledgeState"]) ?? "raw",
-    businessMetadata:
-      row.business_metadata && typeof row.business_metadata === "object"
-        ? (row.business_metadata as Record<string, unknown>)
-        : null,
+    businessMetadata: (() => {
+      const hasMeta = row.business_metadata && typeof row.business_metadata === "object";
+      const metadata = hasMeta ? asRecord(row.business_metadata) : {};
+      const fromColumn =
+        row.crop_health_state && typeof row.crop_health_state === "object"
+          ? mergeCropHealthState(
+              emptyCropHealthState(),
+              row.crop_health_state as Record<string, unknown>,
+            )
+          : cropHealthStateFromMetadata(metadata);
+      if (fromColumn) return withCropHealthState(metadata, fromColumn);
+      return hasMeta ? metadata : null;
+    })(),
     farmingArea: asNullableString(row.farming_area) ?? asNullableString(row.district),
     latitude: asNullableNumber(row.latitude),
     longitude: asNullableNumber(row.longitude),

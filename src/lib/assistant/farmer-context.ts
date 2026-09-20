@@ -5,6 +5,7 @@
 
 import { COUNTRY_OPTIONS } from "@/data/countries";
 import type { UserLevel } from "@/lib/beta/identity";
+import { farmingAreaUniquelyImpliesCountry } from "@/lib/weather/geocode";
 import { extractLastCrop } from "./crops";
 import {
   isBusinessIntent,
@@ -489,9 +490,14 @@ export function shouldConfirmCountry(options: {
   confidence?: LocationConfidence | null;
   asksForProducts?: boolean;
   researchNeed?: string | null;
+  farmingArea?: string | null;
 }): boolean {
   if (!options.country?.trim()) return false;
   if (countryReliableForLocalFacts(options.confidence ?? "unknown")) return false;
+  const implied = farmingAreaUniquelyImpliesCountry(options.farmingArea);
+  if (implied && implied.toLowerCase() === options.country.trim().toLowerCase()) {
+    return false;
+  }
   if (options.asksForProducts) return true;
   const need = options.researchNeed;
   return (

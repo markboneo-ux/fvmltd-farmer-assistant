@@ -1,7 +1,4 @@
-/**
- * Block premature irreversible recommendations from vague symptoms.
- * Soften leaf-removal wording at low/moderate confidence instead of stripping it.
- */
+import { VIRUS_ROGUE_CAUTION } from "@/lib/agronomy/case-continuity";
 
 export type DestructiveCheck = {
   blocked: boolean;
@@ -14,7 +11,13 @@ const DESTRUCTIVE =
   /\b(dump|destroy|pull up|pull out|remove all|rip out|abandon (the )?(field|crop)|plough (in|under)|discard (the )?plants?)\b/i;
 
 const PREMATURE_PLANT_REMOVAL =
-  /\b(remove (the )?(affected |damaged |infected |spotted )?plants|pull the whole field)\b/i;
+  /\b(remove (the )?(affected |damaged |infected |spotted |virus[- ]affected )?plants|pull the whole field|rogue(ing)? (out )?(affected )?plants)\b/i;
+
+function mentionsVirusPlantRemoval(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (!/\bvirus\b/.test(lower) && !/\brogue\b/.test(lower)) return false;
+  return /\b(remov(e|ing)|rogue|pull|destroy|discard).{0,50}\b(plants?|crop)\b/.test(lower);
+}
 
 const LEAF_REMOVAL =
   /\b((remove|pick off|strip)\b[\s\S]{0,50}\b(leaves?|leaf)\b|defoliat)/i;
@@ -38,7 +41,12 @@ export function isLeafRemovalRecommendation(text: string): boolean {
 }
 
 export function isDestructiveRecommendation(text: string): boolean {
-  return DESTRUCTIVE.test(text) || MAJOR_CORRECTION.test(text) || PREMATURE_PLANT_REMOVAL.test(text);
+  return (
+    DESTRUCTIVE.test(text) ||
+    MAJOR_CORRECTION.test(text) ||
+    PREMATURE_PLANT_REMOVAL.test(text) ||
+    mentionsVirusPlantRemoval(text)
+  );
 }
 
 export function softenDestructiveWording(
@@ -46,6 +54,15 @@ export function softenDestructiveWording(
   confidence: "low" | "medium" | "high" | "unknown",
 ): string {
   if (!text.trim() || confidence === "high") return text;
+  if (mentionsVirusPlantRemoval(text)) {
+    return text.replace(
+      /[^.!?]{0,80}\b(remov(e|ing)|rogue|pull|destroy|discard)\b[^.!?]{0,60}\b(plants?|crop)\b[^.!?]*[.!?]?/gi,
+      (match) => {
+        if (/\bdo not\b/i.test(match) || /\bavoid\b/i.test(match)) return match;
+        return VIRUS_ROGUE_CAUTION;
+      },
+    );
+  }
   if (ALREADY_CAUTIOUS_LEAF.test(text) && !/\bremove severely affected\b/i.test(text)) {
     return text;
   }
@@ -86,14 +103,19 @@ export function shouldBlockDestructiveAction(options: {
   }
 
   const wilt = VAGUE_WILT.test(text) && options.observedFacts.length < 3;
+  const virus = /\bvirus\b/i.test(text);
   return {
     blocked: true,
     reasons: wilt
       ? ["vague wilt", "irreversible action"]
-      : ["insufficient evidence", "irreversible action"],
+      : virus
+        ? ["unconfirmed virus", "irreversible action"]
+        : ["insufficient evidence", "irreversible action"],
     farmerMessage: wilt
       ? "Bacterial wilt is one possibility, but other problems can cause similar wilting. Before removing plants, let’s check the stem, roots and how the problem is spreading."
-      : "That is a big step. Let’s confirm what is going on first — check a few plants closely before removing crop or spraying the whole field.",
+      : virus
+        ? VIRUS_ROGUE_CAUTION
+        : "That is a big step. Let’s confirm what is going on first — check a few plants closely before removing crop or spraying the whole field.",
   };
 }
 

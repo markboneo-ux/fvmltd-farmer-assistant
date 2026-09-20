@@ -177,6 +177,8 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
         "production_system",
         "symptom_location",
         "lesion_appearance",
+        "insect_presence",
+        "leaf_age_pattern",
         "recent_spray",
         "photo_request",
         "guidance_followup",

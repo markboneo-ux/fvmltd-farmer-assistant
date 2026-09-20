@@ -31,6 +31,13 @@ export type ActiveCaseContext = {
   country?: string | null;
   district?: string | null;
   farmerLevel?: string | null;
+  cropHealthState?: {
+    caseNarrative?: string | null;
+    observedSymptoms?: string[];
+    country?: string | null;
+    farmingArea?: string | null;
+    crop?: string | null;
+  } | null;
 };
 
 export type ResolvedTurnContext = {
@@ -132,10 +139,12 @@ export function resolveTurnContext(options: {
 
   const crop = currentCrop ?? (carryCrop ? (historyCrop ?? activeCrop) : null);
 
+  const historyUsers = userHistoryText(history);
+  const persistedNarrative = options.activeCase?.cropHealthState?.caseNarrative?.trim() || "";
   const factSource = resetHistory
     ? options.message
     : carryCrop
-      ? `${userHistoryText(history)}\n${options.message}`
+      ? `${persistedNarrative && !historyUsers.includes(persistedNarrative) ? `${persistedNarrative}\n` : ""}${historyUsers}\n${options.message}`
       : options.message;
 
   let knownFacts = extractKnownFacts(factSource, {
@@ -145,7 +154,7 @@ export function resolveTurnContext(options: {
   knownFacts = {
     ...knownFacts,
     crop: crop?.toLowerCase() ?? null,
-    rawText: options.message,
+    rawText: resetHistory || !carryCrop ? options.message : factSource,
   };
 
   if (currentCrop && historyCrop && currentCrop !== historyCrop) {

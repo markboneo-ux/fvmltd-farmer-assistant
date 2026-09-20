@@ -56,6 +56,7 @@ export type CropHealthCaseState = {
   recommendedActions: string[];
   outcome: FollowUpOutcome | null;
   observedSymptoms: string[];
+  notReportedSymptoms: string[];
   suspectedPest: string | null;
   suspectedDiseaseOrDisorder: string | null;
   suspectedCause: string | null;
@@ -63,6 +64,13 @@ export type CropHealthCaseState = {
   nextDistinguishingCheck: string | null;
   requestedPhotoView: CropHealthPhotoView | null;
   agronomicMode?: string | null;
+  farmerIntent?: string | null;
+  lastDiagnosticQuestion?: string | null;
+  answeredDiagnosticQuestions?: string[];
+  caseNarrative?: string | null;
+  photoSupports?: string[];
+  photoWeakens?: string[];
+  photoUnknown?: string[];
 };
 
 export const CROP_HEALTH_STATE_KEY = "cropHealthState";
@@ -97,6 +105,7 @@ export function emptyCropHealthState(
     recommendedActions: [],
     outcome: null,
     observedSymptoms: [],
+    notReportedSymptoms: [],
     suspectedPest: null,
     suspectedDiseaseOrDisorder: null,
     suspectedCause: null,
@@ -104,6 +113,13 @@ export function emptyCropHealthState(
     nextDistinguishingCheck: null,
     requestedPhotoView: null,
     agronomicMode: null,
+    farmerIntent: null,
+    lastDiagnosticQuestion: null,
+    answeredDiagnosticQuestions: [],
+    caseNarrative: null,
+    photoSupports: [],
+    photoWeakens: [],
+    photoUnknown: [],
     ...overrides,
   };
 }
@@ -158,6 +174,7 @@ export function mergeCropHealthState(
       : base.recommendedActions,
     outcome: incoming.outcome ?? base.outcome,
     observedSymptoms: pickList(base.observedSymptoms, incoming.observedSymptoms),
+    notReportedSymptoms: pickList(base.notReportedSymptoms, incoming.notReportedSymptoms),
     suspectedPest: pickText(base.suspectedPest, incoming.suspectedPest),
     suspectedDiseaseOrDisorder: pickText(
       base.suspectedDiseaseOrDisorder,
@@ -174,6 +191,19 @@ export function mergeCropHealthState(
     ),
     requestedPhotoView: incoming.requestedPhotoView ?? base.requestedPhotoView,
     agronomicMode: incoming.agronomicMode ?? base.agronomicMode ?? null,
+    farmerIntent: pickText(base.farmerIntent ?? null, incoming.farmerIntent),
+    lastDiagnosticQuestion: pickText(
+      base.lastDiagnosticQuestion ?? null,
+      incoming.lastDiagnosticQuestion,
+    ),
+    answeredDiagnosticQuestions: pickList(
+      base.answeredDiagnosticQuestions ?? [],
+      incoming.answeredDiagnosticQuestions,
+    ),
+    caseNarrative: pickText(base.caseNarrative ?? null, incoming.caseNarrative),
+    photoSupports: pickList(base.photoSupports ?? [], incoming.photoSupports),
+    photoWeakens: pickList(base.photoWeakens ?? [], incoming.photoWeakens),
+    photoUnknown: pickList(base.photoUnknown ?? [], incoming.photoUnknown),
   };
 }
 
