@@ -5,19 +5,19 @@
 import type { IntentCategory } from "@/lib/assistant/intents";
 import { isBusinessIntent, isCalculationIntent, isDiagnosticIntent } from "@/lib/assistant/intents";
 
-export const AGRICULTURAL_ANSWER_SHAPE = `For a normal agricultural question, write a complete farmer-facing answer in preliminaryAssessment. Use short paragraphs or 5–10 useful bullets. Do not artificially shorten it.
+export const AGRICULTURAL_ANSWER_SHAPE = `For a meaningful crop-health question, write a complete farmer-facing answer in preliminaryAssessment. Use short paragraphs or 5–10 useful bullets. Do not artificially shorten it.
 
-Cover, in this order, using plain sentences (no markdown headings):
-1. WHAT I THINK IS HAPPENING
-2. WHY
-3. CHECK THIS NOW
-4. WHAT TO DO NOW
-5. IF CHEMICAL CONTROL IS NEEDED — verified country-specific options when they exist; otherwise active-ingredient classes clearly marked unverified
-6. WHAT NOT TO DO
-7. WHAT TO WATCH OVER THE NEXT 2–3 DAYS
-8. ONE FOLLOW-UP QUESTION
+Cover, in this order, using plain sentences (no markdown headings, and do not say "triage" unless you explain it):
+1. WHAT I THINK IS HAPPENING — 1 to 3 likely causes, not one jump-to diagnosis
+2. WHAT TO CHECK TODAY
+3. WHAT TO DO NOW — cultural and IPM steps first
+4. SPRAY OR FERTILIZER OPTIONS only when justified; if local registration is not verified, say so
+5. WEATHER IMPLICATIONS only when weather actually changes diagnosis or management
+6. EXACTLY WHAT INFORMATION OR PHOTO IS NEEDED NEXT if uncertainty remains (a specific photo such as underside of a leaf, whole plant, roots, stem lesion, cut fruit, or field pattern — never "more photos")
+
 Skip a heading when it is not needed.
 Use Integrated Pest Management: cultural/physical, then biological, then chemical when justified. Do not make farmers feel guilty for using registered products.
+At low confidence, investigate before recommending pulling plants, dumping crop, or a high-risk spray.
 
 Keep language simple, practical, and farmer-friendly. Not academic.
 

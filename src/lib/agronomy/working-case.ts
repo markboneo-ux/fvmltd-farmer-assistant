@@ -2,9 +2,11 @@ import type { KnownFarmerFacts } from "./tomato-protocol";
 import { ASK_CROP_QUESTION } from "@/lib/assistant/crops";
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   countryReliableForLocalFacts,
   type LocationConfidence,
 } from "@/lib/assistant/farmer-context";
+import { shouldAskFarmingArea } from "@/lib/weather/geocode";
 
 export type WorkingCaseFacts = {
   crop: string | null;
@@ -73,6 +75,8 @@ export function highestValueMissingQuestion(options: {
   asksForProducts?: boolean;
   photoRecommended?: boolean;
   diagnostic?: boolean;
+  weatherNeeded?: boolean;
+  weatherIsCentral?: boolean;
 }): string {
   const { working } = options;
   if (options.diagnostic && !working.crop) return ASK_CROP_QUESTION;
@@ -85,6 +89,18 @@ export function highestValueMissingQuestion(options: {
       return `Just to confirm, are you farming in ${working.country}?`;
     }
     return ASK_COUNTRY_QUESTION;
+  }
+
+  if (
+    shouldAskFarmingArea({
+      farmingArea: working.region,
+      district: working.region,
+      country: working.country,
+      weatherNeeded: options.weatherNeeded,
+      weatherIsCentral: options.weatherIsCentral,
+    })
+  ) {
+    return ASK_FARMING_AREA_QUESTION;
   }
 
   const skipPatternQuestion =

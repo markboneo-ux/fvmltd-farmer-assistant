@@ -233,6 +233,11 @@ describe("Supabase case persistence layer", () => {
       "reviewed_at",
       "reviewed_by",
       "include_in_trend_learning",
+      "farming_area",
+      "latitude",
+      "longitude",
+      "growth_stage",
+      "crop_health_state",
     ]) {
       fake.schemaMissingColumns.add(column);
     }

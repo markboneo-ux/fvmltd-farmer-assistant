@@ -30,6 +30,15 @@ function asStringArray(value: unknown): string[] {
   return [];
 }
 
+function asNullableNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -88,6 +97,28 @@ export function cropCaseToRow(record: CropCaseRecord): Record<string, unknown> {
     case_type: record.caseType,
     knowledge_state: record.knowledgeState,
     business_metadata: record.businessMetadata,
+    farming_area: record.farmingArea,
+    latitude: record.latitude,
+    longitude: record.longitude,
+    growth_stage: record.growthStage,
+    symptom_location: record.symptomLocation,
+    onset: record.onset,
+    spread: record.spread,
+    percentage_affected: record.percentageAffected,
+    recent_rainfall: record.recentRainfall,
+    forecast_rainfall: record.forecastRainfall,
+    temperature: record.temperature,
+    humidity: record.humidity,
+    photo_findings: record.photoFindings,
+    diagnostic_confidence: record.diagnosticConfidence,
+    missing_information: record.missingInformation,
+    suspected_pest: record.suspectedPest,
+    suspected_disease: record.suspectedDisease,
+    confirmed_diagnosis: record.confirmedDiagnosis,
+    crop_health_state:
+      record.businessMetadata && typeof record.businessMetadata === "object"
+        ? (record.businessMetadata as Record<string, unknown>).cropHealthState ?? null
+        : null,
     created_at: record.createdAt,
     updated_at: record.updatedAt,
   };
@@ -156,6 +187,24 @@ export function rowToCropCase(row: Record<string, unknown>): CropCaseRecord {
       row.business_metadata && typeof row.business_metadata === "object"
         ? (row.business_metadata as Record<string, unknown>)
         : null,
+    farmingArea: asNullableString(row.farming_area) ?? asNullableString(row.district),
+    latitude: asNullableNumber(row.latitude),
+    longitude: asNullableNumber(row.longitude),
+    growthStage: asNullableString(row.growth_stage) ?? asNullableString(row.plant_age),
+    symptomLocation: asNullableString(row.symptom_location),
+    onset: asNullableString(row.onset),
+    spread: asNullableString(row.spread) ?? asNullableString(row.field_distribution),
+    percentageAffected: asNullableString(row.percentage_affected),
+    recentRainfall: asNullableString(row.recent_rainfall),
+    forecastRainfall: asNullableString(row.forecast_rainfall),
+    temperature: asNullableString(row.temperature),
+    humidity: asNullableString(row.humidity),
+    photoFindings: asStringArray(row.photo_findings),
+    diagnosticConfidence: asNullableString(row.diagnostic_confidence),
+    missingInformation: asStringArray(row.missing_information),
+    suspectedPest: asNullableString(row.suspected_pest),
+    suspectedDisease: asNullableString(row.suspected_disease),
+    confirmedDiagnosis: asNullableString(row.confirmed_diagnosis),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };

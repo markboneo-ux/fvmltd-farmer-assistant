@@ -134,7 +134,7 @@ export function ChatAssistantMessage({
           className="rounded-xl bg-sun/15 px-3 py-2 text-sm font-medium text-warn ring-1 ring-sun/40"
           role="status"
         >
-          This looks urgent. Treat the next steps as cautious triage, not a
+          This looks urgent. Take the next steps carefully — this is not a
           confirmed diagnosis.
         </div>
       ) : null}
@@ -161,7 +161,7 @@ export function ChatAssistantMessage({
                 Possible causes, ranked
               </h3>
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">
-                {payload.rankedCauses.slice(0, 5).map((cause) => (
+                {payload.rankedCauses.slice(0, 3).map((cause) => (
                   <li key={cause.category}>
                     {cause.label}. More likely if {cause.increasesIf.toLowerCase()}
                   </li>

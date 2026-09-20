@@ -1,7 +1,9 @@
 import "server-only";
 
+import { lookupFarmingArea } from "./geocode";
 import {
   resolveCoordinates,
+  type DailyWeatherPoint,
   type HourlyWeatherPoint,
   type WeatherForecast,
   type WeatherLocationRef,
@@ -66,9 +68,10 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
         "temperature_2m,relative_humidity_2m,precipitation,precipitation_probability,wind_speed_10m,dew_point_2m",
       hourly:
         "temperature_2m,relative_humidity_2m,precipitation,precipitation_probability,wind_speed_10m,dew_point_2m",
-      daily:
-        "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max",
+        daily:
+        "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,relative_humidity_2m_max",
       forecast_days: "7",
+      past_days: "14",
       timezone: "auto",
     });
 
@@ -120,6 +123,18 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
       : [];
 
     const wetness = summarizeWetness(hourly.slice(0, 72));
+    const daily = dailyTimes.map((date, i) => ({
+      forecastDate: date,
+      temperatureMaxC: numAt(dailyRaw.temperature_2m_max, i),
+      temperatureMinC: numAt(dailyRaw.temperature_2m_min, i),
+      rainfallMm: numAt(dailyRaw.precipitation_sum, i),
+      precipitationProbabilityPct: numAt(
+        dailyRaw.precipitation_probability_max,
+        i,
+      ),
+      relativeHumidityMaxPct: numAt(dailyRaw.relative_humidity_2m_max, i),
+    }));
+    const split = splitRecentAndForecast(daily, retrievedAt);
 
     return {
       provider: this.name,
@@ -144,17 +159,9 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
           }
         : null,
       hourly,
-      daily: dailyTimes.map((date, i) => ({
-        forecastDate: date,
-        temperatureMaxC: numAt(dailyRaw.temperature_2m_max, i),
-        temperatureMinC: numAt(dailyRaw.temperature_2m_min, i),
-        rainfallMm: numAt(dailyRaw.precipitation_sum, i),
-        precipitationProbabilityPct: numAt(
-          dailyRaw.precipitation_probability_max,
-          i,
-        ),
-        relativeHumidityMaxPct: null,
-      })),
+      daily: split.forecastDaily.length > 0 ? split.forecastDaily : daily,
+      recentDaily: split.recentDaily,
+      forecastDaily: split.forecastDaily,
       ...wetness,
     };
   }
@@ -169,6 +176,16 @@ function numAt(series: unknown, index: number): number | null {
   return num(series[index]);
 }
 
+export function splitRecentAndForecast(
+  daily: DailyWeatherPoint[],
+  retrievedAt: string,
+): { recentDaily: DailyWeatherPoint[]; forecastDaily: DailyWeatherPoint[] } {
+  const today = retrievedAt.slice(0, 10);
+  const recentDaily = daily.filter((day) => day.forecastDate < today).slice(-14);
+  const forecastDaily = daily.filter((day) => day.forecastDate >= today).slice(0, 7);
+  return { recentDaily, forecastDaily };
+}
+
 export function getDefaultWeatherProvider(): WeatherProvider {
   if (injectedProvider) return injectedProvider;
   return new OpenMeteoWeatherProvider();
@@ -181,7 +198,15 @@ export async function getForecast(
   location: WeatherLocationRef,
 ): Promise<WeatherForecast> {
   const provider = getDefaultWeatherProvider();
-  return provider.getForecast(location);
+  const area = location.district
+    ? lookupFarmingArea(location.district, location.country)
+    : null;
+  return provider.getForecast({
+    ...location,
+    country: location.country || area?.country || null,
+    coordinates: location.coordinates ?? area?.coordinates ?? null,
+    label: location.label || area?.farmingArea || location.district || null,
+  });
 }
 
 /**
@@ -232,6 +257,26 @@ export function buildMockHumidRainyForecast(
     },
     hourly,
     daily: Array.from({ length: 7 }, (_, i) => ({
+      forecastDate: new Date(start + i * 86_400_000)
+        .toISOString()
+        .slice(0, 10),
+      temperatureMaxC: 31,
+      temperatureMinC: 24,
+      rainfallMm: 8 + i,
+      precipitationProbabilityPct: 80,
+      relativeHumidityMaxPct: 95,
+    })),
+    recentDaily: Array.from({ length: 10 }, (_, i) => ({
+      forecastDate: new Date(start - (10 - i) * 86_400_000)
+        .toISOString()
+        .slice(0, 10),
+      temperatureMaxC: 30,
+      temperatureMinC: 24,
+      rainfallMm: 6,
+      precipitationProbabilityPct: 70,
+      relativeHumidityMaxPct: 94,
+    })),
+    forecastDaily: Array.from({ length: 7 }, (_, i) => ({
       forecastDate: new Date(start + i * 86_400_000)
         .toISOString()
         .slice(0, 10),

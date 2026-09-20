@@ -27,7 +27,7 @@ import {
 } from "@/lib/beta/limits";
 import { farmerPersistenceBanner } from "@/lib/chat/persistence-warning";
 import { PRIVACY_SUMMARY } from "@/lib/privacy/copy";
-import { FOLLOWUP_OPTIONS, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
+import { FOLLOWUP_OPTIONS, FOLLOWED_RECOMMENDATION_OPTIONS, FOLLOWED_RECOMMENDATION_PROMPT, FOLLOWUP_PROMPT } from "@/lib/cases/followups";
 import { MAX_VOICE_SECONDS } from "@/lib/voice/caribbean-vocab";
 
 type ChatRole = "user" | "assistant";
@@ -132,6 +132,8 @@ export function FarmerCaseChat({
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [followup, setFollowup] = useState<{ id: string; caseId?: string } | null>(null);
   const [followupPrompt, setFollowupPrompt] = useState(FOLLOWUP_PROMPT);
+  const [followedPrompt, setFollowedPrompt] = useState(FOLLOWED_RECOMMENDATION_PROMPT);
+  const [pendingFollowupOutcome, setPendingFollowupOutcome] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -184,11 +186,13 @@ export function FarmerCaseChat({
         if (!due.ok) return;
         const body = (await due.json()) as {
           prompt?: string;
+          followedPrompt?: string;
           due?: { id: string; caseId: string } | null;
         };
         if (body.due?.id) {
           setFollowup({ id: body.due.id, caseId: body.due.caseId });
           if (body.prompt) setFollowupPrompt(body.prompt);
+          if (body.followedPrompt) setFollowedPrompt(body.followedPrompt);
         }
       } catch {
         // Follow-up is optional when the farmer returns.
@@ -570,6 +574,7 @@ export function FarmerCaseChat({
     setQuestionsAsked(null);
     setCaseId(null);
     setFollowup(null);
+    setPendingFollowupOutcome(null);
     setMode("quick_help");
     setMenuOpen(false);
     setAttachMenuOpen(false);
@@ -962,35 +967,59 @@ export function FarmerCaseChat({
                   <button
                     key={option}
                     type="button"
-                    className="min-h-11 rounded-full bg-sky px-3 text-sm font-medium text-canopy ring-1 ring-line"
-                    onClick={() => {
-                      const targetCaseId = followup.caseId || caseId;
-                      void (async () => {
-                        const response = await fetch("/api/followups", {
-                          method: "POST",
-                          headers: { "content-type": "application/json" },
-                          body: JSON.stringify({
-                            followupId: followup.id,
-                            caseId: targetCaseId,
-                            outcome: option,
-                          }),
-                        });
-                        const body = (await response.json()) as { reopen?: boolean };
-                        setFollowup(null);
-                        if (option === "Worse" || body.reopen) {
-                          void sendQuestion(
-                            "The problem is worse than last time. Please reassess the case.",
-                          );
-                        } else if (option === "Improved") {
-                          void sendQuestion("The crop has improved. What should I keep doing?");
-                        }
-                      })();
-                    }}
+                    className={`min-h-11 rounded-full px-3 text-sm font-medium ring-1 ring-line ${
+                      pendingFollowupOutcome === option
+                        ? "bg-canopy text-white"
+                        : "bg-sky text-canopy"
+                    }`}
+                    onClick={() => setPendingFollowupOutcome(option)}
                   >
                     {option}
                   </button>
                 ))}
               </div>
+              {pendingFollowupOutcome ? (
+                <>
+                  <p className="mt-3 font-medium">{followedPrompt}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {FOLLOWED_RECOMMENDATION_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        className="min-h-11 rounded-full bg-sky px-3 text-sm font-medium text-canopy ring-1 ring-line"
+                        onClick={() => {
+                          const targetCaseId = followup.caseId || caseId;
+                          const outcome = pendingFollowupOutcome;
+                          void (async () => {
+                            const response = await fetch("/api/followups", {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({
+                                followupId: followup.id,
+                                caseId: targetCaseId,
+                                outcome,
+                                actionTaken: option,
+                              }),
+                            });
+                            const body = (await response.json()) as { reopen?: boolean };
+                            setFollowup(null);
+                            setPendingFollowupOutcome(null);
+                            if (outcome === "Worse" || body.reopen) {
+                              void sendQuestion(
+                                "The problem is worse than last time. Please reassess the case.",
+                              );
+                            } else if (outcome === "Improved") {
+                              void sendQuestion("The crop has improved. What should I keep doing?");
+                            }
+                          })();
+                        }}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
           {voiceError ? (

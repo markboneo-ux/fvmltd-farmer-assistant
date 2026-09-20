@@ -5,8 +5,10 @@
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
 import { extractCountryFromText } from "@/lib/research/countries";
+import { lookupFarmingArea } from "@/lib/weather/geocode";
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   extractRegionAndCountry,
   farmerLevelToUserLevel,
   inferFarmerLevel,
@@ -142,7 +144,7 @@ const UNSAFE_MIX =
   /\b(mix|mixing|cocktail|tank\s*mix)\b.{0,40}\b(pesticide|insecticide|fungicide|herbicide|chemical)/i;
 
 const LOCATION_QUESTION =
-  /\b(which\s+)?(country|island|district|parish|region|where\s+are\s+you|where\s+is\s+the\s+(farm|field))\b/i;
+  /\b(which\s+)?(country|island|district|parish|region|area)\b|\bwhere\s+are\s+you\s+farming\b|\bwhat area are you farming in\b/i;
 
 const CROP_QUESTION =
   /\b(what\s+crop|which\s+crop|is\s+it\s+tomato|pepper\s+or|what\s+are\s+you\s+growing)\b/i;
@@ -209,9 +211,11 @@ export function extractKnownFacts(
             : null;
 
   const located = extractRegionAndCountry(rawText);
+  const lookedUp = lookupFarmingArea(rawText, located.country || profile?.country);
   let country: string | null =
-    located.country || extractCountryFromText(rawText) || profile?.country?.trim() || null;
-  let district: string | null = located.region || profile?.district?.trim() || null;
+    located.country || extractCountryFromText(rawText) || lookedUp?.country || profile?.country?.trim() || null;
+  let district: string | null =
+    located.region || lookedUp?.farmingArea || profile?.district?.trim() || null;
   if (!district) {
     const districtMatch = lower.match(
       /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
@@ -339,6 +343,9 @@ export function questionAsksForKnownFact(
   }
 
   if (facts.country && LOCATION_QUESTION.test(question)) {
+    if (/\barea\b/i.test(question) && !facts.district) {
+      return false;
+    }
     if (
       /just to confirm/i.test(question) &&
       facts.locationConfidence !== "explicit" &&
@@ -547,7 +554,9 @@ export function applyCommercialSafetyGuards(
     } else if (needsConfirm && options.knownFacts.country) {
       nextQuestion = `Just to confirm, are you farming in ${options.knownFacts.country}?`;
     } else if (!options.knownFacts.country && nextQuestion !== ASK_COUNTRY_QUESTION) {
-      nextQuestion = ASK_COUNTRY_QUESTION;
+      nextQuestion = /\barea\b/i.test(nextQuestion)
+        ? ASK_FARMING_AREA_QUESTION
+        : ASK_COUNTRY_QUESTION;
     }
   }
   if (
@@ -585,7 +594,7 @@ export function applyCommercialSafetyGuards(
     if (isInterviewStage(payload.stage)) {
       nextQuestion =
         photoRecommended
-          ? "Can you upload a clear photo of the damage?"
+          ? "Can you send a close photo of the damaged leaf plus a whole plant?"
           : nextQuestion && !questionAsksForKnownFact(nextQuestion, options.knownFacts)
             ? nextQuestion
             : "";
@@ -844,7 +853,7 @@ function buildForcedQuickGuidance(
 
   if (facts.suddenWilt) {
     return {
-      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — treat it as urgent triage.`,
+      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — take the next steps carefully.`,
       severity: "high",
       checksToday: [
         "Cut a wilted stem lengthwise and check for brown streaks inside",
@@ -892,7 +901,7 @@ function buildForcedQuickGuidance(
 
   if (facts.stuntedWholeField || facts.distributionHint === "most of field") {
     return {
-      preliminaryAssessment: `Preliminary guidance: Whole-field ${issue} on ${crop} needs cautious triage. Check water, drainage and roots before adding fertilizer. This is not a confirmed diagnosis.`,
+      preliminaryAssessment: `Preliminary guidance: Whole-field ${issue} on ${crop} needs a careful look. Check water, drainage and roots before adding fertilizer. This is not a confirmed diagnosis.`,
       severity: "high",
       checksToday: [
         "Compare low spots and higher ground for wet or dry soil",

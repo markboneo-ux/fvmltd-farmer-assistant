@@ -43,6 +43,7 @@ export type FarmerContext = {
 };
 
 export const ASK_COUNTRY_QUESTION = "What country are you farming in?";
+export const ASK_FARMING_AREA_QUESTION = "What area are you farming in?";
 
 export const LOCATION_CONFIDENCE = [
   "explicit",

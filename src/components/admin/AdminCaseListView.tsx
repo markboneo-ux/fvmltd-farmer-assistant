@@ -11,6 +11,7 @@ type CaseRow = {
   caseStatus: string;
   farmerProblemText: string;
   needsReview: boolean;
+  reviewReasons?: string[];
 };
 
 export function AdminCaseListView() {
@@ -20,12 +21,21 @@ export function AdminCaseListView() {
   useEffect(() => {
     void (async () => {
       const response = await fetch("/api/admin/cases");
-      const payload = (await response.json()) as { cases?: CaseRow[]; error?: string };
+      const payload = (await response.json()) as {
+        cases?: CaseRow[];
+        needsReviewQueue?: CaseRow[];
+        error?: string;
+      };
       if (!response.ok) {
         setError(payload.error || "Could not load cases.");
         return;
       }
-      setRows(payload.cases ?? []);
+      const all = payload.cases ?? [];
+      const reviewFirst = [
+        ...(payload.needsReviewQueue ?? []),
+        ...all.filter((row) => !row.needsReview),
+      ].filter((row, index, list) => list.findIndex((item) => item.id === row.id) === index);
+      setRows(reviewFirst);
     })();
   }, []);
 
@@ -37,7 +47,9 @@ export function AdminCaseListView() {
         </Link>
       </p>
       <h1 className="mt-2 text-2xl font-semibold text-ink">Case review</h1>
-      <p className="mt-1 text-sm text-muted">Staff only. Mark diagnosis and trend-learning flags.</p>
+      <p className="mt-1 text-sm text-muted">
+        Staff only. Cases needing review (low confidence, worsening, unusual, or high-consequence) are listed first.
+      </p>
       {error ? <p className="mt-4 text-danger">{error}</p> : null}
       <ul className="mt-4 space-y-2">
         {rows.map((row) => (
@@ -48,6 +60,7 @@ export function AdminCaseListView() {
             <p className="text-sm text-muted">
               {row.intent} · {row.caseStatus}
               {row.needsReview ? " · needs review" : ""}
+              {row.reviewReasons?.length ? ` (${row.reviewReasons.join(", ")})` : ""}
             </p>
             <p className="mt-1 text-sm">{row.farmerProblemText}</p>
           </li>

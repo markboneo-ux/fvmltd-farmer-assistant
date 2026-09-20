@@ -5,6 +5,7 @@
 
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   shouldAskCountry,
   shouldConfirmCountry,
   type FarmerLevel,
@@ -18,6 +19,8 @@ import { isGuidanceStage, type AgronomicCasePayload } from "./case-schema";
 import { assignDiagnosisConfidence } from "./diagnosis-confidence";
 import { questionAsksForKnownFact, type KnownFarmerFacts } from "./tomato-protocol";
 import { extractWorkingCase, highestValueMissingQuestion } from "./working-case";
+import { specificPhotoRequest } from "./photo-request";
+import { shouldAskFarmingArea } from "@/lib/weather/geocode";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -445,9 +448,26 @@ export function pickHighestValueFollowUp(options: {
     asksForProducts: facts.asksForProducts,
     photoRecommended: payload.photoRecommended,
     diagnostic: Boolean(facts.crop),
+    weatherNeeded: payload.weatherRelevance === "supporting" || payload.weatherRelevance === "important" || payload.weatherRelevance === "central",
+    weatherIsCentral: payload.weatherRelevance === "central",
   });
   if (missing && !questionAsksForKnownFact(missing, facts)) {
     return missing;
+  }
+
+  if (
+    shouldAskFarmingArea({
+      farmingArea: facts.district,
+      district: facts.district,
+      country: facts.country,
+      weatherNeeded:
+        payload.weatherRelevance === "supporting" ||
+        payload.weatherRelevance === "important" ||
+        payload.weatherRelevance === "central",
+      weatherIsCentral: payload.weatherRelevance === "central",
+    })
+  ) {
+    return ASK_FARMING_AREA_QUESTION;
   }
 
   if (
@@ -463,7 +483,13 @@ export function pickHighestValueFollowUp(options: {
   }
 
   if (payload.photoRecommended) {
-    return "Can you send a close photo of the affected leaf plus a whole plant?";
+    return (
+      specificPhotoRequest({
+        facts,
+        alreadyRequested: false,
+      })?.farmerQuestion ??
+      "Can you send a close photo of the affected leaf plus a whole plant?"
+    );
   }
 
   return "";

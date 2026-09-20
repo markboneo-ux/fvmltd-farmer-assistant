@@ -9,7 +9,7 @@ export type WeatherCoordinates = {
 };
 
 export type WeatherLocationRef = {
-  country: string;
+  country?: string | null;
   district?: string | null;
   coordinates?: WeatherCoordinates | null;
   label?: string | null;
@@ -55,6 +55,10 @@ export type WeatherForecast = {
   current: CurrentWeather | null;
   hourly: HourlyWeatherPoint[];
   daily: DailyWeatherPoint[];
+  /** Past 7–14 days when the provider supplies history. */
+  recentDaily?: DailyWeatherPoint[];
+  /** Next 3–7 days of forecast. */
+  forecastDaily?: DailyWeatherPoint[];
   /** Consecutive hours RH >= humid threshold or rainfall > 0. */
   consecutiveWetOrHumidHours: number;
   /** Estimated when direct leaf-wetness is unavailable. */
@@ -111,8 +115,11 @@ export function resolveCoordinates(
     return location.coordinates;
   }
 
-  const country = location.country.trim().toLowerCase();
+  const country = (location.country || "").trim().toLowerCase();
   const district = (location.district || "").trim().toLowerCase();
+  if (!country) {
+    throw new Error("No weather coordinates: country and farming area are both unknown.");
+  }
   if (
     (country.includes("trinidad") || country.includes("tobago")) &&
     district &&
