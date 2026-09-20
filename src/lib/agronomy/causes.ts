@@ -1,6 +1,16 @@
 /**
  * Rank plausible plant-problem causes. Do not force pest/disease.
+ * Crop-specific evidence outranks a generic fallback.
  */
+
+import type { AgronomicWeatherSignal } from "./agronomic-weather";
+import { rankCropCauses } from "./crop-differentials";
+import {
+  extractObservedEvidence,
+  isGenericFallbackCause,
+  type ObservedEvidence,
+} from "./evidence-hierarchy";
+import type { KnownFarmerFacts } from "./tomato-protocol";
 
 export const CAUSE_CATEGORIES = [
   "nutrition",
@@ -31,9 +41,52 @@ export type RankedCause = {
   decreasesIf: string;
 };
 
-export function rankDiagnosticCauses(text: string): RankedCause[] {
+export type RankDiagnosticOptions = {
+  crop?: string | null;
+  facts?: KnownFarmerFacts | null;
+  weatherSignals?: AgronomicWeatherSignal[];
+  evidence?: ObservedEvidence;
+  hasPhotos?: boolean;
+};
+
+export function rankDiagnosticCauses(
+  text: string,
+  options: RankDiagnosticOptions = {},
+): RankedCause[] {
+  const evidence =
+    options.evidence ??
+    extractObservedEvidence({
+      facts: options.facts ?? null,
+      text,
+      hasPhotos: options.hasPhotos,
+      weatherSignals: options.weatherSignals,
+    });
+  const crop = options.crop ?? options.facts?.crop ?? null;
   const lower = text.toLowerCase();
-  const scored: Array<RankedCause & { score: number }> = [];
+
+  const cropSpecific = rankCropCauses({
+    text,
+    crop,
+    evidence,
+    facts: options.facts,
+    limit: 5,
+  });
+
+  if (evidence.observedPest && !evidence.secondUnexplainedSymptom) {
+    return cropSpecific
+      .filter((item) => item.category === "insects" || item.category === "mites" || item.category === "viral disease")
+      .slice(0, 3)
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+  }
+
+  if (crop && cropSpecific.length >= 2) {
+    return cropSpecific.slice(0, 3).map((item, index) => ({ ...item, rank: index + 1 }));
+  }
+
+  const scored: Array<RankedCause & { score: number }> = cropSpecific.map((item) => ({
+    ...item,
+    score: 10 - item.rank,
+  }));
 
   const add = (
     category: CauseCategory,
@@ -44,6 +97,7 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
     decreasesIf: string,
   ) => {
     if (score <= 0) return;
+    if (scored.some((item) => item.label === label)) return;
     scored.push({ category, score, label, rank: 0, why, increasesIf, decreasesIf });
   };
 
@@ -52,7 +106,7 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
   const yellow = /\byellow|chloros/.test(lower);
   const spots = /\b(spots?|blight|mildew|mould|mold)\b/.test(lower) && !/\bno spots?\b/.test(lower);
   const wilt = /\bwilt/.test(lower);
-  const wet = /\b(wet|waterlog|drain|flood|heavy rain)\b/.test(lower);
+  const wet = evidence.wetFromFarmer || /\b(wet|waterlog|drain|flood|heavy rain)\b/.test(lower);
   const dry = /\b(dry|drought|under.?water)\b/.test(lower);
   const insects = /\b(white\s*fl|aphid|thrips|worm|caterpillar|insect|holes?)\b/.test(lower);
   const mites = /\bmites?\b/.test(lower);
@@ -77,14 +131,16 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
       "Plants pull easily, roots are brown or smell sour, or the soil stays wet.",
       "Roots are white and the soil drains in a few hours.",
     );
-    add(
-      "drainage",
-      6,
-      "Wet soil / poor drainage",
-      "Waterlogging yellows leaves without making leaf spots.",
-      "Low spots in the field are worse after rain.",
-      "The same yellowing happens on raised, well-drained beds.",
-    );
+    if (wet) {
+      add(
+        "drainage",
+        6,
+        "Wet soil / poor drainage",
+        "Waterlogging yellows leaves without making leaf spots.",
+        "Low spots in the field are worse after rain.",
+        "The same yellowing happens on raised, well-drained beds.",
+      );
+    }
     add(
       "age/senescence",
       5,
@@ -114,10 +170,10 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
     );
   }
 
-  if (spots) {
+  if (spots && cropSpecific.length === 0) {
     add(
       "fungal disease",
-      8,
+      wet ? 10 : 8,
       "Fungal leaf disease",
       "Spots, blight, or mould on leaves can be fungal, especially in humid weather.",
       "Spots have a pattern, rings, or mould and spread in wet weather.",
@@ -125,7 +181,7 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
     );
     add(
       "bacterial disease",
-      5,
+      wet ? 7 : 5,
       "Bacterial leaf problem",
       "Some leaf spots are bacterial, especially with water-soaking or sticky ooze.",
       "Spots look water-soaked or the stem oozes.",
@@ -133,7 +189,7 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
     );
   }
 
-  if (wilt) {
+  if (wilt && cropSpecific.length === 0) {
     add(
       "bacterial disease",
       8,
@@ -160,13 +216,13 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
     );
   }
 
-  if (wet) {
+  if (wet && !spots) {
     add("drainage", 5, "Drainage", "Wet soil changes root function.", "Water sits more than a day.", "Soil dries within hours.");
   }
   if (dry) {
     add("irrigation", 5, "Irrigation", "Dry roots yellow or wilt without disease spots.", "Soil is powder-dry at root depth.", "Moisture is adequate.");
   }
-  if (insects) {
+  if (insects && !evidence.observedPest) {
     add(
       "insects",
       7,
@@ -189,7 +245,7 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
       "No herbicide was used and neighbours are healthy in a disease-like spread.",
     );
   }
-  if (oldLeaves && yellow) {
+  if (oldLeaves && yellow && !spots) {
     add(
       "age/senescence",
       3,
@@ -200,36 +256,55 @@ export function rankDiagnosticCauses(text: string): RankedCause[] {
     );
   }
 
-  add(
-    "environmental stress",
-    yellow || wilt ? 3 : 1,
-    "Heat, wind, or weather stress",
-    "Weather can add stress but does not by itself prove a disease.",
-    "Symptoms line up with a heat spike, wind burn, or sudden rain.",
-    "The pattern is a classic nutrient or pest picture on otherwise mild days.",
-  );
+  const allowWeatherStress =
+    !evidence.observedPest &&
+    !spots &&
+    cropSpecific.length === 0 &&
+    (yellow || wilt || evidence.heatFromFarmer);
+
+  if (allowWeatherStress) {
+    add(
+      "environmental stress",
+      evidence.heatFromFarmer ? 5 : 3,
+      "Heat, wind, or weather stress",
+      "Weather can add stress but does not by itself prove a disease.",
+      "Symptoms line up with a heat spike, wind burn, or sudden rain.",
+      "The pattern is a classic nutrient or pest picture on otherwise mild days.",
+    );
+  }
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, 5).map((item, index) => ({
-    category: item.category,
-    label: item.label,
-    rank: index + 1,
-    why: item.why,
-    increasesIf: item.increasesIf,
-    decreasesIf: item.decreasesIf,
-  }));
+  return scored
+    .filter((item) => !isGenericFallbackCause(item.label) || cropSpecific.length === 0)
+    .slice(0, 5)
+    .map((item, index) => ({
+      category: item.category,
+      label: item.label,
+      rank: index + 1,
+      why: item.why,
+      increasesIf: item.increasesIf,
+      decreasesIf: item.decreasesIf,
+    }));
 }
 
-export function rankedCausesForPrompt(causes: RankedCause[]): string {
+export function rankedCausesForPrompt(causes: RankedCause[], options?: { observedPest?: string | null }): string {
   if (causes.length === 0) return "";
   const lines = [
-    "Consider several cause categories before answering. Ranked possibilities from the farmer's description:",
+    options?.observedPest
+      ? `The farmer explicitly reported ${options.observedPest}. That observation outranks any generic abiotic differential.`
+      : "Consider several cause categories before answering. Ranked possibilities from the farmer's description:",
   ];
   for (const cause of causes) {
     lines.push(
       `${cause.rank}. ${cause.label} (${cause.category}). ${cause.why} More likely if: ${cause.increasesIf} Less likely if: ${cause.decreasesIf}`,
     );
   }
-  lines.push("Do not force this into a pest/disease diagnosis if nutrition, water, roots, or age fit better.");
+  if (!options?.observedPest) {
+    lines.push("Do not force this into a pest/disease diagnosis if nutrition, water, roots, or age fit better.");
+    lines.push("If the crop is known, prefer crop-relevant causes over generic root-zone / nutrient / foliar-or-insect cards.");
+    lines.push(
+      "Do not include a lesion-specific disease (Cercospora, bacterial leaf spot, frogeye, blight with spots) unless spots or lesions were reported or are clearly visible in a photo.",
+    );
+  }
   return lines.join("\n");
 }

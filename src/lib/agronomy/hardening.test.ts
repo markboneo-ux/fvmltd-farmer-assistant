@@ -66,6 +66,22 @@ describe("location confidence", () => {
     ).toBe(true);
   });
 
+  it("does not ask country confirmation when Couva uniquely implies Trinidad and Tobago", () => {
+    const facts = extractKnownFacts(
+      "My sweet pepper plants in Couva have some leaves curling and yellowing.",
+    );
+    expect(facts.district?.toLowerCase()).toBe("couva");
+    expect(facts.country).toBe("Trinidad and Tobago");
+    expect(
+      shouldConfirmCountry({
+        country: facts.country,
+        confidence: facts.locationConfidence,
+        asksForProducts: true,
+        farmingArea: facts.district,
+      }),
+    ).toBe(false);
+  });
+
   it("treats a registered profile country as confirmed for local facts", () => {
     const facts = extractKnownFacts("My celery is burning up.", {
       country: "Guyana",
@@ -302,9 +318,9 @@ describe("pesticide fallback and trend geography", () => {
         intent: "crop_problem",
       }),
     };
-    expect(playbookFor(extractKnownFacts(message), "HOME_GARDENER")?.id).toBe("generic_home");
+    expect(playbookFor(extractKnownFacts(message), "HOME_GARDENER")?.id).toBe("lettuce_edge_home");
     expect(playbookFor(extractKnownFacts("I farm a small plot of lettuce with brown edges"), "SMALL_FARMER")?.id).toBe(
-      "generic_small",
+      "lettuce_edge_small",
     );
     expect(byLevel.HOME_GARDENER.likelyCauses?.join(" ")).not.toEqual(
       byLevel.AGRONOMIST.likelyCauses?.join(" "),

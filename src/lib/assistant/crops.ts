@@ -6,6 +6,7 @@
 export const CROP_ALIASES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "pepper", pattern: /\bhot\s+pepper(s)?\b/gi },
   { name: "pepper", pattern: /\bsweet\s+pepper(s)?\b/gi },
+  { name: "pepper", pattern: /\bscotch\s*bonnets?\b/gi },
   { name: "sweet potato", pattern: /\bsweet\s+potatoes?\b/gi },
   { name: "pigeon pea", pattern: /\bpigeon\s+peas?\b/gi },
   { name: "string bean", pattern: /\b(bodi|bora|string\s+beans?)\b/gi },

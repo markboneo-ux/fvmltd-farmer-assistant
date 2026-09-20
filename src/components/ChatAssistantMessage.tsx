@@ -8,6 +8,7 @@ import {
   shouldUseDiagnosisLayout,
   stripGuidancePrefix,
 } from "@/lib/chat/visible-reply";
+import { SPRAY_NEEDED_HEADING } from "@/lib/agronomy/chemical-guidance";
 import type { WebSourceCitation } from "@/lib/research/types";
 
 type ChatAssistantMessageProps = {
@@ -93,16 +94,19 @@ export function ChatAssistantMessage({
 
   const assessment = stripGuidancePrefix(payload.preliminaryAssessment);
   const question = payload.nextQuestion.trim();
-  const likelyCauses = payload.likelyCauses ?? [];
+  const admitted = payload.admittedCauses ?? [];
+  const causeLabels = admitted.map((cause) => cause.label);
   const useDiagnosis =
-    shouldUseDiagnosisLayout(payload) || likelyCauses.length > 0;
+    shouldUseDiagnosisLayout(payload) || admitted.length > 0;
   const relevance = payload.weatherRelevance ?? "omit";
   const showWeatherCard =
     shouldRenderWeatherRiskCard(relevance) &&
     (payload.weatherRisks.length > 0 || Boolean(payload.weatherBrief));
   const supportingNote =
     relevance === "supporting" ? payload.weatherBrief || null : null;
-  const showProducts = payload.verifiedInputOptions.length > 0;
+  const sprayGuidance = payload.sprayGuidanceText?.trim() || "";
+  const showSpraySection = Boolean(sprayGuidance);
+  const showProducts = false;
   const uniqueSources: WebSourceCitation[] =
     payload.webSources && payload.webSources.length > 0
       ? payload.webSources
@@ -134,7 +138,7 @@ export function ChatAssistantMessage({
           className="rounded-xl bg-sun/15 px-3 py-2 text-sm font-medium text-warn ring-1 ring-sun/40"
           role="status"
         >
-          This looks urgent. Treat the next steps as cautious triage, not a
+          This looks urgent. Take the next steps carefully — this is not a
           confirmed diagnosis.
         </div>
       ) : null}
@@ -145,8 +149,8 @@ export function ChatAssistantMessage({
             <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
               What I think is happening
             </h3>
-            {likelyCauses.length > 0 ? (
-              <BulletList items={likelyCauses} ordered />
+            {causeLabels.length > 0 ? (
+              <BulletList items={causeLabels} ordered />
             ) : null}
             {payload.diagnosisConfidence ? (
               <p className="mt-1 text-xs text-muted">
@@ -155,14 +159,14 @@ export function ChatAssistantMessage({
             ) : null}
             <p className="mt-1 whitespace-pre-wrap">{payload.diagnosisWhy || assessment}</p>
           </section>
-          {payload.rankedCauses && payload.rankedCauses.length > 0 ? (
+          {admitted.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
                 Possible causes, ranked
               </h3>
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">
-                {payload.rankedCauses.slice(0, 5).map((cause) => (
-                  <li key={cause.category}>
+                {admitted.slice(0, 3).map((cause) => (
+                  <li key={`${cause.rank}-${cause.label}`}>
                     {cause.label}. More likely if {cause.increasesIf.toLowerCase()}
                   </li>
                 ))}
@@ -193,19 +197,24 @@ export function ChatAssistantMessage({
               <BulletList items={payload.actionsToAvoid} />
             </section>
           ) : null}
-          {showProducts ? (
+          {showSpraySection ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                If chemical control is needed
+                {SPRAY_NEEDED_HEADING}
               </h3>
-              {payload.verifiedInputOptions.slice(0, 2).map((option) => (
-                <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1 text-sm">
-                  {option.verifiedBrands[0]?.brandName
-                    ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
-                    : option.activeIngredientOrNutrient}
-                  {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
-                </p>
-              ))}
+              {sprayGuidance ? (
+                <p className="mt-1 whitespace-pre-wrap text-sm">{sprayGuidance}</p>
+              ) : null}
+              {showProducts
+                ? payload.verifiedInputOptions.slice(0, 2).map((option) => (
+                    <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1 text-sm">
+                      {option.verifiedBrands[0]?.brandName
+                        ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
+                        : option.activeIngredientOrNutrient}
+                      {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
+                    </p>
+                  ))
+                : null}
             </section>
           ) : null}
           {(payload.whatWouldChangeDiagnosis ?? []).length > 0 ? (
@@ -259,17 +268,27 @@ export function ChatAssistantMessage({
         <p className="text-sm text-muted">{supportingNote}</p>
       ) : null}
 
-      {showProducts && !useDiagnosis ? (
+      {showSpraySection && !useDiagnosis ? (
         <div className="text-sm">
-          {payload.verifiedInputOptions.slice(0, 2).map((option) => (
-            <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1">
-              One locally available option is{" "}
-              {option.verifiedBrands[0]?.brandName
-                ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
-                : option.activeIngredientOrNutrient}
-              {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
-            </p>
-          ))}
+          {sprayGuidance ? (
+            <div className="mt-1">
+              <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                {SPRAY_NEEDED_HEADING}
+              </p>
+              <p className="mt-1 whitespace-pre-wrap">{sprayGuidance}</p>
+            </div>
+          ) : null}
+          {showProducts
+            ? payload.verifiedInputOptions.slice(0, 2).map((option) => (
+                <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1">
+                  One locally available option is{" "}
+                  {option.verifiedBrands[0]?.brandName
+                    ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
+                    : option.activeIngredientOrNutrient}
+                  {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
+                </p>
+              ))
+            : null}
         </div>
       ) : null}
 

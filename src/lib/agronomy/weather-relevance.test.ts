@@ -50,10 +50,20 @@ describe("weather relevance gate", () => {
     expect(shouldInvokeWeatherTool(facts, intent)).toBe(true);
   });
 
-  it("treats leaf spots after rain as supporting weather, not the main answer", () => {
+  it("treats leaf spots after rain as important weather for tomato disease ranking", () => {
     const message = "Tomato leaf spots after heavy rain";
     const facts = extractKnownFacts(message);
     expect(assessWeatherRelevance({ message, facts }).level).toBe("important");
     expect(formatSupportingWeatherNote({ wetOrHumid: true })).toMatch(/wet\/humid/);
+  });
+
+  it("treats tomato brown spots on lower leaves as weather-fetchable even if the farmer did not mention rain", () => {
+    const message =
+      "My tomato leaves in Couva are developing small brown spots on the lower leaves.";
+    expect(message).not.toMatch(/\b(rain|weather|humid|wet)\b/i);
+    const facts = extractKnownFacts(message);
+    expect(facts.crop).toBe("tomato");
+    expect(assessWeatherRelevance({ message, facts }).level).toBe("supporting");
+    expect(shouldInvokeWeatherTool(facts)).toBe(true);
   });
 });

@@ -31,6 +31,13 @@ import { logCasePersistenceError } from "@/lib/cases/persistence";
 import type { CropCaseRecord } from "@/lib/cases/types";
 import { logOps } from "@/lib/security/ops-log";
 import { logStageFailure } from "@/lib/errors/correlation";
+import {
+  cropHealthStateFromMetadata,
+  emptyCropHealthState,
+  mergeCropHealthState,
+  withCropHealthState,
+} from "@/lib/agronomy/crop-health-state";
+import { shouldFlagForStaffReview } from "@/lib/admin/cases-needing-review";
 import type { AppIdentity } from "./identity";
 import { evaluateUsage, type UsageDecision } from "./limits";
 import { countUsage, recordUsageEvent } from "./usage-store";
@@ -91,14 +98,22 @@ export async function lastKnownLocationForOwner(owner: {
 }): Promise<{ country: string | null; district: string | null }> {
   const owned = await casesForOwner(owner);
   const latest = [...owned].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const withArea = latest.find((item) => item.farmingArea || item.district);
   const withCountry = latest.find((item) => item.country);
   if (!withCountry) {
-    const withDistrict = latest.find((item) => item.district);
-    return { country: null, district: withDistrict?.district ?? null };
+    return {
+      country: null,
+      district: withArea?.farmingArea ?? withArea?.district ?? null,
+    };
   }
   return {
     country: withCountry.country,
-    district: withCountry.district,
+    district:
+      withCountry.farmingArea ||
+      withCountry.district ||
+      withArea?.farmingArea ||
+      withArea?.district ||
+      null,
   };
 }
 
@@ -253,9 +268,37 @@ async function persistConversationEnrichment(input: {
   try {
     await updateCaseFromConversation(record.id, options.userMessage, {
       country:
-        options.payload?.regionalContext?.country || profile.country || undefined,
+        options.payload?.cropHealthState?.country ||
+        options.payload?.regionalContext?.country ||
+        profile.country ||
+        undefined,
       district:
-        options.payload?.regionalContext?.district || profile.district || undefined,
+        options.payload?.cropHealthState?.farmingArea ||
+        options.payload?.regionalContext?.district ||
+        profile.district ||
+        undefined,
+      farmingArea:
+        options.payload?.cropHealthState?.farmingArea ||
+        options.payload?.regionalContext?.district ||
+        undefined,
+      latitude: options.payload?.cropHealthState?.coordinates?.latitude ?? undefined,
+      longitude: options.payload?.cropHealthState?.coordinates?.longitude ?? undefined,
+      growthStage: options.payload?.cropHealthState?.growthStage ?? undefined,
+      symptomLocation: options.payload?.cropHealthState?.symptomLocation ?? undefined,
+      onset: options.payload?.cropHealthState?.onset ?? undefined,
+      spread: options.payload?.cropHealthState?.spread ?? undefined,
+      percentageAffected: options.payload?.cropHealthState?.percentageAffected ?? undefined,
+      recentRainfall: options.payload?.cropHealthState?.recentRainfall ?? undefined,
+      forecastRainfall: options.payload?.cropHealthState?.forecastRainfall ?? undefined,
+      temperature: options.payload?.cropHealthState?.temperature ?? undefined,
+      humidity: options.payload?.cropHealthState?.humidity ?? undefined,
+      photoFindings: options.payload?.cropHealthState?.photoFindings ?? undefined,
+      diagnosticConfidence: options.payload?.diagnosisConfidence ?? undefined,
+      missingInformation: options.payload?.internalMissingInformation ?? undefined,
+      suspectedPest: options.payload?.cropHealthState?.suspectedPest ?? undefined,
+      suspectedDisease:
+        options.payload?.cropHealthState?.suspectedDiseaseOrDisorder ?? undefined,
+      confirmedDiagnosis: null,
       productsRequested:
         record.productsRequested || Boolean(options.payload?.verifiedInputOptions.length),
       verifiedProductsShown: (options.payload?.verifiedInputOptions ?? []).map(
@@ -281,10 +324,38 @@ async function persistConversationEnrichment(input: {
       questionCategory: classified.questionCategory,
       calculationType: classified.calculationType,
       caseType: classified.caseType,
-      businessMetadata: {
-        ...(record.businessMetadata ?? {}),
-        locationConfidence: options.payload?.locationConfidence ?? null,
-      },
+      needsReview: shouldFlagForStaffReview({
+        ...record,
+        severity: options.payload?.severity ?? record.severity,
+        humanEscalation: Boolean(options.payload?.escalationRecommended),
+        possibleCauses: options.payload?.likelyCauses ?? record.possibleCauses,
+        confidence:
+          options.payload?.diagnosisConfidence === "possible" ? "low" : record.confidence,
+      }),
+      businessMetadata: withCropHealthState(
+        {
+          ...(record.businessMetadata ?? {}),
+          locationConfidence: options.payload?.locationConfidence ?? null,
+        },
+        mergeCropHealthState(
+          cropHealthStateFromMetadata(record.businessMetadata) ?? emptyCropHealthState(),
+          options.payload?.cropHealthState ?? {
+            country: options.payload?.regionalContext?.country ?? profile.country ?? null,
+            farmingArea: options.payload?.regionalContext?.district ?? profile.district ?? null,
+            crop: record.crop,
+            diagnosticConfidence: options.payload?.diagnosisConfidence ?? "unknown",
+            recommendedActions: options.payload?.safeActionsNow ?? [],
+            suspectedCauses: (options.payload?.rankedCauses ?? []).slice(0, 3).map((cause) => ({
+              label: cause.label,
+              category: cause.category,
+              evidenceFor: [cause.increasesIf],
+              evidenceAgainst: [cause.decreasesIf],
+              rank: cause.rank,
+            })),
+            missingInformation: options.payload?.internalMissingInformation ?? [],
+          },
+        ),
+      ),
     });
 
     if (options.payload) {

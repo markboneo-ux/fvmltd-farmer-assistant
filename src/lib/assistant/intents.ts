@@ -5,6 +5,7 @@
 
 import { extractLastCrop } from "./crops";
 import { isDeicticFollowUp } from "./reference-resolution";
+import { isDiagnosticContinuityFollowUp } from "@/lib/agronomy/case-continuity";
 
 export const INTENT_CATEGORIES = [
   "crop_problem",
@@ -288,7 +289,7 @@ const FOLLOW_UP_HINT =
   /^(yes|no|ok|okay|not sure|few plants|patches|most of (the )?field|whole field|none|not yet|same|still|a few)[\s.!?]*$/i;
 
 const AGRONOMY_FOLLOW_UP =
-  /\b(soil|wet|water|drain|spray|photo|leaf|leaves|stem|root|patch|field|plants?|wilt|yellow|sticky|mould|mold)\b/i;
+  /\b(soil|wet|water|drain|spray|photo|leaf|leaves|stem|root|patch|field|plants?|wilt|yellow|sticky|mould|mold|survive|serious)\b/i;
 
 export function isLikelyFollowUp(
   message: string,
@@ -298,12 +299,16 @@ export function isLikelyFollowUp(
   if (!text) return false;
   if (FOLLOW_UP_HINT.test(text)) return true;
   if (options?.hasHistory && isDeicticFollowUp(text)) return true;
+  if (options?.hasHistory && isDiagnosticContinuityFollowUp(text)) return true;
 
   const namedCrop = extractLastCrop(text);
   if (namedCrop && options?.activeCrop && namedCrop !== options.activeCrop.toLowerCase()) {
     return false;
   }
-  if (namedCrop && text.length > 24) {
+  if (namedCrop && text.length > 24 && isDiagnosticContinuityFollowUp(text) && options?.hasHistory) {
+    return true;
+  }
+  if (namedCrop && text.length > 24 && !isDiagnosticContinuityFollowUp(text)) {
     return false;
   }
   if (!options?.hasHistory && !options?.activeCrop) {
@@ -359,7 +364,7 @@ export function resolveConversationIntent(options: {
   const previous = asIntent(options.activeIntent) ?? asIntent(options.historyIntent);
   if (!previous) return classified;
 
-  if (isDeicticFollowUp(options.message)) {
+  if (isDeicticFollowUp(options.message) || isDiagnosticContinuityFollowUp(options.message)) {
     return pack(previous);
   }
 

@@ -27,7 +27,7 @@ export function knowledgeStateFromCase(
     record.outcome === "problem_solved" ||
     record.outcome === "improved"
   ) {
-    return "validated";
+    return "candidate";
   }
   if (record.knowledgeState === "candidate") return "candidate";
   return "raw";
@@ -39,12 +39,30 @@ export function isTrustedKnowledge(record: {
   knowledgeState?: KnowledgeState | null;
   outcome?: FollowUpOutcome | null;
 }): boolean {
-  return knowledgeStateFromCase({
-    agronomistReviewed: Boolean(record.agronomistReviewed),
-    diagnosisConfirmed: Boolean(record.diagnosisConfirmed),
-    knowledgeState: record.knowledgeState ?? "raw",
-    outcome: record.outcome ?? null,
-  }) === "validated";
+  if (record.diagnosisConfirmed || record.agronomistReviewed) return true;
+  if (record.knowledgeState === "validated") return true;
+  if (record.outcome === "problem_solved" || record.outcome === "improved") {
+    return true;
+  }
+  return false;
+}
+
+/** Weight agronomist-reviewed and confirmed cases far above unconfirmed AI diagnoses. */
+export function learningWeight(record: {
+  agronomistReviewed?: boolean;
+  diagnosisConfirmed?: boolean;
+  knowledgeState?: KnowledgeState | null;
+  outcome?: FollowUpOutcome | null;
+}): number {
+  if (record.knowledgeState === "rejected") return 0;
+  let score = 2;
+  if (record.agronomistReviewed) score += 40;
+  if (record.diagnosisConfirmed) score += 30;
+  if (record.outcome === "problem_solved" || record.outcome === "improved") score += 25;
+  if (!record.agronomistReviewed && !record.diagnosisConfirmed && !record.outcome) {
+    return 2;
+  }
+  return score;
 }
 
 export function isRejectedKnowledge(record: {

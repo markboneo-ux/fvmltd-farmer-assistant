@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { persistConversationTurn } from "@/lib/beta/conversation";
 import type { AppIdentity } from "@/lib/beta/identity";
 import { emptyRegionalContext, type AgronomicCasePayload } from "@/lib/agronomy/case-schema";
+import {
+  cropHealthStateFromMetadata,
+  emptyCropHealthState,
+} from "@/lib/agronomy/crop-health-state";
 import { createFakeCaseSupabase } from "@/lib/cases/fake-supabase";
 import {
   addCaseMessage,
@@ -138,6 +142,71 @@ describe("Supabase case persistence layer", () => {
     expect(fake.db.case_followups).toHaveLength(1);
   });
 
+  it("persists crop_health_state columns and reloads them on the next turn", async () => {
+    const first = await persistConversationTurn({
+      identity: guest(),
+      userMessage:
+        "My sweet pepper plants in Couva have some leaves curling and yellowing. It started a few days ago.",
+      assistantText: "Check under the curled new leaves for insects.",
+      payload: payload({
+        cropHealthState: emptyCropHealthState({
+          crop: "pepper",
+          country: "Trinidad and Tobago",
+          farmingArea: "Couva",
+          observedSymptoms: ["leaf curl", "yellowing"],
+          notReportedSymptoms: ["spots"],
+          diagnosticConfidence: "possible",
+          lastDiagnosticQuestion: "Are insects present under the curled new leaves?",
+          caseNarrative:
+            "My sweet pepper plants in Couva have some leaves curling and yellowing. It started a few days ago.",
+        }),
+        diagnosisConfidence: "possible",
+        regionalContext: {
+          ...emptyRegionalContext(),
+          country: "Trinidad and Tobago",
+          district: "Couva",
+        },
+      }),
+    });
+    const stored = fake.db.crop_cases[0];
+    expect(stored.farming_area).toBe("Couva");
+    expect(stored.crop_health_state).toMatchObject({
+      crop: "pepper",
+      farmingArea: "Couva",
+      country: "Trinidad and Tobago",
+    });
+    expect((stored.crop_health_state as { observedSymptoms: string[] }).observedSymptoms).toEqual(
+      expect.arrayContaining(["leaf curl", "yellowing"]),
+    );
+
+    const reloaded = await getCropCase(first.caseId);
+    const state = cropHealthStateFromMetadata(reloaded?.businessMetadata);
+    expect(state?.crop).toBe("pepper");
+    expect(state?.farmingArea).toBe("Couva");
+    expect(state?.observedSymptoms).toEqual(expect.arrayContaining(["leaf curl", "yellowing"]));
+    expect(state?.notReportedSymptoms).toEqual(expect.arrayContaining(["spots"]));
+    expect(state?.lastDiagnosticQuestion).toMatch(/insects present under the curled new leaves/i);
+
+    await persistConversationTurn({
+      identity: guest(),
+      caseId: first.caseId,
+      userMessage: "I really want to make sure my sweet peppers survive.",
+      assistantText: "Still the same curling and yellowing case. Check under new leaves.",
+      payload: payload({
+        cropHealthState: {
+          ...state!,
+          farmerIntent: "reassurance_same_case",
+        },
+      }),
+    });
+    const again = await getCropCase(first.caseId);
+    const continued = cropHealthStateFromMetadata(again?.businessMetadata);
+    expect(continued?.crop).toBe("pepper");
+    expect(continued?.observedSymptoms).toEqual(expect.arrayContaining(["leaf curl", "yellowing"]));
+    expect(continued?.farmerIntent).toBe("reassurance_same_case");
+    expect(again?.farmerProblemText).toMatch(/curling and yellowing/i);
+  });
+
   it("still saves the chat when follow-up or trend enrichment fails", async () => {
     fake.failNext.add("case_followups");
     const persisted = await persistConversationTurn({
@@ -233,6 +302,11 @@ describe("Supabase case persistence layer", () => {
       "reviewed_at",
       "reviewed_by",
       "include_in_trend_learning",
+      "farming_area",
+      "latitude",
+      "longitude",
+      "growth_stage",
+      "crop_health_state",
     ]) {
       fake.schemaMissingColumns.add(column);
     }

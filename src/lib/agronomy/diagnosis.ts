@@ -5,6 +5,7 @@
 
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   shouldAskCountry,
   shouldConfirmCountry,
   type FarmerLevel,
@@ -18,6 +19,13 @@ import { isGuidanceStage, type AgronomicCasePayload } from "./case-schema";
 import { assignDiagnosisConfidence } from "./diagnosis-confidence";
 import { questionAsksForKnownFact, type KnownFarmerFacts } from "./tomato-protocol";
 import { extractWorkingCase, highestValueMissingQuestion } from "./working-case";
+import { specificPhotoRequest, sanitizePhotoQuestion } from "./photo-request";
+import { shouldAskFarmingArea } from "@/lib/weather/geocode";
+import { extractObservedEvidence, genericCauseList } from "./evidence-hierarchy";
+import { cropPlaybookFor, rankCropCauses } from "./crop-differentials";
+import { agronomicModeFor } from "./case-modes";
+import { isGenericCareQuestion, spotsAreObserved } from "./case-continuity";
+import { hasLesionEvidence, isLesionSpecificDisease, containsUngatedLesionLeak, isPepperCurlYellowCase } from "./evidence-gated-causes";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -363,15 +371,37 @@ export function playbookFor(
     if (farmerLevel === "TECHNICAL_USER") return CELERY_BURN_TECHNICAL;
     return CELERY_BURN;
   }
-  if (facts.suspectedIssue === "whiteflies" || facts.suddenWilt) {
-    return null;
-  }
+
+  const evidence = extractObservedEvidence({ facts, text: facts.rawText });
+  const ranked = rankCropCauses({
+    text: facts.rawText,
+    crop: facts.crop,
+    evidence,
+    facts,
+  });
+  const cropSpecific = cropPlaybookFor({
+    crop: facts.crop,
+    facts,
+    evidence,
+    farmerLevel,
+    ranked,
+  });
+  if (cropSpecific) return cropSpecific;
+
   const text = facts.rawText.toLowerCase();
-  if (
+  const hasNamedProblem =
     /\b(burn|burning|yellowing|spots?|stunt|wilt|holes?|leaf\s+spot|scorch|necrosis|brown(ing)?|leaf\s+edges?|tip\s*burn|cercospora|septoria|alternaria|mildew|anthracnose|blight|rot|lesion|chloros)\b/.test(
       text,
-    ) &&
-    facts.crop
+    );
+  // Generic root/nutrient/foliar cards are last resort only — never for a
+  // named pest, discrete spots, or sudden wilt on a known crop.
+  if (
+    hasNamedProblem &&
+    facts.crop &&
+    !evidence.observedPest &&
+    !evidence.symptoms.includes("spots") &&
+    !facts.suddenWilt &&
+    !/\bwilt/.test(text)
   ) {
     return genericDifferentialFor(farmerLevel);
   }
@@ -406,12 +436,14 @@ export function pickHighestValueFollowUp(options: {
       confidence: facts.locationConfidence,
       asksForProducts: facts.asksForProducts,
       researchNeed: options.researchNeed,
+      farmingArea: facts.district,
     })
   ) {
     return `Just to confirm, are you farming in ${facts.country}?`;
   }
 
   const working = extractWorkingCase(facts);
+  const evidence = extractObservedEvidence({ facts, text: facts.rawText });
   const playbook = playbookFor(facts, options.farmerLevel ?? null);
   if (playbook?.id.startsWith("celery") && playbook.oneQuestion) {
     if (
@@ -423,10 +455,18 @@ export function pickHighestValueFollowUp(options: {
   }
 
   const existing = payload.nextQuestion.trim();
+  const spotsObserved = spotsAreObserved(evidence, null, facts);
+  const staleSpotQuestion =
+    !spotsObserved &&
+    /\b(pale centre|water-soaked|separate spots|true (leaf )?spots|greasy)\b/i.test(existing) &&
+    !/\b(photo|photograph|image)\b/i.test(existing);
   if (
     existing &&
     !questionAsksForKnownFact(existing, facts) &&
-    !/\bcountry\b/i.test(existing)
+    !/\bcountry\b/i.test(existing) &&
+    !/just to confirm, are you farming in/i.test(existing) &&
+    !isGenericCareQuestion(existing) &&
+    !staleSpotQuestion
   ) {
     return existing;
   }
@@ -445,9 +485,26 @@ export function pickHighestValueFollowUp(options: {
     asksForProducts: facts.asksForProducts,
     photoRecommended: payload.photoRecommended,
     diagnostic: Boolean(facts.crop),
+    weatherNeeded: payload.weatherRelevance === "supporting" || payload.weatherRelevance === "important" || payload.weatherRelevance === "central",
+    weatherIsCentral: payload.weatherRelevance === "central",
   });
   if (missing && !questionAsksForKnownFact(missing, facts)) {
     return missing;
+  }
+
+  if (
+    shouldAskFarmingArea({
+      farmingArea: facts.district,
+      district: facts.district,
+      country: facts.country,
+      weatherNeeded:
+        payload.weatherRelevance === "supporting" ||
+        payload.weatherRelevance === "important" ||
+        payload.weatherRelevance === "central",
+      weatherIsCentral: payload.weatherRelevance === "central",
+    })
+  ) {
+    return ASK_FARMING_AREA_QUESTION;
   }
 
   if (
@@ -463,7 +520,13 @@ export function pickHighestValueFollowUp(options: {
   }
 
   if (payload.photoRecommended) {
-    return "Can you send a close photo of the affected leaf plus a whole plant?";
+    const photoAsk =
+      specificPhotoRequest({
+        facts,
+        alreadyRequested: false,
+      })?.farmerQuestion ??
+      "Can you send a close photo of the affected leaf plus a whole plant?";
+    return sanitizePhotoQuestion(photoAsk, facts);
   }
 
   return "";
@@ -508,28 +571,79 @@ export function applyDiagnosticPlaybook(
   next.preliminaryAssessment = weatherMustNotLead(next.preliminaryAssessment);
   const likelyCauses = next.likelyCauses ?? [];
   const disconfirmers = next.whatWouldChangeDiagnosis ?? [];
+  const evidence = extractObservedEvidence({ facts, text: facts.rawText });
+  const mode = agronomicModeFor({ evidence, facts });
 
   const celerySpecific = playbook.id.startsWith("celery");
-  // Fill empty diagnostic slots from the playbook. Never invent extra pests or
-  // overwrite causes the model already ranked. Thin assessments may be replaced
-  // with the playbook's reasoning; a solid assessment is kept.
+  const cropSpecific = !playbook.id.startsWith("generic");
+  const incomingGeneric = genericCauseList(likelyCauses);
+  const lesion = hasLesionEvidence({ evidence, facts });
+  const incomingLesionWithoutEvidence =
+    likelyCauses.some((label) => isLesionSpecificDisease(label)) && !lesion;
+  const curlYellow = isPepperCurlYellowCase({ facts, evidence, crop: facts.crop }) && !lesion;
+  const incomingLeaky =
+    curlYellow &&
+    (containsUngatedLesionLeak(next.preliminaryAssessment) ||
+      next.checksToday.some((item) => containsUngatedLesionLeak(item)) ||
+      next.safeActionsNow.some((item) => containsUngatedLesionLeak(item)) ||
+      next.actionsToAvoid.some((item) => containsUngatedLesionLeak(item)));
+  const usePlaybookCauses =
+    likelyCauses.length === 0 ||
+    incomingGeneric ||
+    (cropSpecific && incomingGeneric) ||
+    incomingLesionWithoutEvidence ||
+    curlYellow;
+
   next = {
     ...next,
-    likelyCauses: likelyCauses.length > 0 ? likelyCauses : playbook.likelyCauses,
-    diagnosisWhy: next.diagnosisWhy || playbook.why,
+    likelyCauses: usePlaybookCauses ? playbook.likelyCauses : likelyCauses,
+    diagnosisWhy:
+      curlYellow ||
+      (!lesion && /\b(cercospora|frogeye|bacterial leaf spot|pale[- ]centr|water[\s-]?soaked|greasy)\b/i.test(
+        next.diagnosisWhy || "",
+      ))
+        ? playbook.why
+        : next.diagnosisWhy || playbook.why,
     whatWouldChangeDiagnosis:
-      disconfirmers.length > 0 ? disconfirmers : playbook.whatWouldChange,
+      curlYellow ||
+      (!lesion &&
+        (payload.whatWouldChangeDiagnosis ?? []).some((item) =>
+          /\b(pale[- ]centr|greasy|water[\s-]?soaked|cercospora)\b/i.test(item),
+        ))
+        ? playbook.whatWouldChange
+        : disconfirmers.length > 0
+          ? disconfirmers
+          : playbook.whatWouldChange,
     monitorNext: next.monitorNext || playbook.monitor,
-    checksToday: next.checksToday.length > 0 ? next.checksToday : playbook.checks,
+    checksToday:
+      curlYellow && (next.checksToday.length === 0 || incomingLeaky || next.checksToday.some((item) => containsUngatedLesionLeak(item)))
+        ? playbook.checks
+        : next.checksToday.length > 0
+          ? next.checksToday
+          : playbook.checks,
     safeActionsNow:
-      next.safeActionsNow.length > 0 ? next.safeActionsNow : playbook.actionsToday,
-    actionsToAvoid: next.actionsToAvoid.length > 0 ? next.actionsToAvoid : playbook.avoid,
+      curlYellow && (next.safeActionsNow.length === 0 || incomingLeaky || next.safeActionsNow.some((item) => containsUngatedLesionLeak(item)))
+        ? playbook.actionsToday
+        : next.safeActionsNow.length > 0
+          ? next.safeActionsNow
+          : playbook.actionsToday,
+    actionsToAvoid:
+      curlYellow && (next.actionsToAvoid.length === 0 || incomingLeaky || next.actionsToAvoid.some((item) => containsUngatedLesionLeak(item)))
+        ? playbook.avoid
+        : next.actionsToAvoid.length > 0
+          ? next.actionsToAvoid
+          : playbook.avoid,
     photoRecommended: next.photoRecommended || playbook.photoHelpful,
+    agronomicMode: mode,
   };
   if (
-    (celerySpecific || isThinAssessment(payload)) &&
+    (celerySpecific || cropSpecific || isThinAssessment(payload) || curlYellow || incomingLeaky) &&
     playbook.why &&
-    (isThinAssessment(payload) || next.preliminaryAssessment.length < 80)
+    (isThinAssessment(payload) ||
+      incomingGeneric ||
+      incomingLeaky ||
+      curlYellow ||
+      next.preliminaryAssessment.length < 80)
   ) {
     next.preliminaryAssessment = playbook.why;
   }
@@ -550,11 +664,11 @@ export function applyDiagnosticPlaybook(
 
   if (
     facts.asksForProducts &&
-    /\b(cercospora|septoria|alternaria|leaf\s+spot)\b/i.test(facts.rawText)
+    /\b(cercospora|septoria|alternaria|leaf\s+spot|spots?|white\s*fl|spray)\b/i.test(facts.rawText)
   ) {
     const general =
-      "Active ingredients normally used against Cercospora-type leaf spots include protectant coppers or chlorothalonil and, where a programme is justified, strobilurin (QoI) or DMI fungicides in rotation. That is general agronomy, not proof of local registration.";
-    if (!/haven't verified registration|active ingredients normally used/i.test(next.preliminaryAssessment)) {
+      "Active ingredients normally used against this kind of problem are listed only as general agronomy, not proof of local registration.";
+    if (!/haven't verified registration|active ingredients normally used|could not verify a current/i.test(next.preliminaryAssessment)) {
       next.preliminaryAssessment = `${next.preliminaryAssessment} ${general}`.trim();
     }
   }

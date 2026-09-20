@@ -10,6 +10,7 @@ import {
 import { extractCountryFromText } from "@/lib/research/countries";
 import type { UserLevel } from "@/lib/beta/identity";
 import type { HomeOrCommercial, StructuredCaseFacts } from "./types";
+import { lookupFarmingArea } from "@/lib/weather/geocode";
 
 const TT_DISTRICTS = [
   "couva",
@@ -89,10 +90,68 @@ export function extractVariety(text: string, crop: string | null): string | null
 }
 
 export function extractDistrict(text: string): string | null {
+  const lookedUp = lookupFarmingArea(text);
+  if (lookedUp?.farmingArea) return lookedUp.farmingArea;
   const lower = text.toLowerCase();
   for (const district of TT_DISTRICTS) {
     if (lower.includes(district)) return titleCase(district);
   }
+  return null;
+}
+
+export function extractGrowthStage(text: string, plantAge: string | null): string | null {
+  const lower = text.toLowerCase();
+  if (/\b(seedling|nursery|transplant)\b/.test(lower)) return "seedling";
+  if (/\b(flower|flowering|bloom)\b/.test(lower)) return "flowering";
+  if (/\b(fruit(ing)?|bearing|harvest)\b/.test(lower)) return "fruiting";
+  if (/\b(vegetative|leafing out)\b/.test(lower)) return "vegetative";
+  return plantAge;
+}
+
+export function extractSymptomLocation(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (/\b(tips?|edges?|margins?)\b/.test(lower)) return "tips or edges";
+  if (/\b(underside|under the leaf)\b/.test(lower)) return "leaf underside";
+  if (/\b(lower|older)\s+leaves\b/.test(lower)) return "older leaves";
+  if (/\b(new|young)\s+(leaves|growth)\b/.test(lower)) return "new growth";
+  if (/\b(stem|collar|stem base)\b/.test(lower)) return "stem";
+  if (/\b(root|roots)\b/.test(lower)) return "roots";
+  if (/\bfruit\b/.test(lower)) return "fruit";
+  if (/\bwhole plant\b/.test(lower)) return "whole plant";
+  return null;
+}
+
+export function extractOnset(text: string): string | null {
+  const lower = text.toLowerCase();
+  const match = lower.match(
+    /\b(yesterday|today|this morning|last night|last week|a few days ago|overnight|suddenly|since\s+\w+)\b/,
+  );
+  return match?.[1] ?? null;
+}
+
+export function extractPercentageAffected(text: string): string | null {
+  const match = text.match(/\b(\d{1,3})\s*%|\b(few plants|patches|most of (the )?(field|crop)|whole field)\b/i);
+  return match?.[0] ?? null;
+}
+
+export function extractSuspectedPest(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (/\bwhite\s*fl/.test(lower)) return "whiteflies";
+  if (/\baphid/.test(lower)) return "aphids";
+  if (/\bthrips/.test(lower)) return "thrips";
+  if (/\bmites?\b/.test(lower)) return "mites";
+  if (/\b(worm|caterpillar)\b/.test(lower)) return "caterpillars";
+  return null;
+}
+
+export function extractSuspectedDisease(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (/\bcercospora/.test(lower)) return "Cercospora leaf spot";
+  if (/\b(late blight|early blight|blight)\b/.test(lower)) return "blight";
+  if (/\banthracnose/.test(lower)) return "anthracnose";
+  if (/\b(mildew|mould|mold)\b/.test(lower)) return "foliar fungal disease";
+  if (/\bbacterial wilt/.test(lower)) return "bacterial wilt";
+  if (/\bvirus|leaf curl/.test(lower)) return "possible virus";
   return null;
 }
 
@@ -129,11 +188,17 @@ export function extractStructuredFacts(
 
   const userLevel = inferUserLevel(text);
   const located = extractRegionAndCountry(text);
+  const lookedUp = lookupFarmingArea(text, located.country || profile?.country);
   const district =
-    located.region || extractDistrict(text) || profile?.district?.trim() || null;
+    located.region ||
+    lookedUp?.farmingArea ||
+    extractDistrict(text) ||
+    profile?.district?.trim() ||
+    null;
   const country =
     located.country ||
     extractCountryFromText(text) ||
+    lookedUp?.country ||
     profile?.country?.trim() ||
     null;
 
@@ -195,6 +260,24 @@ export function extractStructuredFacts(
       ),
     verifiedProductsShown: [],
     humanEscalation: false,
+    farmingArea: district,
+    latitude: null,
+    longitude: null,
+    growthStage: extractGrowthStage(text, ageMatch ? `${ageMatch[1]} ${ageMatch[2]}` : null),
+    symptomLocation: extractSymptomLocation(text),
+    onset: extractOnset(text),
+    spread: fieldDistribution,
+    percentageAffected: extractPercentageAffected(text),
+    recentRainfall: null,
+    forecastRainfall: null,
+    temperature: null,
+    humidity: null,
+    photoFindings: [],
+    diagnosticConfidence: null,
+    missingInformation: [],
+    suspectedPest: extractSuspectedPest(text),
+    suspectedDisease: extractSuspectedDisease(text),
+    confirmedDiagnosis: null,
   };
 }
 
@@ -222,7 +305,12 @@ export function mergeCaseFacts(
     district: pick(current.district, incoming.district),
     farm: pick(current.farm, incoming.farm),
     area: pick(current.area, incoming.area),
-    farmerProblemText: incoming.farmerProblemText || current.farmerProblemText,
+    farmerProblemText:
+      incoming.farmerProblemText &&
+      extractSymptoms(incoming.farmerProblemText).length > 0 &&
+      incoming.farmerProblemText !== current.farmerProblemText
+        ? [current.farmerProblemText, incoming.farmerProblemText].filter(Boolean).join("\n")
+        : current.farmerProblemText || incoming.farmerProblemText,
     problemCategory: pick(current.problemCategory, incoming.problemCategory),
     symptoms: [
       ...new Set([...(current.symptoms ?? []), ...(incoming.symptoms ?? [])]),
@@ -253,6 +341,29 @@ export function mergeCaseFacts(
       ]),
     ],
     humanEscalation: current.humanEscalation || incoming.humanEscalation,
+    farmingArea: pick(current.farmingArea, incoming.farmingArea),
+    latitude: pick(current.latitude, incoming.latitude),
+    longitude: pick(current.longitude, incoming.longitude),
+    growthStage: pick(current.growthStage, incoming.growthStage),
+    symptomLocation: pick(current.symptomLocation, incoming.symptomLocation),
+    onset: pick(current.onset, incoming.onset),
+    spread: pick(current.spread, incoming.spread),
+    percentageAffected: pick(current.percentageAffected, incoming.percentageAffected),
+    recentRainfall: pick(current.recentRainfall, incoming.recentRainfall),
+    forecastRainfall: pick(current.forecastRainfall, incoming.forecastRainfall),
+    temperature: pick(current.temperature, incoming.temperature),
+    humidity: pick(current.humidity, incoming.humidity),
+    photoFindings: [
+      ...new Set([...(current.photoFindings ?? []), ...(incoming.photoFindings ?? [])]),
+    ],
+    diagnosticConfidence: pick(current.diagnosticConfidence, incoming.diagnosticConfidence),
+    missingInformation:
+      (incoming.missingInformation ?? []).length > 0
+        ? incoming.missingInformation
+        : current.missingInformation,
+    suspectedPest: pick(current.suspectedPest, incoming.suspectedPest),
+    suspectedDisease: pick(current.suspectedDisease, incoming.suspectedDisease),
+    confirmedDiagnosis: pick(current.confirmedDiagnosis, incoming.confirmedDiagnosis),
   };
 }
 

@@ -41,6 +41,9 @@ import {
 import { recordUsageEvent } from "@/lib/beta/usage-store";
 import { persistPrivateCaseImages } from "@/lib/cases/photo-persist";
 import { farmerHistoryContent } from "@/lib/chat/visible-reply";
+import { cropHealthStateFromMetadata } from "@/lib/agronomy/crop-health-state";
+import { applyBuildShaHeader, getBuildInfo } from "@/lib/build-info";
+import { clientSafeCauseDebug } from "@/lib/agronomy/evidence-gated-causes";
 import {
   CASE_IMAGE_MAX_COUNT,
   FARMER_PHOTO_TOO_LARGE,
@@ -118,6 +121,11 @@ async function parseImagesFromFormData(form: FormData): Promise<ImageParseResult
   return { ok: true, images };
 }
 
+function withBuildHeaders(response: NextResponse): NextResponse {
+  applyBuildShaHeader(response.headers);
+  return response;
+}
+
 function jsonError(
   model: string,
   diagnosticCode: string,
@@ -125,15 +133,17 @@ function jsonError(
   status: number,
   extras?: Record<string, unknown>,
 ) {
-  return NextResponse.json(
-    {
-      case: null,
-      responseId: null,
-      requestCompleted: false,
-      error: farmerFacingError(error),
-      ...extras,
-    },
-    { status },
+  return withBuildHeaders(
+    NextResponse.json(
+      {
+        case: null,
+        responseId: null,
+        requestCompleted: false,
+        error: farmerFacingError(error),
+        ...extras,
+      },
+      { status },
+    ),
   );
 }
 
@@ -351,20 +361,22 @@ export async function POST(request: Request) {
         caseId: incomingCaseId,
       });
       logOps("usage_limit", { access: identity.access });
-      return NextResponse.json(
-        {
-          case: null,
-          responseId: null,
-          requestCompleted: false,
-          error:
-            identity.access === "guest" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
-          usage: imageGate.used,
-          remaining: imageGate.remaining,
-          access: identity.access,
-          limitReached: true,
-          reason: imageGate.reason,
-        },
-        { status: 402 },
+      return withBuildHeaders(
+        NextResponse.json(
+          {
+            case: null,
+            responseId: null,
+            requestCompleted: false,
+            error:
+              identity.access === "guest" ? GUEST_LIMIT_MESSAGE : REGISTERED_LIMIT_HEADING,
+            usage: imageGate.used,
+            remaining: imageGate.remaining,
+            access: identity.access,
+            limitReached: true,
+            reason: imageGate.reason,
+          },
+          { status: 402 },
+        ),
       );
     }
 
@@ -424,8 +436,9 @@ export async function POST(request: Request) {
               conversationIntent: continuingCase.conversationIntent,
               farmerProblemText: continuingCase.farmerProblemText,
               country: continuingCase.country,
-              district: continuingCase.district,
+              district: continuingCase.district ?? continuingCase.farmingArea,
               farmerLevel: continuingCase.userLevel,
+              cropHealthState: cropHealthStateFromMetadata(continuingCase.businessMetadata),
             }
           : null,
     });
@@ -439,17 +452,19 @@ export async function POST(request: Request) {
         errorType: result.diagnosticCode,
         correlationId,
       });
-      return NextResponse.json(
-        {
-          case: null,
-          responseId: null,
-          requestCompleted: result.requestCompleted,
-          error: farmerFacingError(result.error) || FARMER_GENERIC_ERROR,
-          ...(includeDiagnostics
-            ? { model: result.model, diagnosticCode: result.diagnosticCode }
-            : {}),
-        },
-        { status: result.status },
+      return withBuildHeaders(
+        NextResponse.json(
+          {
+            case: null,
+            responseId: null,
+            requestCompleted: result.requestCompleted,
+            error: farmerFacingError(result.error) || FARMER_GENERIC_ERROR,
+            ...(includeDiagnostics
+              ? { model: result.model, diagnosticCode: result.diagnosticCode, build: getBuildInfo() }
+              : {}),
+          },
+          { status: result.status },
+        ),
       );
     }
 
@@ -536,7 +551,8 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json({
+    return withBuildHeaders(
+      NextResponse.json({
       case: result.case,
       responseId: result.responseId,
       requestCompleted: result.requestCompleted,
@@ -546,15 +562,19 @@ export async function POST(request: Request) {
       access: identity.access,
       usage: imageGate.used,
       persistenceFailed,
+      build: getBuildInfo(),
       ...(includeDiagnostics
         ? {
             model: result.model,
             diagnosticCode: result.diagnosticCode,
             correlationId,
+            weatherDebug: result.weatherDebug ?? null,
+            causeDebug: clientSafeCauseDebug(result.causeDebug),
             ...(persistenceDebug ?? persistenceDebugInfo()),
           }
         : {}),
-    });
+      }),
+    );
   } catch (error) {
     if (error instanceof CasePersistenceError) {
       logCasePersistenceError(error, error.table);
@@ -562,17 +582,19 @@ export async function POST(request: Request) {
         error: error.message,
         table: error.table,
       });
-      return NextResponse.json(
-        {
-          case: null,
-          responseId: null,
-          requestCompleted: false,
-          error: FARMER_GENERIC_ERROR,
-          ...(includeDiagnostics
-            ? { model, diagnosticCode: "DATABASE_FAILURE" }
-            : {}),
-        },
-        { status: 503 },
+      return withBuildHeaders(
+        NextResponse.json(
+          {
+            case: null,
+            responseId: null,
+            requestCompleted: false,
+            error: FARMER_GENERIC_ERROR,
+            ...(includeDiagnostics
+              ? { model, diagnosticCode: "DATABASE_FAILURE", build: getBuildInfo() }
+              : {}),
+          },
+          { status: 503 },
+        ),
       );
     }
     logOps("openai_failure", {
@@ -588,17 +610,19 @@ export async function POST(request: Request) {
         : /unsupported|mime|file type/i.test(messageText)
           ? FARMER_PHOTO_UNSUPPORTED
           : FARMER_GENERIC_ERROR;
-    return NextResponse.json(
-      {
-        case: null,
-        responseId: null,
-        requestCompleted: false,
-        error: farmerError,
-        ...(includeDiagnostics
-          ? { model, diagnosticCode: "OPENAI_REQUEST_FAILED" }
-          : {}),
-      },
-      { status: /413|too large/i.test(messageText) ? 413 : 502 },
+    return withBuildHeaders(
+      NextResponse.json(
+        {
+          case: null,
+          responseId: null,
+          requestCompleted: false,
+          error: farmerError,
+          ...(includeDiagnostics
+            ? { model, diagnosticCode: "OPENAI_REQUEST_FAILED", build: getBuildInfo() }
+            : {}),
+        },
+        { status: /413|too large/i.test(messageText) ? 413 : 502 },
+      ),
     );
   }
 }

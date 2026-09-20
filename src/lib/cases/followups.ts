@@ -8,6 +8,13 @@ export const FOLLOWUP_OPTIONS = [
   "Worse",
   "Solved",
 ] as const;
+export const FOLLOWED_RECOMMENDATION_PROMPT =
+  "Did you follow the last recommendation?";
+export const FOLLOWED_RECOMMENDATION_OPTIONS = [
+  "Yes, I followed it",
+  "Partly",
+  "Not yet",
+] as const;
 
 export type FollowUpChannel = "in_app" | "notification" | "email" | "whatsapp" | "sms";
 
@@ -63,6 +70,18 @@ export function scheduleFollowUpDate(
   const date = new Date(from);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString();
+}
+
+export function parseFollowedRecommendation(value: string): string | null {
+  const lower = value.trim().toLowerCase();
+  if (lower === "yes" || lower === "yes, i followed it" || lower === "followed") {
+    return "Yes, I followed it";
+  }
+  if (lower === "partly" || lower === "partially") return "Partly";
+  if (lower === "not yet" || lower === "no" || lower === "not yet followed") {
+    return "Not yet";
+  }
+  return null;
 }
 
 export function parseFollowUpOutcome(value: string):

@@ -95,4 +95,21 @@ describe("farmer intent classifier", () => {
     });
     expect(turn.intent).toBe("cashflow");
   });
+
+  it("keeps a crop-problem case when the farmer asks to make sure plants survive", () => {
+    expect(
+      resolveConversationIntent({
+        message: "I really want to make sure my sweet peppers survive.",
+        activeIntent: "crop_problem",
+        activeCrop: "pepper",
+      }).intent,
+    ).toBe("crop_problem");
+    expect(
+      shouldStartNewCase({
+        message: "I really want to make sure my sweet peppers survive.",
+        activeCrop: "pepper",
+        activeIntent: "crop_problem",
+      }),
+    ).toBe(false);
+  });
 });

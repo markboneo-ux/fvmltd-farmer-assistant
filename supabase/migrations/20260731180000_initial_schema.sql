@@ -352,14 +352,31 @@ begin
 end;
 $$;
 
+-- Unique(email) is optional and unrelated to crop-health case state.
+-- Older Preview staff_profiles tables may not have an email column.
+-- CREATE TABLE IF NOT EXISTS does not add missing columns, so only
+-- create this constraint when the column already exists.
 do $$
 begin
-  if not exists (
+  if exists (
     select 1 from pg_constraint where conname = 'staff_profiles_email_key'
   ) then
-    alter table public.staff_profiles
-      add constraint staff_profiles_email_key unique (email);
+    return;
   end if;
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'staff_profiles'
+      and column_name = 'email'
+  ) then
+    return;
+  end if;
+  alter table public.staff_profiles
+    add constraint staff_profiles_email_key unique (email);
+exception
+  when undefined_column then null;
+  when duplicate_object then null;
 end;
 $$;
 

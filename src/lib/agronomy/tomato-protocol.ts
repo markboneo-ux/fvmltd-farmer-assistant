@@ -5,8 +5,10 @@
 import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
 import { ASK_CROP_QUESTION, extractLastCrop } from "@/lib/assistant/crops";
 import { extractCountryFromText } from "@/lib/research/countries";
+import { farmingAreaUniquelyImpliesCountry, lookupFarmingArea } from "@/lib/weather/geocode";
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   extractRegionAndCountry,
   farmerLevelToUserLevel,
   inferFarmerLevel,
@@ -38,8 +40,8 @@ import {
 } from "./case-schema";
 import {
   buildQuestionId,
-  inferQuestionType,
   quickRepliesForType,
+  reconcileQuickReplies,
   type QuestionType,
 } from "./question-types";
 
@@ -142,7 +144,7 @@ const UNSAFE_MIX =
   /\b(mix|mixing|cocktail|tank\s*mix)\b.{0,40}\b(pesticide|insecticide|fungicide|herbicide|chemical)/i;
 
 const LOCATION_QUESTION =
-  /\b(which\s+)?(country|island|district|parish|region|where\s+are\s+you|where\s+is\s+the\s+(farm|field))\b/i;
+  /\b(which\s+)?(country|island|district|parish|region|area)\b|\bwhere\s+are\s+you\s+farming\b|\bwhat area are you farming in\b|\bjust to confirm, are you farming in\b/i;
 
 const CROP_QUESTION =
   /\b(what\s+crop|which\s+crop|is\s+it\s+tomato|pepper\s+or|what\s+are\s+you\s+growing)\b/i;
@@ -195,6 +197,12 @@ export function extractKnownFacts(
   else if (/\bstunt(ed|ing)?\b/.test(lower)) suspectedIssue = "stunting";
   else if (/\b(blight|leaf\s+spot|fungal|cercospora)\b/.test(lower)) {
     suspectedIssue = "foliar fungal disease";
+  } else if (/\bcurl/.test(lower) && /\byellow/.test(lower)) {
+    suspectedIssue = "leaf curl and yellowing";
+  } else if (/\bcurl/.test(lower)) {
+    suspectedIssue = "leaf curl";
+  } else if (/\byellow(ing)?\b/.test(lower) && !/\bspots?\b/.test(lower)) {
+    suspectedIssue = "yellowing";
   }
 
   const problemCategory =
@@ -209,12 +217,14 @@ export function extractKnownFacts(
             : null;
 
   const located = extractRegionAndCountry(rawText);
+  const lookedUp = lookupFarmingArea(rawText, located.country || profile?.country);
   let country: string | null =
-    located.country || extractCountryFromText(rawText) || profile?.country?.trim() || null;
-  let district: string | null = located.region || profile?.district?.trim() || null;
+    located.country || extractCountryFromText(rawText) || lookedUp?.country || profile?.country?.trim() || null;
+  let district: string | null =
+    located.region || lookedUp?.farmingArea || profile?.district?.trim() || null;
   if (!district) {
     const districtMatch = lower.match(
-      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
+      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin|st\s+elizabeth|saint\s+elizabeth|cayo|dennery|christ\s+church)\b/,
     );
     if (districtMatch) district = districtMatch[1];
   }
@@ -283,7 +293,7 @@ export function extractKnownFacts(
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
     asksForProducts:
-      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+(to|should i)\s+spray|spray for\b|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+spray|which\s+spray|spray can i use|what\s+can\s+i\s+(buy|use|spray)|what\s+(to|should i)\s+spray|spray for\b|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
@@ -339,10 +349,14 @@ export function questionAsksForKnownFact(
   }
 
   if (facts.country && LOCATION_QUESTION.test(question)) {
+    if (/\barea\b/i.test(question) && !facts.district) {
+      return false;
+    }
     if (
       /just to confirm/i.test(question) &&
       facts.locationConfidence !== "explicit" &&
-      facts.locationConfidence !== "profile_confirmed"
+      facts.locationConfidence !== "profile_confirmed" &&
+      !farmingAreaUniquelyImpliesCountry(facts.district)
     ) {
       return false;
     }
@@ -509,6 +523,9 @@ export function applyCommercialSafetyGuards(
 
   if (isInterviewStage(stage) || !hasWaterOrRootEvidence(payload)) {
     safeActionsNow = safeActionsNow.filter((action) => {
+      if (/\b(do not|don't|hold|avoid|until we know|not yet)\b/i.test(action) && /\bfertiliz/i.test(action)) {
+        return true;
+      }
       if (PREMATURE_FERTILIZER.test(action)) {
         ensureAvoid(
           "Do not apply fertilizer solely because plants look stunted — check water, drainage and roots first.",
@@ -541,13 +558,16 @@ export function applyCommercialSafetyGuards(
       confidence: options.knownFacts.locationConfidence,
       asksForProducts: options.knownFacts.asksForProducts,
       researchNeed: options.researchNeed,
+      farmingArea: options.knownFacts.district,
     });
     if (options.knownFacts.country && !needsCountry && !needsConfirm) {
       nextQuestion = "";
     } else if (needsConfirm && options.knownFacts.country) {
       nextQuestion = `Just to confirm, are you farming in ${options.knownFacts.country}?`;
     } else if (!options.knownFacts.country && nextQuestion !== ASK_COUNTRY_QUESTION) {
-      nextQuestion = ASK_COUNTRY_QUESTION;
+      nextQuestion = /\barea\b/i.test(nextQuestion)
+        ? ASK_FARMING_AREA_QUESTION
+        : ASK_COUNTRY_QUESTION;
     }
   }
   if (
@@ -585,7 +605,7 @@ export function applyCommercialSafetyGuards(
     if (isInterviewStage(payload.stage)) {
       nextQuestion =
         photoRecommended
-          ? "Can you upload a clear photo of the damage?"
+          ? "Can you send a close photo of the damaged leaf plus a whole plant?"
           : nextQuestion && !questionAsksForKnownFact(nextQuestion, options.knownFacts)
             ? nextQuestion
             : "";
@@ -658,32 +678,21 @@ export function applyCommercialSafetyGuards(
   let questionId = "";
 
   if (nextQuestion) {
-    const inferred = inferQuestionType(nextQuestion);
-    questionType =
-      payload.questionType && payload.questionType !== "open"
-        ? (payload.questionType as QuestionType)
-        : inferred;
-
-    // Prefer deterministic type inference for common patterns.
-    if (inferred !== "open") {
-      questionType = inferred;
-    }
+    const reconciled = reconcileQuickReplies({
+      question: nextQuestion,
+      quickReplies: payload.quickReplies,
+      questionType: payload.questionType,
+    });
+    questionType = reconciled.questionType;
+    quickReplies = reconciled.quickReplies;
 
     const questionNumber =
       options.questionsAskedBeforeThisTurn +
       (isInterviewStage(stage) ? 1 : 0);
-    // Always bind questionId to the resolved questionType so stale buttons cannot linger.
     questionId = buildQuestionId(
       questionType || "open",
       Math.max(1, questionNumber),
     );
-
-    const typedReplies = quickRepliesForType(questionType || "open");
-    if (typedReplies.length > 0) {
-      quickReplies = typedReplies;
-    } else {
-      quickReplies = [];
-    }
   } else if (isGuidanceStage(stage)) {
     questionType = "guidance_followup";
     questionId = buildQuestionId("guidance_followup", options.questionsAskedBeforeThisTurn);
@@ -844,7 +853,7 @@ function buildForcedQuickGuidance(
 
   if (facts.suddenWilt) {
     return {
-      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — treat it as urgent triage.`,
+      preliminaryAssessment: `Preliminary guidance: Sudden wilting in ${crop} can signal serious root, vascular disease, or chemical injury. This is not a final diagnosis — take the next steps carefully.`,
       severity: "high",
       checksToday: [
         "Cut a wilted stem lengthwise and check for brown streaks inside",
@@ -868,7 +877,7 @@ function buildForcedQuickGuidance(
   if (facts.suspectedIssue === "whiteflies") {
     const cropLabel = facts.crop ?? "the crop";
     return {
-      preliminaryAssessment: `Preliminary guidance: Whiteflies on ${cropLabel} are a likely concern based on your report. Severity and next steps depend on how widespread the infestation is and whether leaves show sticky residue, mould, or yellowing. This is preliminary only.`,
+      preliminaryAssessment: `You already found whiteflies on ${cropLabel}. That is an observed pest, not heat or wind damage. Next we need how many there are, whether leaves are sticky or black, and whether this is a hotspot or most of the field. This is preliminary only.`,
       severity:
         facts.distributionHint === "most of field" ? "high" : payload.severity === "unknown" ? "medium" : payload.severity,
       checksToday: [
@@ -878,8 +887,8 @@ function buildForcedQuickGuidance(
       ],
       safeActionsNow: [
         "Scout early morning when whiteflies are easier to see",
-        "Remove heavily infested lower leaves if plants are strong enough",
-        "Avoid spraying the same product repeatedly without checking results",
+        "Compare a few plants versus patches versus most of the field",
+        "Avoid spraying the same insecticide group repeatedly",
       ],
       actionsToAvoid: [
         "Do not mix insecticides into unapproved cocktails",
@@ -892,7 +901,7 @@ function buildForcedQuickGuidance(
 
   if (facts.stuntedWholeField || facts.distributionHint === "most of field") {
     return {
-      preliminaryAssessment: `Preliminary guidance: Whole-field ${issue} on ${crop} needs cautious triage. Check water, drainage and roots before adding fertilizer. This is not a confirmed diagnosis.`,
+      preliminaryAssessment: `Preliminary guidance: Whole-field ${issue} on ${crop} needs a careful look. Check water, drainage and roots before adding fertilizer. This is not a confirmed diagnosis.`,
       severity: "high",
       checksToday: [
         "Compare low spots and higher ground for wet or dry soil",

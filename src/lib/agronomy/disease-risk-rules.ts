@@ -65,7 +65,7 @@ export const TOMATO_FOLIAR_DISEASE_RULE_V1: DiseaseRiskRule = {
     "improve airflow where practical",
     "avoid unnecessary overhead irrigation",
     "verify disease before applying a fungicide",
-    "remove severely affected lower leaves if plants are strong enough",
+    "if only a few leaves are badly affected they can be removed carefully; avoid heavy defoliation until the cause is clearer",
   ],
   baseRiskLevel: "high",
   escalateToUrgentWhen: {

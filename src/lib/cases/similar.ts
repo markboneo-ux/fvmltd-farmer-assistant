@@ -15,6 +15,7 @@
 import { listCropCases, listOutcomes, logCasePersistenceBackend } from "./store";
 import type { CropCaseRecord, SimilarCaseMatch, SimilarCaseQuery } from "./types";
 import { trustedCaseForSimilarity } from "@/lib/trends/ingest";
+import { learningWeight } from "@/lib/assistant/knowledge";
 
 export const SIMILAR_CASE_UNIQUE_FARMER_THRESHOLD = 2;
 export const SIMILAR_CASE_SYMPTOM_THRESHOLD = 1;
@@ -72,7 +73,13 @@ export async function getSimilarCases(
   const scored = allCases
     .map((item) => {
       const trusted = trustedCaseForSimilarity(item, casesWithOutcome.has(item.id));
-      if (!trusted) {
+      const weight = learningWeight({
+        agronomistReviewed: item.agronomistReviewed,
+        diagnosisConfirmed: item.diagnosisConfirmed,
+        knowledgeState: item.knowledgeState,
+        outcome: casesWithOutcome.has(item.id) ? "improved" : null,
+      });
+      if (!trusted && weight < 8) {
         return { caseId: item.id, score: 0, reasons: [] as string[], farmerFacingSummary: "" };
       }
       if (!sameCrop(currentCrop, item.crop)) {
@@ -98,6 +105,10 @@ export async function getSimilarCases(
       if (casesWithOutcome.has(item.id)) {
         score += 25;
         reasons.push("recorded outcome");
+      }
+      if (!item.agronomistReviewed && !item.diagnosisConfirmed && !casesWithOutcome.has(item.id)) {
+        score += 2;
+        reasons.push("unconfirmed AI case");
       }
       if (
         query.district &&

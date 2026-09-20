@@ -3,6 +3,8 @@ import {
   inferQuestionType,
   quickRepliesForType,
   QUICK_REPLIES_BY_TYPE,
+  reconcileQuickReplies,
+  repliesMatchQuestion,
 } from "./question-types";
 
 describe("question-types deterministic quick replies", () => {
@@ -36,5 +38,27 @@ describe("question-types deterministic quick replies", () => {
   it("returns no buttons for unsupported open questions", () => {
     expect(inferQuestionType("What variety are you growing?")).toBe("open");
     expect(quickRepliesForType("open")).toEqual([]);
+  });
+
+  it("derives lesion-appearance chips from the exact follow-up, not stale location chips", () => {
+    const question = "Are the spots small with dark centres or do they have rings?";
+    expect(inferQuestionType(question)).toBe("lesion_appearance");
+    expect(repliesMatchQuestion(question, QUICK_REPLIES_BY_TYPE.symptom_location)).toBe(
+      false,
+    );
+    const reconciled = reconcileQuickReplies({
+      question,
+      quickReplies: QUICK_REPLIES_BY_TYPE.symptom_location,
+      questionType: "symptom_location",
+    });
+    expect(reconciled.questionType).toBe("lesion_appearance");
+    expect(reconciled.quickReplies).toEqual([
+      "Small dark-centred spots",
+      "Rings / target-like spots",
+      "Water-soaked spots",
+      "Something else",
+      "Not sure",
+    ]);
+    expect(reconciled.quickReplies.join(" ")).not.toMatch(/Lower leaves/);
   });
 });

@@ -2,9 +2,11 @@ import type { KnownFarmerFacts } from "./tomato-protocol";
 import { ASK_CROP_QUESTION } from "@/lib/assistant/crops";
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   countryReliableForLocalFacts,
   type LocationConfidence,
 } from "@/lib/assistant/farmer-context";
+import { farmingAreaUniquelyImpliesCountry, shouldAskFarmingArea } from "@/lib/weather/geocode";
 
 export type WorkingCaseFacts = {
   crop: string | null;
@@ -73,13 +75,16 @@ export function highestValueMissingQuestion(options: {
   asksForProducts?: boolean;
   photoRecommended?: boolean;
   diagnostic?: boolean;
+  weatherNeeded?: boolean;
+  weatherIsCentral?: boolean;
 }): string {
   const { working } = options;
   if (options.diagnostic && !working.crop) return ASK_CROP_QUESTION;
 
   if (
     options.asksForProducts &&
-    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown")
+    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown") &&
+    !farmingAreaUniquelyImpliesCountry(working.region)
   ) {
     if (working.country) {
       return `Just to confirm, are you farming in ${working.country}?`;
@@ -87,10 +92,25 @@ export function highestValueMissingQuestion(options: {
     return ASK_COUNTRY_QUESTION;
   }
 
+  if (
+    shouldAskFarmingArea({
+      farmingArea: working.region,
+      district: working.region,
+      country: working.country,
+      weatherNeeded: options.weatherNeeded,
+      weatherIsCentral: options.weatherIsCentral,
+    })
+  ) {
+    return ASK_FARMING_AREA_QUESTION;
+  }
+
   const skipPatternQuestion =
     working.symptom === "whiteflies" ||
     working.symptom === "wilt" ||
-    working.symptom === "stunting";
+    working.symptom === "stunting" ||
+    working.symptom === "leaf curl" ||
+    working.symptom === "leaf curl and yellowing" ||
+    working.symptom === "yellowing";
 
   if (
     options.diagnostic &&
@@ -107,7 +127,8 @@ export function highestValueMissingQuestion(options: {
 
   if (
     options.asksForProducts &&
-    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown")
+    !countryReliableForLocalFacts(options.locationConfidence ?? "unknown") &&
+    !farmingAreaUniquelyImpliesCountry(working.region)
   ) {
     return working.country
       ? `Just to confirm, are you farming in ${working.country}?`

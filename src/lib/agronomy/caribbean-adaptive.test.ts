@@ -256,7 +256,9 @@ describe("adaptive Caribbean assistant", () => {
       join(process.cwd(), "src/components/ChatAssistantMessage.tsx"),
       "utf8",
     );
-    expect(chat).toMatch(/Sources used \(/);
+    expect(chat).toMatch(/admittedCauses/);
+    expect(chat).not.toMatch(/payload\.likelyCauses/);
+    expect(chat).not.toMatch(/payload\.rankedCauses/);
     expect(chat).toMatch(/<details>/);
     expect(chat).not.toMatch(/<details\s+open/);
     expect(chat).toMatch(/Checked /);

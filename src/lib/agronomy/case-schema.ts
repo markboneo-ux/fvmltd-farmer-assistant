@@ -8,6 +8,8 @@ import type { RankedCause } from "./causes";
 import type { DiagnosisConfidence } from "./diagnosis-confidence";
 import type { PesticideCheck, WebCitation, WebSourceCitation } from "@/lib/research/types";
 import { isQuestionType, type QuestionType } from "./question-types";
+import type { CropHealthCaseState } from "./crop-health-state";
+import type { AgronomicMode } from "./case-modes";
 
 export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
 export type CaseMode = (typeof CASE_MODES)[number];
@@ -120,6 +122,22 @@ export type AgronomicCasePayload = {
   weatherBrief?: string | null;
   webSources?: WebSourceCitation[];
   likelyCauses?: string[];
+  /** Server-only: ungated model cause labels, never rendered. */
+  rawModelCauses?: string[];
+  /** Server-only canonical list after evidence gating — the only list the UI may render. */
+  admittedCauses?: Array<
+    RankedCause & {
+      id?: string;
+      evidenceSource:
+        | "farmer_report"
+        | "photo_finding"
+        | "weather_support"
+        | "prior_confirmed_case_fact";
+      evidenceFact: string;
+    }
+  >;
+  allowedCauseIds?: string[];
+  admittedCauseIds?: string[];
   diagnosisWhy?: string | null;
   whatWouldChangeDiagnosis?: string[];
   monitorNext?: string | null;
@@ -128,6 +146,12 @@ export type AgronomicCasePayload = {
   diagnosisConfidence?: DiagnosisConfidence | null;
   sourceVerificationLine?: string | null;
   sourcesCollapsed?: boolean;
+  /** Engine-only structured crop-health state. */
+  cropHealthState?: CropHealthCaseState | null;
+  askFarmingArea?: boolean;
+  agronomicMode?: AgronomicMode | null;
+  /** Farmer-facing spray section when the user asked what to spray. */
+  sprayGuidanceText?: string | null;
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
@@ -168,6 +192,9 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
         "drainage",
         "production_system",
         "symptom_location",
+        "lesion_appearance",
+        "insect_presence",
+        "leaf_age_pattern",
         "recent_spray",
         "photo_request",
         "guidance_followup",
@@ -323,7 +350,24 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     weatherRelevance: "omit",
     weatherBrief: null,
     webSources: [],
-    likelyCauses: asStringArray(data.likelyCauses),
+    rawModelCauses: [
+      ...asStringArray(data.likelyCauses),
+      ...asStringArray(
+        Array.isArray(data.rankedCauses)
+          ? data.rankedCauses
+              .map((item) =>
+                typeof item === "string"
+                  ? item
+                  : item && typeof item === "object" && "label" in item && typeof (item as { label: unknown }).label === "string"
+                    ? (item as { label: string }).label
+                    : "",
+              )
+              .filter(Boolean)
+          : [],
+      ),
+    ],
+    admittedCauses: [],
+    likelyCauses: [],
     diagnosisWhy: asTrimmedString(data.diagnosisWhy) || null,
     whatWouldChangeDiagnosis: asStringArray(data.whatWouldChangeDiagnosis),
     monitorNext: asTrimmedString(data.monitorNext) || null,
@@ -332,6 +376,9 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     diagnosisConfidence: null,
     sourceVerificationLine: null,
     sourcesCollapsed: true,
+    cropHealthState: null,
+    askFarmingArea: false,
+    sprayGuidanceText: asTrimmedString(data.sprayGuidanceText) || null,
   };
 }
 

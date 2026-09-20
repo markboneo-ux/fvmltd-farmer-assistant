@@ -12,6 +12,8 @@ import {
 } from "@/lib/cases/store";
 import {
   FOLLOWUP_OPTIONS,
+  FOLLOWED_RECOMMENDATION_OPTIONS,
+  FOLLOWED_RECOMMENDATION_PROMPT,
   followUpPromptForCase,
   FOLLOWUP_PROMPT,
   parseFollowUpOutcome,
@@ -49,7 +51,9 @@ export async function GET(request: Request) {
       const record = first ? await getCropCase(first.caseId) : null;
       return NextResponse.json({
         prompt: record ? followUpPromptForCase(record) : FOLLOWUP_PROMPT,
+        followedPrompt: FOLLOWED_RECOMMENDATION_PROMPT,
         options: FOLLOWUP_OPTIONS,
+        followedOptions: FOLLOWED_RECOMMENDATION_OPTIONS,
         followups: dueOnly ? (first ? [first] : []) : due,
         due: first,
         channels: ["in_app"],
@@ -66,7 +70,9 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({
       prompt: followUpPromptForCase(owned),
+      followedPrompt: FOLLOWED_RECOMMENDATION_PROMPT,
       options: FOLLOWUP_OPTIONS,
+      followedOptions: FOLLOWED_RECOMMENDATION_OPTIONS,
       followups: await listFollowups(caseId),
       channels: ["in_app"],
       plannedChannels: ["notification", "email", "whatsapp", "sms"],
@@ -123,6 +129,7 @@ export async function POST(request: Request) {
       if (current) {
         await updateCaseFromConversation(saved.caseId, current.farmerProblemText, {
           caseStatus: outcome === "worse" ? "in_progress" : "resolved",
+          needsReview: outcome === "worse" ? true : current.needsReview,
         });
       }
     }

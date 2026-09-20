@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ASK_COUNTRY_QUESTION,
+  ASK_FARMING_AREA_QUESTION,
   extractCountryName,
   extractRegionAndCountry,
   farmerContextFromText,
@@ -138,6 +139,7 @@ describe("farmer country and region", () => {
       }),
     ).toBe(false);
     expect(ASK_COUNTRY_QUESTION).toMatch(/country/i);
+    expect(ASK_FARMING_AREA_QUESTION).toBe("What area are you farming in?");
   });
 });
 
