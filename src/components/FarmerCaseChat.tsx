@@ -52,6 +52,8 @@ type ChatMessage = {
   local?: boolean;
   similarCaseNote?: string;
   causeDebug?: CauseRankingDebug | null;
+  buildShortSha?: string | null;
+  vercelEnv?: string | null;
 };
 
 type CaseApiPayload = {
@@ -71,6 +73,12 @@ type CaseApiPayload = {
   persistenceFailed?: boolean;
   weatherDebug?: unknown;
   causeDebug?: CauseRankingDebug | null;
+  build?: {
+    sha?: string | null;
+    shortSha?: string | null;
+    branch?: string | null;
+    vercelEnv?: string | null;
+  };
 };
 
 type FarmerCaseChatProps = {
@@ -406,6 +414,8 @@ export function FarmerCaseChat({
               ? payload.similarCaseHint
               : undefined,
           causeDebug: payload.causeDebug ?? null,
+          buildShortSha: payload.build?.shortSha ?? null,
+          vercelEnv: payload.build?.vercelEnv ?? null,
         },
       ]);
 
@@ -834,6 +844,9 @@ export function FarmerCaseChat({
                           Developer diagnostics
                         </summary>
                         <div className="mt-2 space-y-1 font-mono">
+                          {message.vercelEnv === "preview" && message.buildShortSha ? (
+                            <p>build: {message.buildShortSha}</p>
+                          ) : null}
                           <p>model: {message.model || "—"}</p>
                           <p>
                             time:{" "}
@@ -853,6 +866,18 @@ export function FarmerCaseChat({
                             {message.casePayload.internalMissingInformation.join(
                               ", ",
                             ) || "—"}
+                          </p>
+                          <p>
+                            allowedCauseIds:{" "}
+                            {(message.causeDebug?.allowedCauseIds ??
+                              message.casePayload.allowedCauseIds ??
+                              []).join(" | ") || "—"}
+                          </p>
+                          <p>
+                            admittedCauseIds:{" "}
+                            {(message.causeDebug?.admittedCauseIds ??
+                              message.casePayload.admittedCauseIds ??
+                              []).join(" | ") || "—"}
                           </p>
                           <p>
                             extractedSymptoms:{" "}

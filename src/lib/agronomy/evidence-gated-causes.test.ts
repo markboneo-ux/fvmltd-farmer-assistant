@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import "@/lib/agronomy/farmer-pipeline";
 import { extractKnownFacts } from "./tomato-protocol";
 import { extractObservedEvidence } from "./evidence-hierarchy";
 import { rankDiagnosticCauses } from "./causes";

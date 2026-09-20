@@ -99,6 +99,14 @@ import {
   type WeatherRelevanceLevel,
   type WeatherRiskOption,
 } from "./case-schema";
+import {
+  parseStructuredReasoning,
+  pipelineDebug,
+  runFarmerCausePipeline,
+  shouldUseStructuredCausePipeline,
+  structuredReasoningInstructions,
+  STRUCTURED_REASONING_JSON_SCHEMA,
+} from "./farmer-pipeline";
 import { buildCaseSystemInstructions } from "./system-instructions";
 import {
   shouldInvokeProductTool,
@@ -668,23 +676,22 @@ function attachCropHealthState(
     },
   );
   const admitted = contracted.admittedCauses ?? [];
-  const finalVisibleCauses = admitted.map((cause) => cause.label);
-  const causeDebug: CauseRankingDebug = {
+  const pipeline = runFarmerCausePipeline({
+    facts,
+    evidence,
+    previousState,
+    hasPhotos,
+    payload: contracted,
+    modelJson: payload,
+  });
+  const causeDebug = pipelineDebug(pipeline, {
     stage: "final",
-    extractedSymptoms: evidence.symptoms,
     rawModelCauses,
     playbookSelectedCauses: playbook?.likelyCauses ?? [],
     preGateRankedCauses,
-    admittedCauses: finalVisibleCauses,
     sprayIntent: Boolean(facts.asksForProducts),
     pesticideTarget: admittedHasPesticideTarget(admitted),
-    finalVisibleCauses,
-    lesionEvidence: gated.debug.lesionEvidence,
-    observedSymptoms: evidence.symptoms,
-    photoFindings: gated.debug.photoFindings,
-    causes: gated.debug.causes,
-    rejected: gated.debug.rejected,
-  };
+  });
   logCauseDebug(causeDebug, "final");
   console.info(
     "[fvm-first-turn-debug]",
@@ -1330,6 +1337,19 @@ export async function runAgronomicCase(options: {
     photoFindings: previousState?.photoFindings,
   });
   const turnMode = agronomicModeFor({ evidence: turnEvidence, facts: knownFacts });
+  const useStructuredPipeline = shouldUseStructuredCausePipeline({
+    intent: classified.intent,
+    facts: knownFacts,
+    evidence: turnEvidence,
+  });
+  const promptPipeline = useStructuredPipeline
+    ? runFarmerCausePipeline({
+        facts: knownFacts,
+        evidence: turnEvidence,
+        previousState,
+        hasPhotos: images.length > 0,
+      })
+    : null;
   let rankedCauses: ReturnType<typeof rankDiagnosticCauses> = isDiagnosticIntent(classified.intent)
     ? gateRankedCausesForTurn({
         ranked: rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
@@ -1555,9 +1575,15 @@ export async function runAgronomicCase(options: {
         webResearchUsed: Boolean(research?.used),
       }),
     ),
-    rankedCauses: rankedCausesForPrompt(rankedCauses, {
-      observedPest: turnEvidence.observedPestLabel,
-    }),
+    rankedCauses: promptPipeline
+      ? structuredReasoningInstructions({
+          allowedCauseIds: promptPipeline.allowedCauseIds,
+          admittedCauseIds: promptPipeline.admittedCauseIds,
+          observations: promptPipeline.observations,
+        })
+      : rankedCausesForPrompt(rankedCauses, {
+          observedPest: turnEvidence.observedPestLabel,
+        }),
     researchNotes: [
       research ? researchNotesForPrompt(research) : "",
       isDiagnosticIntent(classified.intent)
@@ -1581,9 +1607,11 @@ export async function runAgronomicCase(options: {
   const textFormat = {
     format: {
       type: "json_schema" as const,
-      name: "agronomic_case_response",
+      name: useStructuredPipeline ? "farmer_structured_reasoning" : "agronomic_case_response",
       strict: true,
-      schema: CASE_RESPONSE_JSON_SCHEMA as unknown as Record<string, unknown>,
+      schema: (useStructuredPipeline
+        ? STRUCTURED_REASONING_JSON_SCHEMA
+        : CASE_RESPONSE_JSON_SCHEMA) as unknown as Record<string, unknown>,
     },
   };
 
@@ -1606,9 +1634,15 @@ export async function runAgronomicCase(options: {
       allowedCrops: turn.allowedCrops,
       askForCrop: turn.askForCrop,
     }),
-    rankedCausesForPrompt(rankedCauses, {
-      observedPest: turnEvidence.observedPestLabel,
-    }),
+    promptPipeline
+      ? structuredReasoningInstructions({
+          allowedCauseIds: promptPipeline.allowedCauseIds,
+          admittedCauseIds: promptPipeline.admittedCauseIds,
+          observations: promptPipeline.observations,
+        })
+      : rankedCausesForPrompt(rankedCauses, {
+          observedPest: turnEvidence.observedPestLabel,
+        }),
     research ? researchNotesForPrompt(research) : "",
     askForCountry
       ? 'Country is required for this local question. Ask: "What country are you farming in?" Give general agronomy only until the country is known. Do not use Trinidad information for another country.'
@@ -1686,7 +1720,7 @@ export async function runAgronomicCase(options: {
     }
 
     const rawText = response.output_text?.trim() ?? "";
-    if (!rawText) {
+    if (!rawText && !useStructuredPipeline) {
       logReason("OPENAI_REQUEST_FAILED", { model, empty: true });
       return {
         ok: false,
@@ -1748,11 +1782,48 @@ export async function runAgronomicCase(options: {
         // Safety last so the playbook cannot re-enable a generic photo ask.
         return applyCommercialSafetyGuards(next, safetyOptions);
       };
-      const shapePayload = (text: string) =>
-        applyPlaybookAndGuards(parseCasePayload(extractJsonObject(text)));
+      const parseModelJson = (text: string): AgronomicCasePayload => {
+        const raw = extractJsonObject(text);
+        if (useStructuredPipeline) {
+          const stub = assistantPayloadFromText({
+            text: " ",
+            intent: classified.intent,
+            questionCategory: classified.questionCategory,
+            country: knownFacts.country,
+            district: knownFacts.district,
+          });
+          const reasoning = parseStructuredReasoning(raw);
+          if (reasoning) {
+            return {
+              ...stub,
+              stage: "assessment",
+              preliminaryAssessment: " ",
+              checksToday: reasoning.checks,
+              safeActionsNow: reasoning.immediateActions,
+              nextQuestion: reasoning.nextQuestion,
+              photoRecommended: reasoning.photoRequest,
+              admittedCauseIds: reasoning.admittedCauseIds,
+              rawModelCauses: reasoning.admittedCauseIds,
+            };
+          }
+          try {
+            return parseCasePayload(raw);
+          } catch {
+            return stub;
+          }
+        }
+        return parseCasePayload(raw);
+      };
+      const shapePayload = (text: string) => applyPlaybookAndGuards(parseModelJson(text));
 
       parsed = shapePayload(rawText);
-      if (needsDiagnosisRewrite(parsed, { intent: classified.intent, facts: knownFacts })) {
+      const structuredParsed = useStructuredPipeline
+        ? parseStructuredReasoning(extractJsonObject(rawText))
+        : null;
+      if (
+        !structuredParsed &&
+        needsDiagnosisRewrite(parsed, { intent: classified.intent, facts: knownFacts })
+      ) {
         try {
           const rewriteResponse = await createResponse({
             ...baseParams,
@@ -1882,6 +1953,15 @@ export async function runAgronomicCase(options: {
         };
       }
     } catch (parseError) {
+      if (useStructuredPipeline) {
+        parsed = assistantPayloadFromText({
+          text: " ",
+          intent: classified.intent,
+          questionCategory: classified.questionCategory,
+          country: knownFacts.country,
+          district: knownFacts.district,
+        });
+      } else {
       logReason("OPENAI_REQUEST_FAILED", {
         model,
         parseFailed: true,
@@ -1897,6 +1977,7 @@ export async function runAgronomicCase(options: {
         model: response.model || model,
         requestCompleted: true,
       };
+      }
     }
 
     const questionsAsked =
@@ -1921,6 +2002,7 @@ export async function runAgronomicCase(options: {
         ranked: rankedCauses,
         hasPhotos: images.length > 0,
         previousState,
+        serverOwnedDiagnosis: useStructuredPipeline,
       },
     );
     const attached = attachCropHealthState(

@@ -127,6 +127,7 @@ export type AgronomicCasePayload = {
   /** Server-only canonical list after evidence gating — the only list the UI may render. */
   admittedCauses?: Array<
     RankedCause & {
+      id?: string;
       evidenceSource:
         | "farmer_report"
         | "photo_finding"
@@ -135,6 +136,8 @@ export type AgronomicCasePayload = {
       evidenceFact: string;
     }
   >;
+  allowedCauseIds?: string[];
+  admittedCauseIds?: string[];
   diagnosisWhy?: string | null;
   whatWouldChangeDiagnosis?: string[];
   monitorNext?: string | null;

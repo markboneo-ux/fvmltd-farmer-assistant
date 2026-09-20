@@ -304,6 +304,8 @@ export function applyQualityCorrection(
     ranked?: RankedCause[];
     hasPhotos?: boolean;
     previousState?: CropHealthCaseState | null;
+    /** Structured allowlist pipeline owns farmer-visible diagnosis copy. */
+    serverOwnedDiagnosis?: boolean;
   },
 ): AgronomicCasePayload {
   const facts = options.facts;
@@ -391,6 +393,7 @@ export function applyQualityCorrection(
   }
 
   if (
+    !options.serverOwnedDiagnosis &&
     playbook?.why &&
     (/could be heat|root-zone stress|nutrient imbalance or watering|water regularly|balanced fertilizer|generic pepper|pots or in the ground/i.test(
       next.preliminaryAssessment,
@@ -544,6 +547,7 @@ export function applyQualityCorrection(
   }
 
   if (
+    !options.serverOwnedDiagnosis &&
     playbook &&
     !spotsObserved &&
     next.checksToday.some((item) => /pale[- ]centr|water[\s-]?soaked|cercospora|frogeye|if a spray is needed|greasy|mancozeb|chlorothalonil/i.test(item))
@@ -551,6 +555,7 @@ export function applyQualityCorrection(
     next = { ...next, checksToday: playbook.checks };
   }
   if (
+    !options.serverOwnedDiagnosis &&
     playbook &&
     !spotsObserved &&
     next.safeActionsNow.some((item) => /pale[- ]centr|water[\s-]?soaked|cercospora|if a spray is needed|mancozeb|chlorothalonil|copper spray|greasy/i.test(item))
@@ -558,6 +563,7 @@ export function applyQualityCorrection(
     next = { ...next, safeActionsNow: playbook.actionsToday };
   }
   if (
+    !options.serverOwnedDiagnosis &&
     playbook &&
     !spotsObserved &&
     next.actionsToAvoid.some((item) => /pale[- ]centr|water[\s-]?soaked|cercospora|if a spray is needed|mancozeb|chlorothalonil|greasy/i.test(item))

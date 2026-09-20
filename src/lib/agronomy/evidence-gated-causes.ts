@@ -8,6 +8,7 @@ import type { AgronomicCasePayload } from "./case-schema";
 import type { CropHealthCaseState, SuspectedCauseEntry } from "./crop-health-state";
 import type { ObservedEvidence } from "./evidence-hierarchy";
 import type { KnownFarmerFacts } from "./tomato-protocol";
+import type { CauseId, PipelineObservations } from "./cause-catalog";
 
 export const CAUSE_EVIDENCE_SOURCES = [
   "farmer_report",
@@ -19,6 +20,7 @@ export const CAUSE_EVIDENCE_SOURCES = [
 export type CauseEvidenceSource = (typeof CAUSE_EVIDENCE_SOURCES)[number];
 
 export type GatedCause = RankedCause & {
+  id?: CauseId | string;
   evidenceSource: CauseEvidenceSource;
   evidenceFact: string;
 };
@@ -46,6 +48,11 @@ export type CauseRankingDebug = {
   photoFindings: string[];
   causes: CauseAdmission[];
   rejected: Array<{ label: string; reason: string }>;
+  observations?: PipelineObservations;
+  allowedCauseIds?: CauseId[];
+  admittedCauseIds?: CauseId[];
+  discardedCauseIds?: string[];
+  pipeline?: "structured_allowlist";
 };
 
 export const HOLD_FERTILIZER =
@@ -585,6 +592,44 @@ export function logCauseDebug(debug: CauseRankingDebug, stage?: CauseRankingDebu
   console.info("[fvm-cause-debug]", JSON.stringify(payload));
 }
 
+const HTTP_FORBIDDEN_CAUSE =
+  /\b(cercospora|frogeye|bacterial leaf spot|fungal leaf spot|septoria|early blight|pale[- ]centr|greasy|water[\s-]?soaked|mancozeb|chlorothalonil)\b/i;
+
+function httpSafeCauseToken(label: string, lesionEvidence: boolean): boolean {
+  if (!label.trim()) return false;
+  if (HTTP_FORBIDDEN_CAUSE.test(label)) return lesionEvidence;
+  if (
+    /^(CERCOSPORA|BACTERIAL_LEAF_SPOT|FUNGAL_LEAF_SPOT|SEPTORIA|EARLY_BLIGHT)$/i.test(
+      label.trim(),
+    )
+  ) {
+    return lesionEvidence;
+  }
+  return true;
+}
+
+/**
+ * FarmerCaseChat / HTTP debug must not reintroduce discarded lesion names
+ * on cases with no lesion evidence. Full dumps stay in server logs.
+ */
+export function clientSafeCauseDebug(
+  debug: CauseRankingDebug | null | undefined,
+): CauseRankingDebug | null {
+  if (!debug) return null;
+  const keep = (label: string) => httpSafeCauseToken(label, debug.lesionEvidence);
+  return {
+    ...debug,
+    rawModelCauses: debug.rawModelCauses.filter(keep),
+    playbookSelectedCauses: (debug.playbookSelectedCauses ?? []).filter(keep),
+    preGateRankedCauses: (debug.preGateRankedCauses ?? []).filter(keep),
+    discardedCauseIds: debug.lesionEvidence
+      ? (debug.discardedCauseIds ?? []).filter(keep)
+      : [],
+    rejected: debug.lesionEvidence ? debug.rejected.filter((item) => keep(item.label)) : [],
+    causes: debug.causes.filter((item) => item.admitted && keep(item.label)),
+  };
+}
+
 export function photoEvidenceNarrative(options: {
   findings: string[];
   admitted: GatedCause[];
@@ -757,201 +802,38 @@ function diagnosisFromAdmitted(options: {
   return body;
 }
 
+export type AdmittedCauseContractOptions = {
+  admitted: GatedCause[];
+  rawModelCauses: string[];
+  evidence: ObservedEvidence;
+  facts: KnownFarmerFacts;
+  hasPhotos?: boolean;
+  previousState?: CropHealthCaseState | null;
+  modelJson?: unknown;
+};
+
+type AdmittedCauseContractFn = (
+  payload: AgronomicCasePayload,
+  options: AdmittedCauseContractOptions,
+) => AgronomicCasePayload;
+
+let admittedCauseContractImpl: AdmittedCauseContractFn | null = null;
+
+/** Registered by the structured allowlist pipeline. Avoids an import cycle. */
+export function setAdmittedCauseContractImpl(fn: AdmittedCauseContractFn) {
+  admittedCauseContractImpl = fn;
+}
+
 /**
- * Last farmer-visible contract: only admittedCauses may be rendered or passed
- * into playbooks, spray logic, disconfirmers, and cause cards.
+ * Last farmer-visible contract: server-admitted cause IDs only.
+ * Model prose is never copied into the farmer UI.
  */
 export function applyAdmittedCauseContract(
   payload: AgronomicCasePayload,
-  options: {
-    admitted: GatedCause[];
-    rawModelCauses: string[];
-    evidence: ObservedEvidence;
-    facts: KnownFarmerFacts;
-    hasPhotos?: boolean;
-    previousState?: CropHealthCaseState | null;
-  },
+  options: AdmittedCauseContractOptions,
 ): AgronomicCasePayload {
-  const findings = sanitizePhotoFindings([
-    ...(options.previousState?.photoFindings ?? []),
-    ...options.evidence.photoEvidence,
-  ]);
-  const photoUncertain = photoFindingsAreUncertain(findings, options.hasPhotos);
-  let lesion = hasLesionEvidence({
-    evidence: options.evidence,
-    facts: options.facts,
-    state: options.previousState,
-    photoFindings: findings,
-    hasPhotos: options.hasPhotos,
-  });
-  if (photoUncertain) lesion = false;
-
-  const admitted = enforceAdmittedInvariants(options.admitted, { lesionEvidence: lesion });
-  const pesticideTarget = admittedHasPesticideTarget(admitted);
-  const allowSpray = Boolean(options.facts.asksForProducts) && pesticideTarget;
-  const allowDestruction = farmerConsideringDestruction(options.facts.rawText);
-  const curlYellow = isPepperCurlYellowCase({
-    facts: options.facts,
-    evidence: options.evidence,
-    crop: options.facts.crop,
-  });
-
-  const clean = (value: string) =>
-    stripForbiddenVisibleLanguage(value, {
-      lesionEvidence: lesion,
-      allowSpray,
-      allowDestruction,
-    });
-
-  const stillLeaks = (value: string | null | undefined) => {
-    if (!value?.trim()) return false;
-    if (allowSpray && lesion) return false;
-    if (!lesion && containsUngatedLesionLeak(value)) return true;
-    if (
-      !allowSpray &&
-      /\bif a spray is needed|mancozeb|chlorothalonil|copper spray/i.test(value)
-    ) {
-      return true;
-    }
-    return false;
-  };
-
-  const photoLine = options.hasPhotos
-    ? photoEvidenceNarrative({
-        findings,
-        admitted,
-        lesionEvidence: lesion,
-      })
-    : null;
-
-  const diagnosisWhy = clean(
-    diagnosisFromAdmitted({
-      admitted,
-      photoLine,
-      curlYellow,
-      fallbackWhy: payload.diagnosisWhy || payload.preliminaryAssessment,
-      photoUncertain,
-      lesionEvidence: lesion,
-    }),
-  );
-
-  let preliminaryAssessment = clean(payload.preliminaryAssessment);
-  if (curlYellow || photoUncertain || stillLeaks(preliminaryAssessment) || stillLeaks(payload.preliminaryAssessment)) {
-    preliminaryAssessment = diagnosisWhy;
+  if (!admittedCauseContractImpl) {
+    throw new Error("Structured allowlist pipeline is not registered.");
   }
-
-  let checks = payload.checksToday.map(clean).filter(Boolean);
-  const avoid = payload.actionsToAvoid
-    .map(clean)
-    .filter((item) => item && (allowDestruction || !DESTRUCTION_COPY.test(item)))
-    .filter((item) => !stillLeaks(item));
-
-  let safeActions = payload.safeActionsNow
-    .map(clean)
-    .filter((item) => item && (allowDestruction || !DESTRUCTION_COPY.test(item)))
-    .filter((item) => lesion || !/\b(remove|pick off|strip)\b[\s\S]{0,50}\b(leaves?|leaf)\b/i.test(item))
-    .filter((item) => !stillLeaks(item));
-  if (curlYellow && !safeActions.some((item) => /fertilizer/i.test(item))) {
-    safeActions.push(HOLD_FERTILIZER);
-  }
-
-  const whatWouldChange = admitted
-    .map((cause) => cause.increasesIf)
-    .map(clean)
-    .filter(Boolean)
-    .filter((item) => !stillLeaks(item));
-
-  let nextQuestion = payload.nextQuestion.trim();
-  if (curlYellow && (!nextQuestion || stillLeaks(nextQuestion) || FORBIDDEN_UNGATED_LESION.test(nextQuestion))) {
-    nextQuestion = curlYellowFollowUp({
-      hasPhotos: options.hasPhotos,
-      findings,
-      answered: options.previousState?.answeredDiagnosticQuestions,
-      last: options.previousState?.lastDiagnosticQuestion,
-    });
-  }
-  nextQuestion = clean(nextQuestion);
-
-  if (curlYellow && (checks.length === 0 || checks.some((item) => stillLeaks(item) || /\b(pale|greasy|spot|spray|cercospora|water[\s-]?soaked)\b/i.test(item)))) {
-    checks = [...CURL_YELLOW_CHECKS];
-  }
-  if (curlYellow && (safeActions.length === 0 || safeActions.some((item) => stillLeaks(item)))) {
-    safeActions = [...CURL_YELLOW_ACTIONS];
-  }
-
-  const next: AgronomicCasePayload = {
-    ...payload,
-    rawModelCauses: options.rawModelCauses,
-    admittedCauses: admitted,
-    likelyCauses: admitted.map((cause) => cause.label),
-    rankedCauses: admitted,
-    diagnosisWhy,
-    preliminaryAssessment,
-    whatWouldChangeDiagnosis: whatWouldChange,
-    checksToday: checks,
-    safeActionsNow: safeActions,
-    actionsToAvoid:
-      curlYellow && (avoid.length === 0 || avoid.some((item) => stillLeaks(item)))
-        ? [...CURL_YELLOW_AVOID]
-        : avoid,
-    monitorNext: payload.monitorNext && !stillLeaks(clean(payload.monitorNext))
-      ? clean(payload.monitorNext)
-      : curlYellow
-        ? "Watch whether new growth stays curled and whether more plants join in over 2–3 days."
-        : payload.monitorNext
-          ? clean(payload.monitorNext)
-          : payload.monitorNext,
-    nextQuestion,
-    sprayGuidanceText: allowSpray && payload.sprayGuidanceText ? clean(payload.sprayGuidanceText) : null,
-    verifiedInputOptions: allowSpray ? payload.verifiedInputOptions : [],
-  };
-
-  if (!allowSpray) {
-    next.sprayGuidanceText = null;
-  }
-
-  if (!lesion) {
-    if (next.weatherBrief && stillLeaks(next.weatherBrief)) {
-      next.weatherBrief = null;
-    }
-    next.weatherRisks = (next.weatherRisks ?? []).filter(
-      (risk) =>
-        !stillLeaks(risk.diseaseOrPest) &&
-        !/\b(cercospora|frogeye|leaf[- ]spot|bacterial spot)\b/i.test(risk.diseaseOrPest),
-    );
-    if (curlYellow && next.weatherBrief && /\b(leaf[- ]spot|cercospora|fungal|bacterial)\b/i.test(next.weatherBrief)) {
-      next.weatherBrief = null;
-    }
-  }
-
-  const scrubbedFields: Array<keyof AgronomicCasePayload> = [
-    "preliminaryAssessment",
-    "diagnosisWhy",
-    "nextQuestion",
-    "monitorNext",
-    "sprayGuidanceText",
-    "weatherBrief",
-  ];
-  for (const field of scrubbedFields) {
-    const value = next[field];
-    if (typeof value === "string" && stillLeaks(value)) {
-      if (field === "preliminaryAssessment" || field === "diagnosisWhy") {
-        next[field] = diagnosisWhy as never;
-      } else if (field === "sprayGuidanceText") {
-        next[field] = allowSpray && lesion ? (clean(value) as never) : (null as never);
-      } else if (field === "weatherBrief") {
-        next[field] = null as never;
-      } else {
-        next[field] = clean(value) as never;
-      }
-    }
-  }
-  next.checksToday = next.checksToday.filter((item) => !stillLeaks(item));
-  next.safeActionsNow = next.safeActionsNow.filter((item) => !stillLeaks(item));
-  next.actionsToAvoid = next.actionsToAvoid.filter((item) => !stillLeaks(item));
-  if (curlYellow && next.checksToday.length === 0) next.checksToday = [...CURL_YELLOW_CHECKS];
-  if (curlYellow && next.safeActionsNow.length === 0) next.safeActionsNow = [...CURL_YELLOW_ACTIONS];
-  if (curlYellow && next.actionsToAvoid.length === 0) next.actionsToAvoid = [...CURL_YELLOW_AVOID];
-
-  return next;
+  return admittedCauseContractImpl(payload, options);
 }

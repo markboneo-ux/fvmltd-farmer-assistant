@@ -808,7 +808,7 @@ describe("Couva 3-turn farmer-visible payload (ChatAssistantMessage contract)", 
     expect(visible.toLowerCase()).not.toMatch(/mancozeb|chlorothalonil|copper-based/);
     expect(visible).toMatch(/cannot determine whether lesions, insects, or a nutrient pattern are present/i);
 
-    expect(third.case.rawModelCauses?.join(" ").toLowerCase()).toMatch(/cercospora|bacterial leaf spot/);
+    expect(third.causeDebug?.rawModelCauses.join(" ").toLowerCase()).toMatch(/cercospora|bacterial leaf spot/);
     expect((third.case.admittedCauses ?? []).map((cause) => cause.label).join(" ").toLowerCase()).not.toMatch(
       /cercospora|bacterial leaf spot|fungal leaf spot/,
     );
