@@ -58,6 +58,8 @@ import { logOps } from "@/lib/security/ops-log";
 import { getForecast } from "@/lib/weather/get-forecast";
 import { resolveFarmingArea, shouldAskFarmingArea } from "@/lib/weather/geocode";
 import { summarizeAgronomicWeather } from "./agronomic-weather";
+import type { AgronomicWeatherSignal } from "./agronomic-weather";
+import { emptyWeatherDebug, logWeatherDebug, type WeatherRetrievalDebug } from "./weather-debug";
 import { buildDifferentialDiagnosis, isLowDiagnosticConfidence } from "./differential";
 import {
   mergeCropHealthState,
@@ -66,7 +68,7 @@ import {
 } from "./crop-health-state";
 import { extractObservedEvidence } from "./evidence-hierarchy";
 import { agronomicModeFor, modeAnswerGuide, shouldShowRankedCauses } from "./case-modes";
-import { specificPhotoRequest } from "./photo-request";
+import { specificPhotoRequest, sanitizePhotoQuestion } from "./photo-request";
 import {
   countryKnowledgeHooks,
   countryKnowledgeNotesForPrompt,
@@ -89,6 +91,7 @@ import {
   shouldInvokeWeatherTool,
   weatherRelevanceFor,
 } from "./tool-policy";
+import { rulesForCrop } from "./disease-risk-rules";
 import { applyOutputGuard } from "./output-guard";
 import {
   applyCommercialSafetyGuards,
@@ -120,6 +123,7 @@ export type AgronomicCaseResult =
       diagnosticCode: "AI_READY";
       requestCompleted: true;
       questionsAsked: number;
+      weatherDebug?: WeatherRetrievalDebug;
     }
   | {
       ok: false;
@@ -523,13 +527,21 @@ function attachCropHealthState(
     hasPhotos,
     alreadyRequested: photoAlreadyRequested,
   });
+  const nextQuestion = sanitizePhotoQuestion(payload.nextQuestion, facts);
+  if (nextQuestion !== payload.nextQuestion) {
+    payload = { ...payload, nextQuestion };
+  }
   if (
     payload.photoRecommended &&
     photo &&
-    !payload.nextQuestion.trim() &&
+    (!payload.nextQuestion.trim() || /affected leaf/i.test(payload.nextQuestion)) &&
     !photoAlreadyRequested
   ) {
-    payload = { ...payload, nextQuestion: photo.farmerQuestion, questionType: "photo_request" };
+    payload = {
+      ...payload,
+      nextQuestion: photo.farmerQuestion,
+      questionType: "photo_request",
+    };
   }
   if (
     isLowDiagnosticConfidence(differential.diagnosticConfidence) &&
@@ -580,11 +592,15 @@ async function enrichWithRegionalTools(
   facts: KnownFarmerFacts,
   research: ResearchResult | null,
   intent?: IntentCategory | null,
-): Promise<AgronomicCasePayload> {
+): Promise<{
+  payload: AgronomicCasePayload;
+  weatherDebug: WeatherRetrievalDebug;
+  retrievedWeatherSignals: AgronomicWeatherSignal[];
+}> {
   const country = facts.country?.trim() || "";
   const crop = facts.crop;
   const issue = facts.suspectedIssue || "general crop problem";
-  const relevance = weatherRelevanceFor(facts, intent);
+  const initialRelevance = weatherRelevanceFor(facts, intent);
 
   const geocoded = await resolveFarmingArea({
     farmingArea: facts.district,
@@ -605,7 +621,16 @@ async function enrichWithRegionalTools(
   let productDataAsOf: string | null = null;
   let verifiedInputOptions: VerifiedInputDisplay[] = [];
   let weatherBrief: string | null = payload.weatherBrief ?? null;
-  const weatherRelevance: WeatherRelevanceLevel = relevance;
+  let weatherRelevance: WeatherRelevanceLevel = initialRelevance;
+  let retrievedWeatherSignals: AgronomicWeatherSignal[] = [];
+  let weatherDebug = emptyWeatherDebug({
+    resolvedLocation: {
+      country: resolvedCountry || geocoded?.country || null,
+      farmingArea: resolvedArea,
+      coordinates: geocoded?.coordinates ?? null,
+    },
+    providerResult: shouldFetchWeather ? "skipped" : "skipped",
+  });
 
   if (shouldFetchWeather && (resolvedCountry || geocoded?.coordinates)) {
     try {
@@ -616,11 +641,32 @@ async function enrichWithRegionalTools(
       });
       weatherDataAsOf = forecast.retrievedAt;
       const agronomic = summarizeAgronomicWeather(forecast);
-      if (relevance === "central") {
+      retrievedWeatherSignals = agronomic.signals;
+      weatherDebug = {
+        ...weatherDebug,
+        providerResult: "success",
+        providerName: forecast.provider,
+        recentPeriodAvailable: (forecast.recentDaily?.length ?? 0) > 0,
+        forecastAvailable:
+          (forecast.forecastDaily?.length ?? forecast.daily.length) > 0,
+        signals: [...retrievedWeatherSignals],
+      };
+      const retrievedSupportsDisease =
+        retrievedWeatherSignals.includes("prolonged_wetness") ||
+        retrievedWeatherSignals.includes("disease_pressure");
+      const cropHasWeatherModel = Boolean(crop && rulesForCrop(crop).length > 0);
+      if (
+        weatherRelevance === "supporting" &&
+        retrievedSupportsDisease &&
+        cropHasWeatherModel
+      ) {
+        weatherRelevance = "important";
+      }
+      if (weatherRelevance === "central") {
         weatherBrief = [formatForecastTimingBrief(forecast), agronomic.farmerBrief]
           .filter(Boolean)
           .join(" ");
-      } else if (relevance === "supporting") {
+      } else if (weatherRelevance === "supporting") {
         weatherBrief =
           agronomic.farmerBrief ||
           formatSupportingWeatherNote({
@@ -628,7 +674,7 @@ async function enrichWithRegionalTools(
             heat: forecastLooksHot(forecast),
             rainLikely: (forecast.daily[0]?.rainfallMm ?? 0) >= 2,
           });
-      } else if (relevance === "important") {
+      } else if (weatherRelevance === "important") {
         weatherBrief = agronomic.farmerBrief;
       }
       payload = {
@@ -646,7 +692,7 @@ async function enrichWithRegionalTools(
       if (
         crop &&
         resolvedCountry &&
-        (relevance === "important" || relevance === "central")
+        (weatherRelevance === "important" || weatherRelevance === "central")
       ) {
         const weather = await getWeatherDiseaseRisk({
           country: resolvedCountry,
@@ -671,8 +717,18 @@ async function enrichWithRegionalTools(
           disclaimer: alert.disclaimer,
         }));
       }
-    } catch {
-      // Weather is optional supporting context — never fail the farmer reply.
+    } catch (error) {
+      weatherDebug = {
+        ...weatherDebug,
+        providerResult: "failed",
+        error:
+          error instanceof Error
+            ? error.message.slice(0, 180)
+            : "weather_provider_failed",
+        signals: [],
+      };
+      retrievedWeatherSignals = [];
+      weatherBrief = null;
     }
   }
 
@@ -780,7 +836,7 @@ async function enrichWithRegionalTools(
     };
   }
 
-  if (relevance === "central" && weatherRisks.length > 0) {
+  if (weatherRelevance === "central" && weatherRisks.length > 0) {
     const top = weatherRisks[0];
     for (const check of top.recommendedChecks.slice(0, 2)) {
       if (!payload.checksToday.includes(check)) {
@@ -808,30 +864,36 @@ async function enrichWithRegionalTools(
   };
 
   return {
-    ...payload,
-    regionalContext: emptyRegionalContext({
-      country: resolvedCountry || country || null,
-      district: resolvedArea,
-      productDataAsOf,
-      weatherDataAsOf,
-    }),
-    weatherRisks:
-      relevance === "omit" || relevance === "none" || relevance === "supporting"
-        ? []
-        : weatherRisks,
-    verifiedInputOptions,
-    webCitations: citations,
-    pesticideChecks: research?.pesticideChecks ?? [],
-    researchUsed: Boolean(research?.used),
-    researchFailed: Boolean(research?.failure),
-    weatherRelevance,
-    weatherBrief,
-    webSources,
-    sourceVerificationLine:
-      research?.pesticideAnswer?.verificationLine ??
-      sourceVerificationLine(webSources, country || facts.country),
-    sourcesCollapsed: true,
-    farmerLevel: facts.farmerLevel,
+    payload: {
+      ...payload,
+      regionalContext: emptyRegionalContext({
+        country: resolvedCountry || country || null,
+        district: resolvedArea,
+        productDataAsOf,
+        weatherDataAsOf,
+      }),
+      weatherRisks:
+        weatherRelevance === "omit" ||
+        weatherRelevance === "none" ||
+        weatherRelevance === "supporting"
+          ? []
+          : weatherRisks,
+      verifiedInputOptions,
+      webCitations: citations,
+      pesticideChecks: research?.pesticideChecks ?? [],
+      researchUsed: Boolean(research?.used),
+      researchFailed: Boolean(research?.failure),
+      weatherRelevance,
+      weatherBrief,
+      webSources,
+      sourceVerificationLine:
+        research?.pesticideAnswer?.verificationLine ??
+        sourceVerificationLine(webSources, country || facts.country),
+      sourcesCollapsed: true,
+      farmerLevel: facts.farmerLevel,
+    },
+    weatherDebug,
+    retrievedWeatherSignals,
   };
 }
 
@@ -1074,7 +1136,7 @@ export async function runAgronomicCase(options: {
     text: effectiveMessage,
   });
   const turnMode = agronomicModeFor({ evidence: turnEvidence, facts: knownFacts });
-  const rankedCauses = isDiagnosticIntent(classified.intent)
+  let rankedCauses: ReturnType<typeof rankDiagnosticCauses> = isDiagnosticIntent(classified.intent)
     ? rankDiagnosticCauses(effectiveMessage, {
         crop: knownFacts.crop,
         facts: knownFacts,
@@ -1171,19 +1233,18 @@ export async function runAgronomicCase(options: {
       }),
       turn,
     );
-    const payload = applyOutputGuard(
-      await enrichWithRegionalTools(
-        base,
-        knownFacts,
-        research,
-        classified.intent,
-      ),
-      {
-        userMessage: knownFacts.rawText,
-        crop: knownFacts.crop,
-        allowedCrops: turn.allowedCrops,
-      },
+    const enriched = await enrichWithRegionalTools(
+      base,
+      knownFacts,
+      research,
+      classified.intent,
     );
+    logWeatherDebug(enriched.weatherDebug);
+    const payload = applyOutputGuard(enriched.payload, {
+      userMessage: knownFacts.rawText,
+      crop: knownFacts.crop,
+      allowedCrops: turn.allowedCrops,
+    });
     return {
       ok: true,
       case: payload,
@@ -1192,6 +1253,7 @@ export async function runAgronomicCase(options: {
       diagnosticCode: "AI_READY",
       requestCompleted: true,
       questionsAsked: 0,
+      weatherDebug: enriched.weatherDebug,
     };
   }
 
@@ -1435,6 +1497,15 @@ export async function runAgronomicCase(options: {
     }
 
     let parsed: AgronomicCasePayload;
+    let weatherDebug = emptyWeatherDebug({
+      resolvedLocation: {
+        country: knownFacts.country,
+        farmingArea: knownFacts.district,
+        coordinates: null,
+      },
+      providerResult: options.skipRegionalTools ? "skipped" : "skipped",
+    });
+    let retrievedWeatherSignals: AgronomicWeatherSignal[] = [];
     try {
       const safetyOptions = {
         mode: effectiveMode,
@@ -1515,19 +1586,35 @@ export async function runAgronomicCase(options: {
           (weatherRelevance !== "omit" && weatherRelevance !== "none"));
 
       if (allowTools || research?.used) {
-        parsed = applyOutputGuard(
-          await enrichWithRegionalTools(
-            parsed,
-            knownFacts,
-            research,
-            classified.intent,
-          ),
-          {
-            userMessage: knownFacts.rawText,
-            crop: knownFacts.crop,
-            allowedCrops: turn.allowedCrops,
-          },
+        const enriched = await enrichWithRegionalTools(
+          parsed,
+          knownFacts,
+          research,
+          classified.intent,
         );
+        parsed = applyOutputGuard(enriched.payload, {
+          userMessage: knownFacts.rawText,
+          crop: knownFacts.crop,
+          allowedCrops: turn.allowedCrops,
+        });
+        weatherDebug = enriched.weatherDebug;
+        retrievedWeatherSignals = enriched.retrievedWeatherSignals;
+        if (retrievedWeatherSignals.length > 0 && isDiagnosticIntent(classified.intent)) {
+          const evidenceWithWeather = extractObservedEvidence({
+            facts: knownFacts,
+            text: effectiveMessage,
+            weatherSignals: retrievedWeatherSignals,
+          });
+          rankedCauses.splice(
+            0,
+            rankedCauses.length,
+            ...rankDiagnosticCauses(effectiveMessage, {
+              crop: knownFacts.crop,
+              facts: knownFacts,
+              evidence: evidenceWithWeather,
+            }),
+          );
+        }
       } else {
         const webSources = enrichCitations(
           research?.pesticideAnswer?.sources?.length
@@ -1605,30 +1692,54 @@ export async function runAgronomicCase(options: {
         ? 1
         : 0);
 
+    const weatherSignals = [
+      ...new Set([...turnEvidence.weatherSignals, ...retrievedWeatherSignals]),
+    ];
+    const corrected = applyQualityCorrection(
+      applyOutputGuard(parsed, {
+        userMessage: knownFacts.rawText,
+        crop: knownFacts.crop,
+        allowedCrops: turn.allowedCrops,
+      }),
+      {
+        facts: knownFacts,
+        weatherSignals,
+        ranked: rankedCauses,
+      },
+    );
+    const farmerFacing = attachCropHealthState(
+      corrected,
+      knownFacts,
+      images.length > 0,
+      photoAlreadyRequested,
+    );
+    const usedRetrievedWeather =
+      weatherDebug.providerResult === "success" &&
+      retrievedWeatherSignals.length > 0 &&
+      Boolean(
+        (farmerFacing.weatherBrief &&
+          (farmerFacing.weatherRelevance === "important" ||
+            farmerFacing.weatherRelevance === "central" ||
+            farmerFacing.weatherRelevance === "supporting")) ||
+          /\b(wet|humid|rain|leaf-disease|damp)\b/i.test(
+            `${farmerFacing.diagnosisWhy ?? ""} ${farmerFacing.preliminaryAssessment}`,
+          ),
+      );
+    weatherDebug = {
+      ...weatherDebug,
+      materiallyChangedDiagnosis: usedRetrievedWeather,
+    };
+    logWeatherDebug(weatherDebug);
+
     return {
       ok: true,
-      case: attachCropHealthState(
-        applyQualityCorrection(
-          applyOutputGuard(parsed, {
-            userMessage: knownFacts.rawText,
-            crop: knownFacts.crop,
-            allowedCrops: turn.allowedCrops,
-          }),
-          {
-            facts: knownFacts,
-            weatherSignals: turnEvidence.weatherSignals,
-            ranked: rankedCauses,
-          },
-        ),
-        knownFacts,
-        images.length > 0,
-        photoAlreadyRequested,
-      ),
+      case: farmerFacing,
       responseId: response.id,
       model: response.model || model,
       diagnosticCode: "AI_READY",
       requestCompleted: true,
       questionsAsked,
+      weatherDebug,
     };
   } catch (error) {
     const withCode = error as Error & {

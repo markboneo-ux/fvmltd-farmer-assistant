@@ -134,6 +134,8 @@ export type AgronomicCasePayload = {
   cropHealthState?: CropHealthCaseState | null;
   askFarmingArea?: boolean;
   agronomicMode?: AgronomicMode | null;
+  /** Farmer-facing spray section when the user asked what to spray. */
+  sprayGuidanceText?: string | null;
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */
@@ -174,6 +176,7 @@ export const CASE_RESPONSE_JSON_SCHEMA = {
         "drainage",
         "production_system",
         "symptom_location",
+        "lesion_appearance",
         "recent_spray",
         "photo_request",
         "guidance_followup",
@@ -340,6 +343,7 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     sourcesCollapsed: true,
     cropHealthState: null,
     askFarmingArea: false,
+    sprayGuidanceText: asTrimmedString(data.sprayGuidanceText) || null,
   };
 }
 

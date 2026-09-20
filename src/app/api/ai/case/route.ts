@@ -551,6 +551,7 @@ export async function POST(request: Request) {
             model: result.model,
             diagnosticCode: result.diagnosticCode,
             correlationId,
+            weatherDebug: result.weatherDebug ?? null,
             ...(persistenceDebug ?? persistenceDebugInfo()),
           }
         : {}),

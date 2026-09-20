@@ -4,6 +4,7 @@ import type { AgronomicCasePayload } from "@/lib/agronomy/case-schema";
 import {
   buildFarmerVisibleReply,
   farmerHistoryContent,
+  farmerRenderedAnswer,
   shouldUseDiagnosisLayout,
   stripGuidancePrefix,
 } from "./visible-reply";
@@ -87,5 +88,21 @@ describe("farmer-visible reply", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("includes an If a spray is needed section in the farmer-rendered answer", () => {
+    const text = farmerRenderedAnswer(
+      payload({
+        stage: "assessment",
+        likelyCauses: ["Cercospora leaf spot"],
+        checksToday: ["Look for a yellow halo"],
+        safeActionsNow: ["Keep leaves drier"],
+        diagnosisWhy: "Leaf spots on pepper can be fungal or bacterial.",
+        sprayGuidanceText:
+          "I could not verify a current Grenada registration for this exact use.",
+      }),
+    );
+    expect(text).toMatch(/If a spray is needed/i);
+    expect(text).toMatch(/I could not verify a current Grenada registration for this exact use/);
   });
 });

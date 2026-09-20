@@ -8,6 +8,7 @@ import {
   shouldUseDiagnosisLayout,
   stripGuidancePrefix,
 } from "@/lib/chat/visible-reply";
+import { SPRAY_NEEDED_HEADING } from "@/lib/agronomy/chemical-guidance";
 import type { WebSourceCitation } from "@/lib/research/types";
 
 type ChatAssistantMessageProps = {
@@ -103,6 +104,8 @@ export function ChatAssistantMessage({
   const supportingNote =
     relevance === "supporting" ? payload.weatherBrief || null : null;
   const showProducts = payload.verifiedInputOptions.length > 0;
+  const sprayGuidance = payload.sprayGuidanceText?.trim() || "";
+  const showSpraySection = Boolean(sprayGuidance) || showProducts;
   const uniqueSources: WebSourceCitation[] =
     payload.webSources && payload.webSources.length > 0
       ? payload.webSources
@@ -193,19 +196,24 @@ export function ChatAssistantMessage({
               <BulletList items={payload.actionsToAvoid} />
             </section>
           ) : null}
-          {showProducts ? (
+          {showSpraySection ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
-                If chemical control is needed
+                {SPRAY_NEEDED_HEADING}
               </h3>
-              {payload.verifiedInputOptions.slice(0, 2).map((option) => (
-                <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1 text-sm">
-                  {option.verifiedBrands[0]?.brandName
-                    ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
-                    : option.activeIngredientOrNutrient}
-                  {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
-                </p>
-              ))}
+              {sprayGuidance ? (
+                <p className="mt-1 whitespace-pre-wrap text-sm">{sprayGuidance}</p>
+              ) : null}
+              {showProducts
+                ? payload.verifiedInputOptions.slice(0, 2).map((option) => (
+                    <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1 text-sm">
+                      {option.verifiedBrands[0]?.brandName
+                        ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
+                        : option.activeIngredientOrNutrient}
+                      {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
+                    </p>
+                  ))
+                : null}
             </section>
           ) : null}
           {(payload.whatWouldChangeDiagnosis ?? []).length > 0 ? (
@@ -259,17 +267,27 @@ export function ChatAssistantMessage({
         <p className="text-sm text-muted">{supportingNote}</p>
       ) : null}
 
-      {showProducts && !useDiagnosis ? (
+      {showSpraySection && !useDiagnosis ? (
         <div className="text-sm">
-          {payload.verifiedInputOptions.slice(0, 2).map((option) => (
-            <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1">
-              One locally available option is{" "}
-              {option.verifiedBrands[0]?.brandName
-                ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
-                : option.activeIngredientOrNutrient}
-              {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
-            </p>
-          ))}
+          {sprayGuidance ? (
+            <div className="mt-1">
+              <p className="text-xs font-semibold tracking-wide text-canopy uppercase">
+                {SPRAY_NEEDED_HEADING}
+              </p>
+              <p className="mt-1 whitespace-pre-wrap">{sprayGuidance}</p>
+            </div>
+          ) : null}
+          {showProducts
+            ? payload.verifiedInputOptions.slice(0, 2).map((option) => (
+                <p key={`${option.productType}-${option.activeIngredientOrNutrient}`} className="mt-1">
+                  One locally available option is{" "}
+                  {option.verifiedBrands[0]?.brandName
+                    ? `${option.verifiedBrands[0].brandName}, containing ${option.activeIngredientOrNutrient}`
+                    : option.activeIngredientOrNutrient}
+                  {option.registrationStatus ? ` (${option.registrationStatus})` : ""}.
+                </p>
+              ))
+            : null}
         </div>
       ) : null}
 

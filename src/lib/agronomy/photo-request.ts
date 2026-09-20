@@ -10,6 +10,9 @@ export type PhotoRequest = {
   farmerQuestion: string;
 };
 
+export const WHITEFLY_UNDERSIDE_PHOTO =
+  "Send a close photo of the underside of an affected leaf";
+
 export function specificPhotoRequest(options: {
   facts: Pick<
     KnownFarmerFacts,
@@ -51,10 +54,7 @@ export function specificPhotoRequest(options: {
     issue === "leaf holes" ||
     /\b(white\s*fl|aphid|thrips|mite|underside|sticky|sooty)\b/.test(text)
   ) {
-    return pick(
-      "underside_of_leaf",
-      "A close photo of the underside of a leaf would help — show how many whiteflies there are and whether there is sticky residue or black mould.",
-    );
+    return pick("underside_of_leaf", WHITEFLY_UNDERSIDE_PHOTO);
   }
 
   if (
@@ -113,4 +113,28 @@ export function isGenericPhotoAsk(text: string): boolean {
       text,
     ) && !/\b(underside|whole plant|roots?|stem|cut fruit|field|beds?|lesion)\b/i.test(text)
   );
+}
+
+function mentionsWhitefly(facts: Pick<KnownFarmerFacts, "rawText" | "suspectedIssue">): boolean {
+  const text = `${facts.rawText} ${facts.suspectedIssue ?? ""}`.toLowerCase();
+  return /\bwhite\s*fl/.test(text) || facts.suspectedIssue === "whiteflies";
+}
+
+/** Prefer an underside leaf photo when whiteflies were observed. */
+export function sanitizePhotoQuestion(
+  question: string,
+  facts: Pick<KnownFarmerFacts, "rawText" | "suspectedIssue">,
+): string {
+  if (!question.trim() || !mentionsWhitefly(facts)) return question;
+  if (!/\b(photo|photograph|image|picture)\b/i.test(question)) return question;
+  if (/\bunderside\b/i.test(question) && /affected leaf/i.test(question)) {
+    return WHITEFLY_UNDERSIDE_PHOTO;
+  }
+  if (/\b(front of an affected leaf|affected leaf|damaged leaf|close photo of (an |the )?affected)\b/i.test(question)) {
+    return WHITEFLY_UNDERSIDE_PHOTO;
+  }
+  if (isGenericPhotoAsk(question) || /\b(affected leaf|leaf image|leaf photo)\b/i.test(question)) {
+    return WHITEFLY_UNDERSIDE_PHOTO;
+  }
+  return question;
 }

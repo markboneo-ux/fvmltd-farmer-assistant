@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isGenericPhotoAsk, specificPhotoRequest } from "./photo-request";
+import { isGenericPhotoAsk, sanitizePhotoQuestion, specificPhotoRequest } from "./photo-request";
 import { extractKnownFacts } from "./tomato-protocol";
 
 describe("specific photo requests", () => {
@@ -15,7 +15,9 @@ describe("specific photo requests", () => {
     const facts = extractKnownFacts("Tomato whiteflies in Trinidad");
     const request = specificPhotoRequest({ facts });
     expect(request?.view).toBe("underside_of_leaf");
-    expect(request?.farmerQuestion.toLowerCase()).toMatch(/underside/);
+    expect(request?.farmerQuestion).toBe(
+      "Send a close photo of the underside of an affected leaf",
+    );
   });
 
   it("does not treat a specific stem photo ask as a generic photo ask", () => {
@@ -23,5 +25,17 @@ describe("specific photo requests", () => {
     expect(
       isGenericPhotoAsk("Can you send a photo of a wilted plant with a stem cut open lengthwise?"),
     ).toBe(false);
+  });
+
+  it("rewrites a generic affected-leaf photo ask to the underside for whiteflies", () => {
+    const facts = extractKnownFacts(
+      "Whiteflies under my Scotch bonnet leaves in St Elizabeth.",
+    );
+    expect(
+      sanitizePhotoQuestion(
+        "Can you send a close photo of the front of an affected leaf, including any spots?",
+        facts,
+      ),
+    ).toBe("Send a close photo of the underside of an affected leaf");
   });
 });

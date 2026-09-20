@@ -19,7 +19,7 @@ import { isGuidanceStage, type AgronomicCasePayload } from "./case-schema";
 import { assignDiagnosisConfidence } from "./diagnosis-confidence";
 import { questionAsksForKnownFact, type KnownFarmerFacts } from "./tomato-protocol";
 import { extractWorkingCase, highestValueMissingQuestion } from "./working-case";
-import { specificPhotoRequest } from "./photo-request";
+import { specificPhotoRequest, sanitizePhotoQuestion } from "./photo-request";
 import { shouldAskFarmingArea } from "@/lib/weather/geocode";
 import { extractObservedEvidence, genericCauseList } from "./evidence-hierarchy";
 import { cropPlaybookFor, rankCropCauses } from "./crop-differentials";
@@ -507,13 +507,13 @@ export function pickHighestValueFollowUp(options: {
   }
 
   if (payload.photoRecommended) {
-    return (
+    const photoAsk =
       specificPhotoRequest({
         facts,
         alreadyRequested: false,
       })?.farmerQuestion ??
-      "Can you send a close photo of the affected leaf plus a whole plant?"
-    );
+      "Can you send a close photo of the affected leaf plus a whole plant?";
+    return sanitizePhotoQuestion(photoAsk, facts);
   }
 
   return "";

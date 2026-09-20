@@ -11,9 +11,11 @@ import {
 } from "./evidence-hierarchy";
 import { sanitizeCertaintyLanguage, overclaimsConfirmation } from "./certainty-language";
 import { buildSprayGuidance, hasUnverifiedCountryPesticideClaim } from "./chemical-guidance";
-import { sanitizeDestructiveActions } from "@/lib/cases/destructive";
+import { sanitizeDestructiveActions, softenDestructiveWording } from "@/lib/cases/destructive";
 import type { AgronomicWeatherSignal } from "./agronomic-weather";
 import type { RankedCause } from "./causes";
+import { reconcileQuickReplies, repliesMatchQuestion } from "./question-types";
+import { sanitizePhotoQuestion } from "./photo-request";
 
 const GENERIC_DIAGNOSIS =
   /\b(could be heat|heat, nutrient|heat, watering|may be a disease|monitor it|check your plants|could be many things|looks like stress)\b/i;
@@ -141,7 +143,8 @@ If the farmer named a pest (for example whiteflies), manage that pest. Do not ra
 If crop and symptom are known, use crop-relevant causes, not generic root-zone / nutrient / foliar-or-insect cards.
 Write ONE coherent answer. Do not repeat the same guidance in paragraphs and again as lists.
 Include: what is most likely and why; other possibilities only if unresolved; what to check now; what to do today; spray options only if asked or justified, with verified vs unverified clearly separated; weather only if it changes the ranking or a decision; what would change the assessment; one next question or one specific photo.
-Do not recommend removing leaves or plants at low confidence. Do not say a streaming test confirms bacterial wilt.
+Do not recommend destroying plants or heavy defoliation at low confidence. If only a few leaves are badly affected, they can be removed carefully; avoid heavy defoliation until the cause is clearer.
+Do not say a streaming test confirms bacterial wilt.
 Do not lead with weather. Do not add product sales language. Return JSON only.`;
 
 const DUPLICATE_HEADINGS =
@@ -206,6 +209,21 @@ export function evaluateConsistency(options: {
 
   if (hasUnverifiedCountryPesticideClaim(payload.preliminaryAssessment)) {
     reasons.push("unverified_pesticide_claim");
+  }
+
+  if (facts?.asksForProducts) {
+    const rendered = [
+      payload.sprayGuidanceText ?? "",
+      payload.preliminaryAssessment,
+      payload.diagnosisWhy ?? "",
+    ].join(" ");
+    if (!/if a spray is needed|could not verify a current|verified for this country/i.test(rendered)) {
+      reasons.push("spray_question_unanswered");
+    }
+  }
+
+  if (payload.nextQuestion.trim() && !repliesMatchQuestion(payload.nextQuestion, payload.quickReplies)) {
+    reasons.push("mismatched_quick_replies");
   }
 
   if (overclaimsConfirmation(text, { labOrStaff: evidence.labOrStaffResult })) {
@@ -319,10 +337,15 @@ export function applyQualityCorrection(
     rankedCauses = extras.length === 0 ? [] : extras.slice(0, 3);
   }
 
-  const cleanedActions = sanitizeDestructiveActions(next.safeActionsNow, {
-    observedFacts: evidence.explicitObservations,
-    confidence: mapConfidence(next.diagnosisConfidence),
-  });
+  const cleanedActions = sanitizeDestructiveActions(
+    next.safeActionsNow.map((item) =>
+      softenDestructiveWording(item, mapConfidence(next.diagnosisConfidence)),
+    ),
+    {
+      observedFacts: evidence.explicitObservations,
+      confidence: mapConfidence(next.diagnosisConfidence),
+    },
+  );
   let safeActionsNow = cleanedActions.actions;
   if (cleanedActions.blocked && cleanedActions.farmerMessage) {
     if (!next.preliminaryAssessment.includes(cleanedActions.farmerMessage)) {
@@ -349,7 +372,35 @@ export function applyQualityCorrection(
     safeActionsNow,
     diagnosisWhy: next.diagnosisWhy || playbook?.why || next.diagnosisWhy,
   };
-  next.preliminaryAssessment = stripDuplicateSections(next.preliminaryAssessment, next);
+
+  if (
+    playbook?.why &&
+    evidence.weatherSignals.includes("prolonged_wetness") &&
+    !/\b(wet|rain|damp|humid|leaf-disease)\b/i.test(next.diagnosisWhy || "")
+  ) {
+    next = { ...next, diagnosisWhy: playbook.why };
+  }
+
+  const confidence = mapConfidence(next.diagnosisConfidence);
+  next.preliminaryAssessment = softenDestructiveWording(
+    stripDuplicateSections(next.preliminaryAssessment, next),
+    confidence,
+  );
+  if (next.diagnosisWhy) {
+    next = {
+      ...next,
+      diagnosisWhy: softenDestructiveWording(next.diagnosisWhy, confidence),
+    };
+  }
+  next = {
+    ...next,
+    weatherRisks: next.weatherRisks.map((risk) => ({
+      ...risk,
+      preventiveActions: risk.preventiveActions.map((item) =>
+        softenDestructiveWording(item, confidence),
+      ),
+    })),
+  };
 
   if (
     next.weatherBrief &&
@@ -375,16 +426,26 @@ export function applyQualityCorrection(
       verifiedInputs: next.verifiedInputOptions,
       pesticideChecks: next.pesticideChecks,
     });
-    if (
-      spray &&
-      !/could not verify a current|verified for this country/i.test(next.preliminaryAssessment)
-    ) {
-      next = {
-        ...next,
-        preliminaryAssessment: `${next.preliminaryAssessment}\n\n${spray.farmerText}`.trim(),
-      };
+    if (spray) {
+      next = { ...next, sprayGuidanceText: spray.farmerText };
     }
   }
+
+  next = {
+    ...next,
+    nextQuestion: sanitizePhotoQuestion(next.nextQuestion, facts),
+  };
+
+  const reconciled = reconcileQuickReplies({
+    question: next.nextQuestion,
+    quickReplies: next.quickReplies,
+    questionType: next.questionType,
+  });
+  next = {
+    ...next,
+    questionType: reconciled.questionType,
+    quickReplies: reconciled.quickReplies,
+  };
 
   if (hasUnverifiedCountryPesticideClaim(next.preliminaryAssessment) && facts.country) {
     next = {

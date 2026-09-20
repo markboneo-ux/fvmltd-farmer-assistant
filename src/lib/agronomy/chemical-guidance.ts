@@ -25,9 +25,11 @@ const WHITEFLY_CLASSES = [
   "A locally labelled whitefly insecticide, rotating IRAC groups if you do spray",
 ];
 
+export const SPRAY_NEEDED_HEADING = "If a spray is needed";
+
 export function couldNotVerifyUse(country: string, crop?: string | null): string {
-  const cropBit = crop?.trim() ? ` on ${crop.trim()}` : "";
-  return `I could not verify a current ${country} registration for this exact use${cropBit}.`;
+  void crop;
+  return `I could not verify a current ${country} registration for this exact use.`;
 }
 
 export function generalClassesFor(options: {

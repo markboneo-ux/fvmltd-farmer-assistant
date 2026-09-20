@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import { emptyRegionalContext, type AgronomicCasePayload } from "./case-schema";
 import { rankDiagnosticCauses } from "./causes";
 import { agronomicModeFor } from "./case-modes";
@@ -6,11 +6,14 @@ import { extractObservedEvidence } from "./evidence-hierarchy";
 import { applyDiagnosticPlaybook, playbookFor } from "./diagnosis";
 import { applyQualityCorrection, evaluateConsistency } from "./response-quality";
 import { sanitizeCertaintyLanguage, overclaimsConfirmation } from "./certainty-language";
-import { buildSprayGuidance } from "./chemical-guidance";
-import { extractKnownFacts } from "./tomato-protocol";
+import { buildSprayGuidance, SPRAY_NEEDED_HEADING } from "./chemical-guidance";
+import { extractKnownFacts, applyCommercialSafetyGuards } from "./tomato-protocol";
 import { extractLastCrop } from "@/lib/assistant/crops";
 import { runAgronomicCase } from "./runCase";
-import { shouldBlockDestructiveAction } from "@/lib/cases/destructive";
+import { shouldBlockDestructiveAction, SOFT_LEAF_REMOVAL } from "@/lib/cases/destructive";
+import { farmerRenderedAnswer } from "@/lib/chat/visible-reply";
+import { QUICK_REPLIES_BY_TYPE } from "./question-types";
+import { setWeatherProviderForTests, buildMockHumidRainyForecast } from "@/lib/weather/get-forecast";
 
 function payload(overrides: Partial<AgronomicCasePayload> = {}): AgronomicCasePayload {
   return {
@@ -61,6 +64,15 @@ function mockJson(overrides: Partial<AgronomicCasePayload> = {}) {
     }),
   );
 }
+
+beforeEach(() => {
+  setWeatherProviderForTests({
+    name: "mock-humid-rainy",
+    async getForecast(location) {
+      return buildMockHumidRainyForecast(location);
+    },
+  });
+});
 
 describe("evidence hierarchy and modes", () => {
   it("treats an explicit whitefly report as observed pest management", () => {
@@ -115,7 +127,7 @@ describe("evidence hierarchy and modes", () => {
       asksForSpray: true,
       diagnosisConfidence: "possible",
     });
-    expect(spray?.farmerText).toMatch(/could not verify a current Grenada registration/i);
+    expect(spray?.farmerText).toMatch(/I could not verify a current Grenada registration for this exact use/);
     expect(spray?.farmerText.toLowerCase()).toMatch(/general active-ingredient classes/);
     expect(spray?.farmerText.toLowerCase()).not.toMatch(/^check with the regulator\.?$/);
     expect(spray?.localRegistrationVerified).toBe(false);
@@ -209,8 +221,13 @@ describe("live case shaping through runAgronomicCase", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.case.preliminaryAssessment).toMatch(/could not verify a current Grenada registration/i);
-    expect(result.case.preliminaryAssessment.toLowerCase()).toMatch(/not verified/);
+    expect(result.case.sprayGuidanceText).toMatch(
+      /I could not verify a current Grenada registration for this exact use/,
+    );
+    const rendered = farmerRenderedAnswer(result.case);
+    expect(rendered).toMatch(new RegExp(SPRAY_NEEDED_HEADING, "i"));
+    expect(rendered).toMatch(/I could not verify a current Grenada registration for this exact use/);
+    expect(rendered.toLowerCase()).toMatch(/not verified/);
     expect(result.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/cercospora|bacterial/);
   });
 
@@ -273,6 +290,171 @@ describe("live case shaping through runAgronomicCase", () => {
     expect(result.case.preliminaryAssessment.toLowerCase()).toMatch(/whitefl/);
     expect(result.case.preliminaryAssessment.toLowerCase()).not.toMatch(
       /^this could be heat, wind, or weather stress/,
+    );
+  });
+});
+
+describe("preview remaining live-case gaps", () => {
+  it("requires the final rendered Grenada spray answer to contain an If a spray is needed section", async () => {
+    const result = await runAgronomicCase({
+      message: "Sweet peppers in Grenada have leaf spots. What spray can I use?",
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "grenada-rendered",
+        output_text: mockJson({
+          preliminaryAssessment:
+            "Leaf spots on sweet pepper can be Cercospora or a bacterial spot. Do not buy an unverified product yet.",
+          diagnosisWhy:
+            "Leaf spots on sweet pepper can be Cercospora or a bacterial spot. Do not buy an unverified product yet.",
+          likelyCauses: ["Cercospora leaf spot", "Bacterial leaf spot"],
+          checksToday: ["Look for a yellow halo", "Check whether spots are greasy"],
+          safeActionsNow: ["Keep leaves drier if you can"],
+          actionsToAvoid: ["Do not spray an unnamed mix"],
+        }),
+      }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const rendered = farmerRenderedAnswer(result.case);
+    expect(rendered).toMatch(/If a spray is needed/i);
+    expect(rendered).toMatch(/I could not verify a current Grenada registration for this exact use/);
+    expect(rendered).not.toMatch(/^Check with the regulator\.?$/m);
+  });
+
+  it("regenerates only quick replies when the follow-up is about lesion type but chips are symptom location", () => {
+    const question = "Are the spots small with dark centres or do they have rings?";
+    const guarded = applyCommercialSafetyGuards(
+      payload({
+        stage: "assessment",
+        preliminaryAssessment: "On tomato, separate true leaf spots from even yellowing.",
+        nextQuestion: question,
+        questionType: "symptom_location",
+        quickReplies: QUICK_REPLIES_BY_TYPE.symptom_location,
+        likelyCauses: ["Septoria leaf spot", "Early blight"],
+        checksToday: ["Look at the spot centres"],
+        safeActionsNow: ["Hold extra fertilizer"],
+      }),
+      {
+        mode: "quick_help",
+        questionsAskedBeforeThisTurn: 1,
+        knownFacts: extractKnownFacts(
+          "My tomatoes in Couva have yellow spots on the lower leaves after a week of rain.",
+        ),
+        intent: "pest_disease",
+      },
+    );
+    expect(guarded.nextQuestion).toBe(question);
+    expect(guarded.quickReplies).toEqual([
+      "Small dark-centred spots",
+      "Rings / target-like spots",
+      "Water-soaked spots",
+      "Something else",
+      "Not sure",
+    ]);
+    expect(guarded.quickReplies.join(" ")).not.toMatch(/Lower leaves|New leaves|Whole plant/);
+  });
+
+  it("softens leaf-removal wording at low or moderate confidence instead of stripping it", () => {
+    const facts = extractKnownFacts(
+      "My tomatoes in Couva have yellow spots on the lower leaves after a week of rain.",
+    );
+    const corrected = applyQualityCorrection(
+      payload({
+        diagnosisConfidence: "possible",
+        safeActionsNow: ["Remove severely affected leaves if necessary."],
+        preliminaryAssessment: "Remove severely affected leaves if necessary. Then scout the bed.",
+      }),
+      { facts },
+    );
+    expect(corrected.safeActionsNow.join(" ")).toContain(SOFT_LEAF_REMOVAL);
+    expect(corrected.safeActionsNow.join(" ").toLowerCase()).not.toMatch(
+      /remove severely affected leaves/,
+    );
+    expect(
+      `${corrected.preliminaryAssessment} ${corrected.safeActionsNow.join(" ")}`,
+    ).not.toMatch(/remove severely affected leaves if necessary/i);
+  });
+
+  it("uses retrieved Couva weather when the farmer never mentioned rain", async () => {
+    const message =
+      "My tomato leaves in Couva are developing small brown spots on the lower leaves.";
+    expect(message).not.toMatch(/\b(rain|weather|humid|forecast)\b/i);
+    const result = await runAgronomicCase({
+      message,
+      createResponse: async () => ({
+        id: "couva-no-rain",
+        output_text: mockJson({
+          stage: "assessment",
+          preliminaryAssessment:
+            "On tomato, separate true leaf spots from even yellowing. Septoria, early blight, and bacterial spot remain possible.",
+          likelyCauses: ["Septoria leaf spot", "Early blight", "Bacterial spot or speck"],
+          checksToday: ["Look at spot centres", "Check older versus new leaves"],
+          safeActionsNow: ["Keep people from walking through wet plants"],
+          nextQuestion: "Are the spots small with dark centres or do they have rings?",
+        }),
+      }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.weatherDebug?.resolvedLocation.farmingArea).toMatch(/couva/i);
+    expect(result.weatherDebug?.providerResult).toBe("success");
+    expect(result.weatherDebug?.recentPeriodAvailable).toBe(true);
+    expect(result.weatherDebug?.forecastAvailable).toBe(true);
+    expect(result.weatherDebug?.signals.length).toBeGreaterThan(0);
+    expect(result.weatherDebug?.materiallyChangedDiagnosis).toBe(true);
+    expect(result.case.weatherBrief).toMatch(/wet|humid|rain|leaf-disease/i);
+    const rendered = farmerRenderedAnswer(result.case);
+    expect(rendered).toMatch(/wet|humid|rain|leaf-disease|damp/i);
+  });
+
+  it("does not invent weather when retrieval fails", async () => {
+    const { setWeatherProviderForTests } = await import("@/lib/weather/get-forecast");
+    setWeatherProviderForTests({
+      name: "mock-failing",
+      async getForecast() {
+        throw new Error("provider down");
+      },
+    });
+    const result = await runAgronomicCase({
+      message:
+        "My tomato leaves in Couva are developing small brown spots on the lower leaves.",
+      createResponse: async () => ({
+        id: "couva-weather-fail",
+        output_text: mockJson({
+          stage: "assessment",
+          preliminaryAssessment:
+            "On tomato, separate true leaf spots from even yellowing.",
+          likelyCauses: ["Septoria leaf spot", "Early blight"],
+        }),
+      }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.weatherDebug?.providerResult).toBe("failed");
+    expect(result.case.weatherBrief).toBeFalsy();
+    const rendered = farmerRenderedAnswer(result.case);
+    expect(rendered.toLowerCase()).not.toMatch(/after a wet week|the crop has had a stretch of wet weather/);
+  });
+
+  it("asks Jamaica whitefly cases for an underside leaf photo, not a generic affected-leaf image", async () => {
+    const result = await runAgronomicCase({
+      message: "Whiteflies under my Scotch bonnet leaves in St Elizabeth.",
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "jam-photo",
+        output_text: mockJson({
+          preliminaryAssessment: "You already found whiteflies.",
+          photoRecommended: true,
+          nextQuestion:
+            "Can you send a close photo of the front of an affected leaf, including any spots?",
+          likelyCauses: ["Whiteflies (observed)"],
+        }),
+      }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.case.nextQuestion).toBe(
+      "Send a close photo of the underside of an affected leaf",
     );
   });
 });

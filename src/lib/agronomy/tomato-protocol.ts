@@ -40,8 +40,8 @@ import {
 } from "./case-schema";
 import {
   buildQuestionId,
-  inferQuestionType,
   quickRepliesForType,
+  reconcileQuickReplies,
   type QuestionType,
 } from "./question-types";
 
@@ -667,32 +667,21 @@ export function applyCommercialSafetyGuards(
   let questionId = "";
 
   if (nextQuestion) {
-    const inferred = inferQuestionType(nextQuestion);
-    questionType =
-      payload.questionType && payload.questionType !== "open"
-        ? (payload.questionType as QuestionType)
-        : inferred;
-
-    // Prefer deterministic type inference for common patterns.
-    if (inferred !== "open") {
-      questionType = inferred;
-    }
+    const reconciled = reconcileQuickReplies({
+      question: nextQuestion,
+      quickReplies: payload.quickReplies,
+      questionType: payload.questionType,
+    });
+    questionType = reconciled.questionType;
+    quickReplies = reconciled.quickReplies;
 
     const questionNumber =
       options.questionsAskedBeforeThisTurn +
       (isInterviewStage(stage) ? 1 : 0);
-    // Always bind questionId to the resolved questionType so stale buttons cannot linger.
     questionId = buildQuestionId(
       questionType || "open",
       Math.max(1, questionNumber),
     );
-
-    const typedReplies = quickRepliesForType(questionType || "open");
-    if (typedReplies.length > 0) {
-      quickReplies = typedReplies;
-    } else {
-      quickReplies = [];
-    }
   } else if (isGuidanceStage(stage)) {
     questionType = "guidance_followup";
     questionId = buildQuestionId("guidance_followup", options.questionsAskedBeforeThisTurn);

@@ -28,7 +28,7 @@ const EXPLICIT_WEATHER =
   /\b(weather|forecast|rainfall|rainy|humidity|humid weather|drought|dew point|leaf wetness)\b/i;
 
 const DISEASE_PRESSURE =
-  /\b(leaf\s+(spot|spots|blight)|blight|cercospora|mildew|mould|mold|sooty|anthracnose|rust\b|downy|powdery)\b/i;
+  /\b(leaf\s+(spot|spots|blight)|blight|cercospora|mildew|mould|mold|sooty|anthracnose|rust\b|downy|powdery|(brown|yellow|dark|small)\s+spots?)\b/i;
 
 const WATER_STRESS =
   /\b(waterlog|water-?logged|wet\s+soil|standing water|flood|drainage|overwater|underwater|wilt(ing)? after rain|heavy rain|too (wet|dry))\b/i;
@@ -43,7 +43,7 @@ const MARKET_OR_PRICE =
   /\b(price|sell(ing)?|wholesale|retail|farmgate|market|how much (should|can) i (sell|charge)|cashflow|cash flow)\b/i;
 
 const FOLIAR_SYMPTOM =
-  /\b(leaf\s+spot|spots? after (rain|heavy rain)|lesion|water-?soaked|target spot|blight)\b/i;
+  /\b(leaf\s+spots?|(brown|yellow|dark|small|black)\s+spots?|spots?\s+on\s+(the\s+)?(lower\s+|upper\s+|older\s+)?(leaves|leaf)|lesion|water-?soaked|target\s+spot|blight)\b/i;
 
 function sprayTimingQuestion(text: string): boolean {
   return (
@@ -120,6 +120,11 @@ export function assessWeatherRelevance(options: {
   if (foliar && cropHasWeatherModel && (water || /\brain|humid|wet\b/i.test(combined))) {
     reasons.push("crop_symptom_weather_biology");
     return { level: "important", reasons };
+  }
+
+  if (foliar && cropHasWeatherModel) {
+    reasons.push("crop_foliar_fetch_weather");
+    return { level: "supporting", reasons };
   }
 
   if (foliar) {
