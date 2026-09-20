@@ -653,7 +653,6 @@ function pepperCurlYellowPlaybook(
       ],
       avoid: [
         "Do not jump to a spray until insects, old versus new leaves, and spread are checked",
-        "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
       ],
       whatWouldChange: [
         "Insects or sticky residue under new leaves would raise aphids or whiteflies",

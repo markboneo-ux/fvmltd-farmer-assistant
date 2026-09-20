@@ -59,7 +59,7 @@ export const HOLD_FERTILIZER =
   "Do not add extra fertilizer yet until we know whether older or newer leaves are affected.";
 
 export const UNDERSIDE_INSECT_QUESTION =
-  "Can you check the underside of the curled new leaves for tiny insects or mites?";
+  "Can you check the underside of the curled new leaves for tiny insects, mites, webbing, cast skins, or sticky residue?";
 
 export const OLD_VS_NEW_YELLOW_QUESTION =
   "Is the yellowing mainly on the newest curled leaves or the older lower leaves?";
@@ -109,7 +109,6 @@ export const CURL_YELLOW_ACTIONS = [
 
 export const CURL_YELLOW_AVOID = [
   "Do not jump to a spray until insects, old versus new leaves, and spread are checked",
-  "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
 ];
 
 export function mentionsPepper(text: string | null | undefined): boolean {

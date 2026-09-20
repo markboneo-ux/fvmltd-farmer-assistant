@@ -70,6 +70,9 @@ vi.mock("@/lib/openai/client", () => ({
             immediateActions: [
               "If a spray is needed, use Mancozeb- or chlorothalonil-class protectants",
               "Copper spray classes for bacterial leaf spot",
+              "Gently wash the leaves with water to remove any potential mites or aphids.",
+              "Ensure balanced nutrition, particularly nitrogen and magnesium.",
+              "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
             ],
             nextQuestion: "Are the spots round with a pale centre, or greasy and water-soaked?",
             photoRequest: false,
@@ -210,8 +213,13 @@ describe("POST /api/ai/case Couva HTTP integration", () => {
     expect(allowed.join(" ")).not.toMatch(/CERCOSPORA|BACTERIAL_LEAF_SPOT|FUNGAL_LEAF_SPOT/);
     expect(admitted.join(" ")).not.toMatch(/CERCOSPORA|BACTERIAL_LEAF_SPOT|FUNGAL_LEAF_SPOT/);
     expect(admitted.join(" ")).toMatch(/APHIDS|NUTRIENT_PATTERN|MITES/);
-    expect(body.case.nextQuestion.toLowerCase()).toMatch(/underside|insect|mite/);
+    expect(body.case.nextQuestion.toLowerCase()).toMatch(/underside of the curled new leaves/);
+    expect(body.case.nextQuestion.toLowerCase()).toMatch(/tiny insects|mites|webbing|cast skins|sticky residue/);
+    expect((body.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
     expect(body.case.sprayGuidanceText).toBeFalsy();
+    const visibleLower = visible.toLowerCase();
+    expect(visibleLower).not.toMatch(/wash the leaves|ensure balanced nutrition|nitrogen and magnesium/);
+    expect((visibleLower.match(/do not add extra fertilizer/g) ?? []).length).toBeLessThanOrEqual(1);
     expect(body.causeDebug?.observations?.symptoms?.join(" ").toLowerCase()).toMatch(/curl|yellow/);
     expect(body.causeDebug?.observations?.symptoms?.join(" ").toLowerCase()).not.toMatch(/\bspots?\b/);
   });

@@ -432,6 +432,72 @@ function uniqueLines(items: string[]): string[] {
   return out;
 }
 
+const WASH_UNOBSERVED_PEST =
+  /\b(wash|rinse|hose)\b.{0,50}\b(leaves?|foliage|plants?|undersides?)\b|\b(leaves?|foliage|plants?)\b.{0,50}\b(wash|rinse|hose)\b/i;
+
+const FEED_BEFORE_EVIDENCE =
+  /\bensure balanced nutrition\b|\bparticularly nitrogen and magnesium\b|\bnitrogen and magnesium\b|\breceiving balanced nutrition\b|\bfeed with (a )?balanced\b|\bapply extra (fertilizer|nitrogen|magnesium)\b/i;
+
+const FERTILIZER_HOLD_LINE =
+  /\b(do not add extra fertilizer|hold extra fertilizer|do not change fertilizer|not to (add extra )?fertilizer|until we know whether older or newer leaves)\b/i;
+
+function isWashUnobservedPest(line: string): boolean {
+  return WASH_UNOBSERVED_PEST.test(line);
+}
+
+function isPrematureFeedAdvice(line: string): boolean {
+  return FEED_BEFORE_EVIDENCE.test(line);
+}
+
+function isFertilizerHoldLine(line: string): boolean {
+  return FERTILIZER_HOLD_LINE.test(line);
+}
+
+function splitSentences(text: string): string[] {
+  return (text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [text])
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/** Drop wash-until-observed, premature feeding, and fertilizer-hold copy from prose. Hold stays in actions only. */
+function sanitizeCurlYellowProse(text: string, insectsObserved: boolean): string {
+  return splitSentences(text)
+    .filter((sentence) => {
+      if (!insectsObserved && isWashUnobservedPest(sentence)) return false;
+      if (isPrematureFeedAdvice(sentence)) return false;
+      if (isFertilizerHoldLine(sentence)) return false;
+      return true;
+    })
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dropWashAndPrematureFeed(lines: string[], insectsObserved: boolean): string[] {
+  return lines.filter((line) => {
+    if (!insectsObserved && isWashUnobservedPest(line)) return false;
+    if (isPrematureFeedAdvice(line)) return false;
+    return true;
+  });
+}
+
+function keepFertilizerHoldOnce(options: {
+  actions: string[];
+  avoid: string[];
+  checks: string[];
+}): { actions: string[]; avoid: string[]; checks: string[] } {
+  const actions = uniqueLines(options.actions);
+  const hasInActions = actions.some(isFertilizerHoldLine);
+  const actionsWithHold = hasInActions
+    ? actions
+    : uniqueLines([...actions, HOLD_FERTILIZER]);
+  return {
+    actions: actionsWithHold,
+    avoid: options.avoid.filter((line) => !isFertilizerHoldLine(line)),
+    checks: options.checks.filter((line) => !isFertilizerHoldLine(line)),
+  };
+}
+
 export function renderFarmerPayloadFromPipeline(
   payload: AgronomicCasePayload,
   pipeline: FarmerPipelineResult,
@@ -516,21 +582,31 @@ export function renderFarmerPayloadFromPipeline(
   }
 
   if (curlYellowCase(pipeline.observations) && !pipeline.observations.lesionEvidence) {
-    if (checks.length === 0 || checks.some((item) => mentionsUnallowedCause(item, allowed))) {
-      checks = [...CURL_YELLOW_CHECKS];
-    }
-    if (actions.length === 0 || actions.some((item) => mentionsUnallowedCause(item, allowed))) {
-      actions = [...CURL_YELLOW_ACTIONS];
-    }
-    avoid = [...CURL_YELLOW_AVOID];
-    if (!nextQuestion || mentionsUnallowedCause(nextQuestion, allowed) || (nextQuestion.match(/\?/g) ?? []).length !== 1) {
+    const insectsObserved = pipeline.observations.insectsReported;
+    checks = dropWashAndPrematureFeed([...CURL_YELLOW_CHECKS], insectsObserved);
+    actions = dropWashAndPrematureFeed([...CURL_YELLOW_ACTIONS], insectsObserved);
+    avoid = dropWashAndPrematureFeed([...CURL_YELLOW_AVOID], insectsObserved);
+    const held = keepFertilizerHoldOnce({ actions, avoid, checks });
+    checks = held.checks;
+    actions = held.actions;
+    avoid = held.avoid;
+    if (!insectsObserved) {
       nextQuestion = UNDERSIDE_INSECT_QUESTION;
-    }
-    if (!actions.some((item) => /fertilizer/i.test(item))) {
-      actions = uniqueLines([...actions, HOLD_FERTILIZER]);
+    } else if (
+      !nextQuestion ||
+      mentionsUnallowedCause(nextQuestion, allowed) ||
+      (nextQuestion.match(/\?/g) ?? []).length !== 1
+    ) {
+      nextQuestion = UNDERSIDE_INSECT_QUESTION;
     }
     if (!incomingUsable && !assessment.includes(CONSERVATIVE_CURL_YELLOW_FALLBACK)) {
       assessment = catalogAssessment;
+    }
+    assessment = sanitizeCurlYellowProse(assessment, insectsObserved);
+    if (!assessment) {
+      assessment =
+        sanitizeCurlYellowProse(catalogAssessment, insectsObserved) ||
+        CONSERVATIVE_CURL_YELLOW_FALLBACK;
     }
   }
 
@@ -595,11 +671,18 @@ export function renderFarmerPayloadFromPipeline(
       : null;
 
   if (usedFallback && curlYellowCase(pipeline.observations) && !incomingUsable) {
-    checks = [...CURL_YELLOW_CHECKS];
-    actions = [...CURL_YELLOW_ACTIONS];
-    avoid = [...CURL_YELLOW_AVOID];
+    const insectsObserved = pipeline.observations.insectsReported;
+    checks = dropWashAndPrematureFeed([...CURL_YELLOW_CHECKS], insectsObserved);
+    actions = dropWashAndPrematureFeed([...CURL_YELLOW_ACTIONS], insectsObserved);
+    avoid = dropWashAndPrematureFeed([...CURL_YELLOW_AVOID], insectsObserved);
+    const held = keepFertilizerHoldOnce({ actions, avoid, checks });
+    checks = held.checks;
+    actions = held.actions;
+    avoid = held.avoid;
     nextQuestion = UNDERSIDE_INSECT_QUESTION;
-    assessment = catalogAssessment;
+    assessment =
+      sanitizeCurlYellowProse(catalogAssessment, insectsObserved) ||
+      CONSERVATIVE_CURL_YELLOW_FALLBACK;
   }
 
   pipeline.usedConservativeFallback = usedFallback && !incomingUsable;
@@ -614,8 +697,13 @@ export function renderFarmerPayloadFromPipeline(
           ? null
           : payload.weatherBrief;
 
-  const diagnosisWhy =
+  let diagnosisWhy =
     incomingWhy && !mentionsUnallowedCause(incomingWhy, allowed) ? incomingWhy : assessment;
+  if (curlYellowCase(pipeline.observations) && !pipeline.observations.lesionEvidence) {
+    const insectsObserved = pipeline.observations.insectsReported;
+    diagnosisWhy = sanitizeCurlYellowProse(diagnosisWhy, insectsObserved);
+    if (!diagnosisWhy) diagnosisWhy = assessment;
+  }
 
   return {
     ...payload,

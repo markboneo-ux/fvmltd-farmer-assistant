@@ -129,6 +129,72 @@ describe("structured allowlist pipeline", () => {
     expect(next.admittedCauseIds ?? []).not.toContain("CERCOSPORA");
   });
 
+  it("does not contradict fertilizer hold, wash unobserved pests, or duplicate hold lines on Couva curl/yellow", () => {
+    const facts = extractKnownFacts(COUVA);
+    const evidence = extractObservedEvidence({ facts, text: facts.rawText });
+    const pipeline = runFarmerCausePipeline({ facts, evidence, payload: payload() });
+    const next = renderFarmerPayloadFromPipeline(
+      payload({
+        preliminaryAssessment:
+          "On sweet pepper, curling with yellowing is still unconfirmed. Ensure balanced nutrition, particularly nitrogen and magnesium.",
+        diagnosisWhy:
+          "Ensure balanced nutrition, particularly nitrogen and magnesium. Do not add extra fertilizer yet until we know whether older or newer leaves are affected.",
+        checksToday: ["Inspect the undersides of leaves for small insects or webbing."],
+        safeActionsNow: [
+          "Gently wash the leaves with water to remove any potential mites or aphids.",
+          "Ensure the plants are receiving balanced nutrition and not over-fertilized.",
+          "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
+        ],
+        actionsToAvoid: [
+          "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
+        ],
+        nextQuestion: "Are you noticing any small insects or webbing on the undersides of the leaves?",
+      }),
+      pipeline,
+      {
+        facts,
+        modelJson: {
+          admittedCauseIds: ["APHIDS", "MITES", "NUTRIENT_PATTERN"],
+          reasoningPerCause: [
+            { causeId: "APHIDS", why: "Check undersides." },
+            { causeId: "NUTRIENT_PATTERN", why: "Ensure balanced nutrition, particularly nitrogen and magnesium." },
+          ],
+          checks: ["Look for nutrient deficiency patterns"],
+          immediateActions: [
+            "Gently wash the leaves with water to remove any potential mites or aphids.",
+            "Ensure balanced nutrition, particularly nitrogen and magnesium.",
+          ],
+          nextQuestion: "Are you noticing any small insects or webbing on the undersides of the leaves?",
+          photoRequest: false,
+        },
+      },
+    );
+
+    const visible = [
+      next.preliminaryAssessment,
+      next.diagnosisWhy,
+      ...next.checksToday,
+      ...next.safeActionsNow,
+      ...next.actionsToAvoid,
+      next.nextQuestion,
+    ]
+      .join("\n")
+      .toLowerCase();
+
+    expect(visible).not.toMatch(/wash the leaves|rinse the leaves|hose the leaves/);
+    expect(visible).not.toMatch(/ensure balanced nutrition|nitrogen and magnesium|receiving balanced nutrition/);
+    expect(visible.match(/do not add extra fertilizer/g) ?? []).toHaveLength(1);
+    expect(next.safeActionsNow.join(" ").toLowerCase()).toMatch(/do not add extra fertilizer/);
+    expect(next.actionsToAvoid.join(" ").toLowerCase()).not.toMatch(/do not add extra fertilizer/);
+    expect(next.nextQuestion.toLowerCase()).toMatch(
+      /underside of the curled new leaves/,
+    );
+    expect(next.nextQuestion.toLowerCase()).toMatch(
+      /tiny insects.*mites.*webbing.*cast skins.*sticky residue|sticky residue.*cast skins/,
+    );
+    expect((next.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
+  });
+
   it("uses the conservative fallback when no cause is admitted", () => {
     const facts = extractKnownFacts("Hello there");
     const evidence = extractObservedEvidence({ facts, text: facts.rawText });
