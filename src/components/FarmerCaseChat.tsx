@@ -11,6 +11,7 @@ import {
   type CasePhotoAttachHandle,
 } from "@/components/CasePhotoAttach";
 import type { AgronomicCasePayload, CaseMode } from "@/lib/agronomy/case-schema";
+import type { CauseRankingDebug } from "@/lib/agronomy/evidence-gated-causes";
 import { PRODUCT_NAME, PRODUCT_SUBTITLE } from "@/lib/brand";
 import {
   FARMER_PHOTO_TOO_LARGE,
@@ -50,6 +51,7 @@ type ChatMessage = {
   questionsAsked?: number;
   local?: boolean;
   similarCaseNote?: string;
+  causeDebug?: CauseRankingDebug | null;
 };
 
 type CaseApiPayload = {
@@ -67,6 +69,8 @@ type CaseApiPayload = {
   limitReached?: boolean;
   reason?: string;
   persistenceFailed?: boolean;
+  weatherDebug?: unknown;
+  causeDebug?: CauseRankingDebug | null;
 };
 
 type FarmerCaseChatProps = {
@@ -401,6 +405,7 @@ export function FarmerCaseChat({
               !/\btomato/i.test(casePayload.preliminaryAssessment))
               ? payload.similarCaseHint
               : undefined,
+          causeDebug: payload.causeDebug ?? null,
         },
       ]);
 
@@ -849,6 +854,20 @@ export function FarmerCaseChat({
                               ", ",
                             ) || "—"}
                           </p>
+                          <p>
+                            suspectedCauses:{" "}
+                            {(message.casePayload.cropHealthState?.suspectedCauses ?? [])
+                              .map(
+                                (cause) =>
+                                  `${cause.label} [${cause.evidenceSource ?? "unset"}: ${cause.evidenceFact ?? "none"}]`,
+                              )
+                              .join(" | ") || "—"}
+                          </p>
+                          {message.causeDebug ? (
+                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap">
+                              {JSON.stringify(message.causeDebug, null, 2)}
+                            </pre>
+                          ) : null}
                         </div>
                       </details>
                     ) : null}

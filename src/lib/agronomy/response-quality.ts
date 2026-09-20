@@ -23,12 +23,15 @@ import {
 } from "./symptom-consistency";
 import {
   applyAuthoritativeCaseValidation,
-  highestValueCurlYellowQuestion,
   isDiagnosticContinuityFollowUp,
   isGenericCareQuestion,
   spotsAreObserved,
   sprayDiscussionJustified,
 } from "./case-continuity";
+import {
+  admitEvidenceGatedCauses,
+  curlYellowFollowUp,
+} from "./evidence-gated-causes";
 import type { CropHealthCaseState } from "./crop-health-state";
 
 const GENERIC_DIAGNOSIS =
@@ -369,6 +372,23 @@ export function applyQualityCorrection(
     rankedCauses = ranked.slice(0, 3);
   }
 
+  const gated = admitEvidenceGatedCauses({
+    incoming: (likely.length > 0 ? likely : rankedCauses).map((item) =>
+      typeof item === "string" ? item : item,
+    ),
+    evidence,
+    facts,
+    state: options.previousState,
+    crop: facts.crop,
+  });
+  if (gated.admitted.length > 0) {
+    likely = gated.admitted.map((cause) => cause.label);
+    rankedCauses = gated.admitted;
+  } else {
+    likely = likely.filter((label) => !/\b(cercospora|frogeye|bacterial leaf spot|septoria|early blight)\b/i.test(label));
+    rankedCauses = rankedCauses.filter((cause) => !/\b(cercospora|frogeye|bacterial leaf spot|septoria|early blight)\b/i.test(cause.label));
+  }
+
   if (
     playbook?.why &&
     (/could be heat|root-zone stress|nutrient imbalance or watering|water regularly|balanced fertilizer|generic pepper|pots or in the ground/i.test(
@@ -474,6 +494,7 @@ export function applyQualityCorrection(
     diagnosisConfidence: next.diagnosisConfidence,
     mode: mode,
     state: options.previousState,
+    facts,
   });
   if (sprayJustified) {
     const spray = buildSprayGuidance({
@@ -501,7 +522,12 @@ export function applyQualityCorrection(
       facts.suspectedIssue === "leaf curl" ||
       evidence.symptoms.includes("leaf curl"))
   ) {
-    const curlQuestion = highestValueCurlYellowQuestion(options.previousState);
+    const curlQuestion = curlYellowFollowUp({
+      hasPhotos: options.hasPhotos,
+      findings: options.previousState?.photoFindings,
+      answered: options.previousState?.answeredDiagnosticQuestions,
+      last: options.previousState?.lastDiagnosticQuestion,
+    });
     if (
       !next.nextQuestion.trim() ||
       /spots?|pale centre|water-soaked|country|just to confirm/i.test(next.nextQuestion) ||
@@ -573,6 +599,10 @@ export function applyQualityCorrection(
     state: options.previousState,
     hasPhotos: options.hasPhotos,
   });
+
+  if (!shouldShowRankedCauses(mode, evidence)) {
+    next = { ...next, rankedCauses: [] };
+  }
 
   const finalReplies = reconcileQuickReplies({
     question: next.nextQuestion,

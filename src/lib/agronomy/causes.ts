@@ -301,6 +301,9 @@ export function rankedCausesForPrompt(causes: RankedCause[], options?: { observe
   if (!options?.observedPest) {
     lines.push("Do not force this into a pest/disease diagnosis if nutrition, water, roots, or age fit better.");
     lines.push("If the crop is known, prefer crop-relevant causes over generic root-zone / nutrient / foliar-or-insect cards.");
+    lines.push(
+      "Do not include a lesion-specific disease (Cercospora, bacterial leaf spot, frogeye, blight with spots) unless spots or lesions were reported or are clearly visible in a photo.",
+    );
   }
   return lines.join("\n");
 }

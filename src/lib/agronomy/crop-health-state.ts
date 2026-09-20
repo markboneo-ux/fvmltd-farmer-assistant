@@ -27,6 +27,8 @@ export type SuspectedCauseEntry = {
   evidenceFor: string[];
   evidenceAgainst: string[];
   rank: number;
+  evidenceSource?: "farmer_report" | "photo_finding" | "weather_support" | "prior_confirmed_case_fact";
+  evidenceFact?: string;
 };
 
 export type CropHealthCaseState = {
@@ -162,7 +164,7 @@ export function mergeCropHealthState(
     recentSprays: pickText(base.recentSprays, incoming.recentSprays),
     photoFindings: pickList(base.photoFindings, incoming.photoFindings),
     suspectedCauses:
-      incoming.suspectedCauses && incoming.suspectedCauses.length > 0
+      incoming.suspectedCauses !== undefined
         ? incoming.suspectedCauses.slice(0, 3)
         : base.suspectedCauses,
     diagnosticConfidence: incoming.diagnosticConfidence ?? base.diagnosticConfidence,

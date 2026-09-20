@@ -10,6 +10,14 @@ import type { CropHealthCaseState } from "./crop-health-state";
 import type { ObservedEvidence } from "./evidence-hierarchy";
 import type { KnownFarmerFacts } from "./tomato-protocol";
 import { SPRAY_NEEDED_HEADING } from "./chemical-guidance";
+import {
+  admitEvidenceGatedCauses,
+  curlYellowFollowUp,
+  hasLesionEvidence,
+  HOLD_FERTILIZER,
+  photoEvidenceNarrative,
+  sanitizePhotoFindings,
+} from "./evidence-gated-causes";
 
 export const SPOT_LEAKAGE =
   /\b(pale centre|pale center|greasy water-?soaked|water-?soaked spots|fungal vs bacterial|cercospora|frogeye|separate spots|true leaf spots|leaf spots)\b/i;
@@ -75,22 +83,25 @@ export function spotsAreObserved(
   state?: CropHealthCaseState | null,
   facts?: KnownFarmerFacts | null,
 ): boolean {
-  const blob = [
-    ...evidence.symptoms,
-    ...(state?.observedSymptoms ?? []),
-    ...(state?.symptoms ?? []),
-    ...(state?.photoFindings ?? []),
-    facts?.suspectedIssue ?? "",
-    facts?.rawText ?? "",
-  ]
-    .join(" ")
-    .toLowerCase();
-  if (/\bno (discrete )?(leaf[- ]?)?spots?\b/.test(blob)) return false;
-  return (
-    evidence.symptoms.includes("spots") ||
-    (/\b(spots?|lesions?|leaf spot|cercospora|septoria|frogeye)\b/.test(blob) &&
-      !/\bno discrete spots\b/.test(blob))
-  );
+  return hasLesionEvidence({
+    evidence,
+    facts,
+    state,
+    photoFindings: state?.photoFindings,
+  });
+}
+
+export function establishedPesticideTarget(options: {
+  evidence: ObservedEvidence;
+  facts?: KnownFarmerFacts | null;
+  state?: CropHealthCaseState | null;
+  mode?: string | null;
+}): boolean {
+  if (options.evidence.observedPest && options.mode === "OBSERVED_PEST_MANAGEMENT") {
+    return true;
+  }
+  if (options.evidence.observedPest && options.facts?.asksForProducts) return true;
+  return false;
 }
 
 export function sprayDiscussionJustified(options: {
@@ -99,18 +110,15 @@ export function sprayDiscussionJustified(options: {
   diagnosisConfidence?: string | null;
   mode?: string | null;
   state?: CropHealthCaseState | null;
+  facts?: KnownFarmerFacts | null;
 }): boolean {
   if (options.asksForSpray) return true;
-  const confidence = options.diagnosisConfidence ?? options.state?.diagnosticConfidence;
-  const high =
-    confidence === "highly_likely" ||
-    confidence === "confirmed" ||
-    confidence === "likely";
-  if (!high) return false;
-  if (options.evidence.observedPest && options.mode === "OBSERVED_PEST_MANAGEMENT") {
-    return true;
-  }
-  return spotsAreObserved(options.evidence, options.state);
+  return establishedPesticideTarget({
+    evidence: options.evidence,
+    facts: options.facts,
+    state: options.state,
+    mode: options.mode,
+  });
 }
 
 export function stripSpraySections(text: string): string {
@@ -173,16 +181,17 @@ export function photoChangedRankingLine(options: {
   photoFindings: string[];
   causes: string[];
 }): string {
-  const findings = options.photoFindings.map((item) => item.trim()).filter(Boolean);
+  const findings = sanitizePhotoFindings(options.photoFindings);
+  if (findings.length === 0) {
+    return "The photo does not give a reliable close view. I cannot determine whether lesions, insects, or a nutrient pattern are present.";
+  }
   const causeList = options.causes.slice(0, 3);
-  const supported = causeList[0] ?? "the leading possibility";
-  const weakened =
-    causeList.find((label) => /waterlog|drain|blight|fungal/i.test(label)) ??
-    "a drainage problem that was not described";
-  const seen = findings.length
-    ? findings.slice(0, 2).join("; ")
-    : "cupping, uneven yellowing, or insects if they are visible";
-  return `The photo makes ${supported} more likely because it shows ${seen}. It makes ${weakened} less likely unless those signs are actually visible. A still photo cannot prove a virus or name an insect that is not in the frame.`;
+  const supported = causeList[0];
+  const seen = findings.slice(0, 2).join("; ");
+  const supportLine = supported
+    ? `The photo shows ${seen}. That is consistent with ${supported} as a possibility. It does not prove that cause.`
+    : `The photo shows: ${seen}. That is not enough to name a cause.`;
+  return `${supportLine} A still photo cannot prove a virus or name an insect that is not clearly in the frame.`;
 }
 
 export function photoUnknownLine(): string {
@@ -251,7 +260,20 @@ export function applyAuthoritativeCaseValidation(
     hasPhotos?: boolean;
   },
 ): AgronomicCasePayload {
-  const spotsObserved = spotsAreObserved(options.evidence, options.state, options.facts);
+  const gated = admitEvidenceGatedCauses({
+    incoming: (payload.rankedCauses?.length
+      ? payload.rankedCauses
+      : payload.likelyCauses ?? []),
+    evidence: options.evidence,
+    facts: options.facts,
+    state: options.state,
+    crop: options.facts.crop,
+  });
+  const spotsObserved = hasLesionEvidence({
+    evidence: options.evidence,
+    facts: options.facts,
+    state: options.state,
+  });
   const asksForSpray = options.facts.asksForProducts;
   const justified = sprayDiscussionJustified({
     asksForSpray,
@@ -259,41 +281,34 @@ export function applyAuthoritativeCaseValidation(
     diagnosisConfidence: payload.diagnosisConfidence,
     mode: payload.agronomicMode,
     state: options.state,
+    facts: options.facts,
   });
 
-  const clean = (value: string) =>
-    stripUnobservedSpotLanguage(justified ? stripSpraySections(value) : stripSpraySections(value), spotsObserved);
+  const clean = (value: string) => {
+    let text = stripUnobservedSpotLanguage(stripSpraySections(value), spotsObserved);
+    text = text.replace(
+      /\b(ensure balanced fertilization|feed with a balanced fertilizer|balanced fertilizer|water regularly, feed)\b[^.]*\.?/gi,
+      HOLD_FERTILIZER,
+    );
+    return text;
+  };
 
   let next: AgronomicCasePayload = {
     ...payload,
     preliminaryAssessment: clean(payload.preliminaryAssessment),
     diagnosisWhy: payload.diagnosisWhy ? clean(payload.diagnosisWhy) : payload.diagnosisWhy,
     checksToday: payload.checksToday.map(clean).filter(Boolean),
-    safeActionsNow: payload.safeActionsNow.map(clean).filter(Boolean),
+    safeActionsNow: payload.safeActionsNow
+      .map(clean)
+      .filter((item) => spotsObserved || !/\b(remove|pick off|strip)\b[\s\S]{0,50}\b(leaves?|leaf)\b/i.test(item))
+      .filter(Boolean),
     actionsToAvoid: payload.actionsToAvoid.map(clean).filter(Boolean),
-    likelyCauses: (payload.likelyCauses ?? [])
-      .filter((label) => spotsObserved || !/\b(cercospora|frogeye|bacterial leaf spot|septoria|early blight)\b/i.test(label))
-      .map(clean),
+    likelyCauses: gated.admitted.map((cause) => cause.label),
+    rankedCauses: gated.admitted,
     whatWouldChangeDiagnosis: (payload.whatWouldChangeDiagnosis ?? []).map(clean),
     monitorNext: payload.monitorNext ? clean(payload.monitorNext) : payload.monitorNext,
     nextQuestion: oneFollowUpQuestion(clean(payload.nextQuestion)),
   };
-
-  if (!spotsObserved) {
-    next.rankedCauses = (next.rankedCauses ?? []).filter(
-      (cause) => !/\b(cercospora|frogeye|bacterial leaf spot|septoria|leaf spot)\b/i.test(cause.label),
-    );
-    if (
-      isCurlYellowCase(options.evidence, options.facts, options.state) &&
-      referencesUnobservedSpots(next.nextQuestion, false) &&
-      !/\b(photo|photograph|image)\b/i.test(next.nextQuestion)
-    ) {
-      next = {
-        ...next,
-        nextQuestion: highestValueCurlYellowQuestion(options.state),
-      };
-    }
-  }
 
   if (!justified) {
     next = { ...next, sprayGuidanceText: null, verifiedInputOptions: [] };
@@ -307,34 +322,53 @@ export function applyAuthoritativeCaseValidation(
   }
 
   if (options.hasPhotos) {
-    const photoLine = photoChangedRankingLine({
-      photoFindings: options.state?.photoFindings?.length
+    const findings = sanitizePhotoFindings(
+      options.state?.photoFindings?.length
         ? options.state.photoFindings
         : options.evidence.photoEvidence,
-      causes: next.likelyCauses ?? [],
+    );
+    const photoLine = photoEvidenceNarrative({
+      findings,
+      admitted: gated.admitted,
+      lesionEvidence: spotsObserved,
     });
-    const unknown = photoUnknownLine();
-    const assessment = next.diagnosisWhy || next.preliminaryAssessment;
-    if (!/the photo makes\b/i.test(assessment)) {
-      next = {
-        ...next,
-        diagnosisWhy: `${assessment}\n\n${photoLine} ${unknown}`.trim(),
-        preliminaryAssessment: `${next.preliminaryAssessment}\n\n${photoLine}`.trim(),
-      };
-    }
-  }
-
-  if (
-    isCurlYellowCase(options.evidence, options.facts, options.state) &&
-    (isGenericCareQuestion(next.nextQuestion) ||
-      (!spotsObserved &&
-        referencesUnobservedSpots(next.nextQuestion, false) &&
-        !/\b(photo|photograph|image)\b/i.test(next.nextQuestion)))
-  ) {
+    const stripInventedPhoto = (text: string) =>
+      text
+        .replace(/the photo makes[\s\S]*?(?:\n\n|$)/gi, "\n")
+        .replace(/if they are visible/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
     next = {
       ...next,
-      nextQuestion: highestValueCurlYellowQuestion(options.state),
+      diagnosisWhy: `${stripInventedPhoto(next.diagnosisWhy || next.preliminaryAssessment)}\n\n${photoLine}`.trim(),
+      preliminaryAssessment: `${stripInventedPhoto(next.preliminaryAssessment)}\n\n${photoLine}`.trim(),
     };
+    if (isCurlYellowCase(options.evidence, options.facts, options.state)) {
+      next = {
+        ...next,
+        nextQuestion: curlYellowFollowUp({
+          hasPhotos: true,
+          findings,
+          answered: options.state?.answeredDiagnosticQuestions,
+          last: options.state?.lastDiagnosticQuestion,
+        }),
+      };
+    }
+  } else if (isCurlYellowCase(options.evidence, options.facts, options.state)) {
+    if (
+      !next.nextQuestion.trim() ||
+      isGenericCareQuestion(next.nextQuestion) ||
+      referencesUnobservedSpots(next.nextQuestion, spotsObserved) ||
+      /just to confirm|country/i.test(next.nextQuestion)
+    ) {
+      next = {
+        ...next,
+        nextQuestion: curlYellowFollowUp({
+          answered: options.state?.answeredDiagnosticQuestions,
+          last: options.state?.lastDiagnosticQuestion,
+        }),
+      };
+    }
   }
 
   next = {

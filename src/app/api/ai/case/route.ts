@@ -554,6 +554,7 @@ export async function POST(request: Request) {
             diagnosticCode: result.diagnosticCode,
             correlationId,
             weatherDebug: result.weatherDebug ?? null,
+            causeDebug: result.causeDebug ?? null,
             ...(persistenceDebug ?? persistenceDebugInfo()),
           }
         : {}),

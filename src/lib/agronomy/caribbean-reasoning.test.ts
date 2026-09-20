@@ -509,13 +509,59 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
   const turn1 =
     "My sweet pepper plants in Couva have some leaves curling and yellowing. It started a few days ago.";
   const turn2 = "I really want to make sure my sweet peppers survive.";
+  const lesionLeak =
+    /cercospora|frogeye|bacterial leaf spot|pale[- ]centr|greasy|water-?soaked specks?|fungal vs bacterial|if a spray is needed/i;
 
   function rendered(result: Awaited<ReturnType<typeof runAgronomicCase>>): string {
     if (!result.ok) return "";
     return farmerRenderedAnswer(result.case);
   }
 
-  it("resolves Couva, keeps diagnosis, and never invents spots or a spray section", async () => {
+  function assertEvidenceSupportedState(
+    result: Awaited<ReturnType<typeof runAgronomicCase>>,
+    options?: { hasPhotos?: boolean },
+  ) {
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const state = result.case.cropHealthState;
+    expect(state).toBeTruthy();
+    expect(state?.observedSymptoms.join(" ")).toMatch(/curl|yellow/i);
+    expect(state?.observedSymptoms.join(" ").toLowerCase()).not.toMatch(/\b(spots?|lesions?|leaf_spot)\b/);
+    expect(state?.notReportedSymptoms).toEqual(expect.arrayContaining(["spots"]));
+    const causeBlob = [
+      ...(state?.suspectedCauses ?? []).map((cause) => cause.label),
+      state?.suspectedCause,
+      state?.suspectedDiseaseOrDisorder,
+      ...(result.case.likelyCauses ?? []),
+      ...(result.case.rankedCauses ?? []).map((cause) => cause.label),
+    ]
+      .join(" ")
+      .toLowerCase();
+    expect(causeBlob).not.toMatch(/cercospora|frogeye|bacterial leaf spot/);
+    expect(causeBlob).not.toMatch(/\bleaf[- ]spot\b/);
+    for (const cause of state?.suspectedCauses ?? []) {
+      expect(cause.evidenceSource).toMatch(
+        /farmer_report|photo_finding|weather_support|prior_confirmed_case_fact/,
+      );
+      expect(cause.evidenceFact?.length).toBeGreaterThan(0);
+    }
+    const text = rendered(result).toLowerCase();
+    expect(text).not.toMatch(lesionLeak);
+    expect(text).not.toMatch(/if they are visible/);
+    expect((text.match(/if a spray is needed/g) ?? []).length).toBe(0);
+    expect(result.case.sprayGuidanceText).toBeFalsy();
+    expect(text).not.toMatch(/remove yellowing leaves|remove affected (leaves|plants)|pick off|strip .{0,30}leaves/);
+    expect((result.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
+    if (options?.hasPhotos) {
+      const findings = (state?.photoFindings ?? []).join(" ").toLowerCase();
+      expect(findings).not.toMatch(/if they are visible/);
+      expect(text).toMatch(/the photo|visible |cannot determine/);
+    }
+    expect(result.causeDebug?.causes.length).toBeGreaterThan(0);
+    expect(result.causeDebug?.lesionEvidence).toBe(false);
+  }
+
+  it("keeps only evidence-supported causes across the three Couva turns", async () => {
     const first = await runAgronomicCase({
       message: turn1,
       skipRegionalTools: true,
@@ -526,7 +572,7 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
             "If a spray is needed I need a closer look at the spots — pale centre versus greasy water-soaked. Waterlogging is the main cause.",
           sprayGuidanceText:
             "If a spray is needed\nI need a closer look at the spots — pale centre versus greasy water-soaked.",
-          likelyCauses: ["Waterlogging", "Cercospora / frogeye leaf spot"],
+          likelyCauses: ["Waterlogging", "Cercospora / frogeye leaf spot", "Bacterial leaf spot"],
           nextQuestion: "Just to confirm, are you farming in Trinidad and Tobago?",
           diagnosisConfidence: "possible",
         }),
@@ -534,23 +580,15 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
     });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
+    assertEvidenceSupportedState(first);
     expect(first.case.cropHealthState?.crop).toMatch(/pepper/);
     expect(first.case.cropHealthState?.farmingArea?.toLowerCase()).toBe("couva");
     expect(first.case.cropHealthState?.country).toBe("Trinidad and Tobago");
-    expect(first.case.cropHealthState?.observedSymptoms.join(" ")).toMatch(/curl|yellow/i);
-    expect(first.case.cropHealthState?.notReportedSymptoms).toEqual(
-      expect.arrayContaining(["spots"]),
-    );
     const firstText = rendered(first).toLowerCase();
     expect(firstText).not.toMatch(/just to confirm, are you farming in trinidad/);
-    expect(firstText).not.toMatch(/pale centre versus greasy water-soaked/);
-    expect(firstText).not.toMatch(/cercospora/);
-    expect((firstText.match(/if a spray is needed/g) ?? []).length).toBe(0);
-    expect(first.case.sprayGuidanceText).toBeFalsy();
     expect(first.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/waterlog/);
-    expect(first.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient|virus/);
-    expect(first.case.nextQuestion.toLowerCase()).toMatch(/insect|old leaves or new|scattered|patches/);
-    expect((first.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
+    expect(first.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(first.case.nextQuestion.toLowerCase()).toMatch(/underside|insect|mite|older lower leaves|newest curled/);
 
     const second = await runAgronomicCase({
       message: turn2,
@@ -579,15 +617,15 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
     });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
+    assertEvidenceSupportedState(second);
     expect(second.case.cropHealthState?.crop).toMatch(/pepper/);
     expect(second.case.agronomicMode).not.toBe("GENERAL_CROP_MANAGEMENT");
     const secondText = rendered(second).toLowerCase();
     expect(secondText).toMatch(/curl|yellow/);
     expect(secondText).not.toMatch(/water regularly, feed with a balanced fertilizer/);
-    expect(secondText).not.toMatch(/pale centre versus greasy water-soaked/);
-    expect((secondText.match(/if a spray is needed/g) ?? []).length).toBe(0);
-    expect(second.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient|virus/);
-    expect(second.case.nextQuestion.toLowerCase()).toMatch(/insect|old leaves or new|scattered|patches/);
+    expect(secondText).toMatch(/do not add extra fertilizer yet/);
+    expect(second.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(second.case.nextQuestion.toLowerCase()).toMatch(/underside|insect|mite|older lower leaves|newest curled/);
     expect(second.case.cropHealthState?.farmerIntent).toBe("reassurance_same_case");
 
     const third = await runAgronomicCase({
@@ -616,13 +654,15 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
         id: "couva-pepper-3",
         output_text: mockJson({
           preliminaryAssessment:
-            "The photo shows a nutrient deficiency, a virus, and aphids. Suspected virus may require removing affected plants.",
-          likelyCauses: [
-            "Nutrient shortage or uneven feeding",
-            "Virus risk if new leaves stay curled",
-            "Aphids or other sucking insects",
+            "The photo makes Cercospora / frogeye leaf spot more likely because it shows cupping, uneven yellowing, or insects if they are visible. If a spray is needed, separate fungal vs bacterial spots. Pale-centred spots raise Cercospora; greasy water-soaked specks raise bacterial leaf spot.",
+          sprayGuidanceText:
+            "If a spray is needed\nIF THE SPOTS FIT A FUNGAL LEAF SPOT\nMancozeb. IF THE SPOTS FIT A BACTERIAL LEAF SPOT\nCopper.",
+          likelyCauses: ["Cercospora / frogeye leaf spot", "Bacterial leaf spot"],
+          safeActionsNow: [
+            "Remove yellowing leaves",
+            "Ensure balanced fertilization",
+            "Remove affected plants because this may be a virus",
           ],
-          safeActionsNow: ["Remove affected plants because this may be a virus"],
           diagnosisConfidence: "possible",
           nextQuestion:
             "Are insects present under the curled new leaves? Is yellowing worse on old leaves or new growth?",
@@ -631,16 +671,15 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
     });
     expect(third.ok).toBe(true);
     if (!third.ok) return;
+    assertEvidenceSupportedState(third, { hasPhotos: true });
     const thirdText = rendered(third).toLowerCase();
     expect(third.case.cropHealthState?.crop).toMatch(/pepper/);
-    expect(third.case.cropHealthState?.observedSymptoms.join(" ")).toMatch(/curl|yellow/i);
-    expect(thirdText).toMatch(/the photo makes/);
-    expect(thirdText).not.toMatch(/pale centre versus greasy water-soaked/);
-    expect((thirdText.match(/if a spray is needed/g) ?? []).length).toBe(0);
-    expect(thirdText).not.toMatch(/remove affected plants/);
     expect(thirdText).toMatch(/do not remove whole plants|inspect vectors|staff review/);
-    expect((third.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
-    expect(third.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient|virus/);
-    expect(third.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/cercospora|waterlog/);
+    expect(thirdText).toMatch(/do not add extra fertilizer yet/);
+    expect(third.case.nextQuestion.toLowerCase()).toMatch(
+      /underside of the curled new leaves|newest curled leaves or the older lower leaves/,
+    );
+    expect(third.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(third.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/cercospora|waterlog|bacterial leaf spot/);
   });
 });

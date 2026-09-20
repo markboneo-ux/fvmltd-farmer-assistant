@@ -3,6 +3,7 @@ import { extractKnownFacts } from "./tomato-protocol";
 import { extractObservedEvidence } from "./evidence-hierarchy";
 import {
   applyAuthoritativeCaseValidation,
+  establishedPesticideTarget,
   farmerIntentFromMessage,
   isDiagnosticContinuityFollowUp,
   oneFollowUpQuestion,
@@ -86,13 +87,19 @@ describe("case continuity helpers", () => {
     expect(farmingAreaUniquelyImpliesCountry("Couva")).toBe("Trinidad and Tobago");
   });
 
-  it("states what a photo supports without claiming it proves a virus", () => {
+  it("states concrete photo findings without hypothetical visibility", () => {
     const line = photoChangedRankingLine({
       photoFindings: ["cupped new leaves", "uneven yellowing"],
       causes: ["Aphids or other sucking insects", "Nutrient shortage or uneven feeding"],
     });
-    expect(line).toMatch(/The photo makes/i);
-    expect(line).toMatch(/cannot prove a virus/i);
+    expect(line.toLowerCase()).toMatch(/the photo shows|cannot prove a virus/);
+    expect(line.toLowerCase()).not.toMatch(/if they are visible/);
+    expect(photoChangedRankingLine({ photoFindings: [], causes: [] }).toLowerCase()).toMatch(
+      /cannot determine/,
+    );
+    expect(photoChangedRankingLine({ photoFindings: [], causes: [] }).toLowerCase()).not.toMatch(
+      /if they are visible/,
+    );
   });
 
   it("rejects invented spots and unjustified spray from a generated payload", () => {
@@ -115,5 +122,9 @@ describe("case continuity helpers", () => {
     expect(next.preliminaryAssessment.toLowerCase()).not.toMatch(/pale centre versus greasy water-soaked/);
     expect((next.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
     expect(VIRUS_ROGUE_CAUTION).toMatch(/Do not remove whole plants/);
+    expect(
+      establishedPesticideTarget({ evidence, facts }),
+    ).toBe(false);
+    expect(next.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/cercospora|bacterial leaf spot/);
   });
 });

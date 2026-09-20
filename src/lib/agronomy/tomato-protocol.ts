@@ -523,6 +523,9 @@ export function applyCommercialSafetyGuards(
 
   if (isInterviewStage(stage) || !hasWaterOrRootEvidence(payload)) {
     safeActionsNow = safeActionsNow.filter((action) => {
+      if (/\b(do not|don't|hold|avoid|until we know|not yet)\b/i.test(action) && /\bfertiliz/i.test(action)) {
+        return true;
+      }
       if (PREMATURE_FERTILIZER.test(action)) {
         ensureAvoid(
           "Do not apply fertilizer solely because plants look stunted — check water, drainage and roots first.",

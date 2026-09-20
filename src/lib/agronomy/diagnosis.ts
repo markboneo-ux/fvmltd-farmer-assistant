@@ -25,6 +25,7 @@ import { extractObservedEvidence, genericCauseList } from "./evidence-hierarchy"
 import { cropPlaybookFor, rankCropCauses } from "./crop-differentials";
 import { agronomicModeFor } from "./case-modes";
 import { isGenericCareQuestion, spotsAreObserved } from "./case-continuity";
+import { hasLesionEvidence, isLesionSpecificDisease } from "./evidence-gated-causes";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -575,8 +576,14 @@ export function applyDiagnosticPlaybook(
   const celerySpecific = playbook.id.startsWith("celery");
   const cropSpecific = !playbook.id.startsWith("generic");
   const incomingGeneric = genericCauseList(likelyCauses);
+  const lesion = hasLesionEvidence({ evidence, facts });
+  const incomingLesionWithoutEvidence =
+    likelyCauses.some((label) => isLesionSpecificDisease(label)) && !lesion;
   const usePlaybookCauses =
-    likelyCauses.length === 0 || incomingGeneric || (cropSpecific && incomingGeneric);
+    likelyCauses.length === 0 ||
+    incomingGeneric ||
+    (cropSpecific && incomingGeneric) ||
+    incomingLesionWithoutEvidence;
 
   next = {
     ...next,

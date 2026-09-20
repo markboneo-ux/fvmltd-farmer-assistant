@@ -63,11 +63,20 @@ import { emptyWeatherDebug, logWeatherDebug, type WeatherRetrievalDebug } from "
 import { buildDifferentialDiagnosis, isLowDiagnosticConfidence } from "./differential";
 import {
   mergeCropHealthState,
-  suspectedCausesFromRanked,
   type CropHealthCaseState,
 } from "./crop-health-state";
 import { extractObservedEvidence } from "./evidence-hierarchy";
 import { farmerIntentFromMessage, photoUnknownLine } from "./case-continuity";
+import {
+  admitEvidenceGatedCauses,
+  farmerReportedLesions,
+  gatedCausesToEntries,
+  hasLesionEvidence,
+  logCauseDebug,
+  sanitizePhotoFindings,
+  trustedPhotoFindings,
+  type CauseRankingDebug,
+} from "./evidence-gated-causes";
 import { agronomicModeFor, modeAnswerGuide, shouldShowRankedCauses } from "./case-modes";
 import { specificPhotoRequest, sanitizePhotoQuestion } from "./photo-request";
 import {
@@ -125,6 +134,7 @@ export type AgronomicCaseResult =
       requestCompleted: true;
       questionsAsked: number;
       weatherDebug?: WeatherRetrievalDebug;
+      causeDebug?: CauseRankingDebug;
     }
   | {
       ok: false;
@@ -516,6 +526,37 @@ function buildUserContent(
   return parts;
 }
 
+function gateRankedCausesForTurn(options: {
+  ranked: ReturnType<typeof rankDiagnosticCauses>;
+  evidence: ReturnType<typeof extractObservedEvidence>;
+  facts: KnownFarmerFacts;
+  state?: CropHealthCaseState | null;
+  stage: "prompt" | "final";
+}): ReturnType<typeof rankDiagnosticCauses> {
+  const gated = admitEvidenceGatedCauses({
+    incoming: options.ranked,
+    evidence: options.evidence,
+    facts: options.facts,
+    state: options.state,
+    crop: options.facts.crop,
+  });
+  if (options.stage === "prompt") {
+    logCauseDebug(gated.debug, "prompt");
+  }
+  return gated.admitted;
+}
+
+function carriedObservedSymptoms(
+  previous: string[] | undefined,
+  farmerText: string,
+): string[] {
+  const farmerHasLesions = farmerReportedLesions(farmerText);
+  return (previous ?? []).filter((item) => {
+    if (/spot|lesion/i.test(item)) return farmerHasLesions;
+    return true;
+  });
+}
+
 function attachCropHealthState(
   payload: AgronomicCasePayload,
   facts: KnownFarmerFacts,
@@ -523,10 +564,12 @@ function attachCropHealthState(
   photoAlreadyRequested: boolean,
   previousState?: CropHealthCaseState | null,
   currentMessage?: string,
-): AgronomicCasePayload {
+): { payload: AgronomicCasePayload; causeDebug: CauseRankingDebug } {
   const evidence = extractObservedEvidence({
     facts,
-    text: [facts.rawText, ...(previousState?.observedSymptoms ?? [])].filter(Boolean).join(" "),
+    text: [facts.rawText, ...carriedObservedSymptoms(previousState?.observedSymptoms, facts.rawText)]
+      .filter(Boolean)
+      .join(" "),
     hasPhotos,
     photoFindings: previousState?.photoFindings,
   });
@@ -567,7 +610,10 @@ function attachCropHealthState(
     payload = { ...payload, escalationRecommended: true };
   }
 
-  const observed = [...new Set([...evidence.symptoms, ...(previousState?.observedSymptoms ?? [])])];
+  const lesion = hasLesionEvidence({ evidence, facts, state: previousState });
+  const observedFromEvidence = evidence.symptoms.filter((item) => item !== "spots" || lesion);
+  const previousSafe = carriedObservedSymptoms(previousState?.observedSymptoms, facts.rawText);
+  const observed = [...new Set([...observedFromEvidence, ...previousSafe])];
   const notReported = ["spots", "waterlogging", "wilting"].filter(
     (item) => !observed.some((symptom) => symptom.includes(item.replace(/ing$/, ""))),
   );
@@ -576,7 +622,31 @@ function attachCropHealthState(
     answered.push(previousState.lastDiagnosticQuestion);
   }
 
-  const state: CropHealthCaseState = mergeCropHealthState(previousState ?? payload.cropHealthState, {
+  const gated = admitEvidenceGatedCauses({
+    incoming: payload.rankedCauses?.length ? payload.rankedCauses : payload.likelyCauses ?? [],
+    evidence,
+    facts,
+    state: previousState,
+    crop: facts.crop,
+  });
+  logCauseDebug(gated.debug, "final");
+
+  const farmerHasLesions = farmerReportedLesions(facts.rawText);
+  const photoFindings = hasPhotos
+    ? trustedPhotoFindings({
+        raw: [
+          ...(previousState?.photoFindings ?? []),
+          ...trustedPhotoFindings({
+            raw: payload.cropHealthState?.photoFindings,
+            farmerReportedLesions: farmerHasLesions,
+          }),
+          ...evidence.photoEvidence,
+        ],
+        farmerReportedLesions: farmerHasLesions || lesion,
+      })
+    : sanitizePhotoFindings(previousState?.photoFindings);
+
+  const merged: CropHealthCaseState = mergeCropHealthState(previousState, {
     country: facts.country,
     farmingArea: facts.district,
     crop: facts.crop,
@@ -585,38 +655,22 @@ function attachCropHealthState(
     symptoms: observed,
     observedSymptoms: observed,
     notReportedSymptoms: notReported,
-    symptomLocation: payload.cropHealthState?.symptomLocation ?? previousState?.symptomLocation ?? evidence.symptomLocation,
+    symptomLocation: previousState?.symptomLocation ?? evidence.symptomLocation,
     spread: facts.distributionHint,
     irrigation: facts.irrigationType,
     recentFertilizer: facts.recentFertilizer ? "mentioned" : null,
     recentSprays: facts.recentPesticide ? "mentioned" : null,
-    photoFindings: hasPhotos
-      ? [...(previousState?.photoFindings ?? []), ...(payload.cropHealthState?.photoFindings ?? evidence.photoEvidence)]
-      : previousState?.photoFindings,
-    suspectedCauses:
-      (payload.rankedCauses ?? []).length > 0
-        ? suspectedCausesFromRanked((payload.rankedCauses ?? []).slice(0, 3))
-        : (payload.likelyCauses ?? []).slice(0, 3).map((label, index) => ({
-            label,
-            category: /aphid|insect|whitefl|mite/i.test(label)
-              ? "insects"
-              : /nutrient|fertilizer|feeding/i.test(label)
-                ? "nutrition"
-                : /virus/i.test(label)
-                  ? "viral disease"
-                  : /waterlog|drain/i.test(label)
-                    ? "drainage"
-                    : "environmental stress",
-            evidenceFor: [],
-            evidenceAgainst: [],
-            rank: index + 1,
-          })),
+    photoFindings,
+    suspectedCauses: gatedCausesToEntries(gated.admitted),
     diagnosticConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
     missingInformation: payload.internalMissingInformation,
     recommendedActions: payload.safeActionsNow,
     suspectedPest: evidence.observedPestLabel ?? differential.suspectedPest,
-    suspectedDiseaseOrDisorder: differential.suspectedDiseaseOrDisorder,
-    suspectedCause: differential.suspectedCause,
+    suspectedDiseaseOrDisorder: lesion
+      ? differential.suspectedDiseaseOrDisorder
+      : gated.admitted.find((cause) => cause.category.includes("viral") || cause.category === "nutrition")
+          ?.label ?? null,
+    suspectedCause: gated.admitted[0]?.label ?? null,
     confirmedDiagnosis: null,
     nextDistinguishingCheck: payload.nextQuestion || differential.nextObservation,
     requestedPhotoView: photo?.view ?? previousState?.requestedPhotoView ?? null,
@@ -625,21 +679,36 @@ function attachCropHealthState(
     lastDiagnosticQuestion: payload.nextQuestion || null,
     answeredDiagnosticQuestions: answered,
     caseNarrative: facts.rawText,
-    photoSupports: hasPhotos ? (payload.likelyCauses ?? []).slice(0, 2) : previousState?.photoSupports,
-    photoWeakens: hasPhotos ? ["a drainage problem that was not described"] : previousState?.photoWeakens,
-    photoUnknown: hasPhotos
-      ? [photoUnknownLine()]
-      : previousState?.photoUnknown,
+    photoSupports: hasPhotos
+      ? photoFindings.filter((item) => /curl|cup|yellow|insect|mite|mosaic|visible/i.test(item))
+      : previousState?.photoSupports,
+    photoWeakens: hasPhotos
+      ? lesion
+        ? previousState?.photoWeakens
+        : ["leaf-spot disease — no discrete lesions visible"]
+      : previousState?.photoWeakens,
+    photoUnknown: hasPhotos ? [photoUnknownLine()] : previousState?.photoUnknown,
   });
+  merged.suspectedCauses = gatedCausesToEntries(gated.admitted);
+  merged.suspectedCause = gated.admitted[0]?.label ?? null;
+  merged.suspectedDiseaseOrDisorder = lesion
+    ? differential.suspectedDiseaseOrDisorder
+    : gated.admitted.find((cause) => cause.category.includes("viral") || cause.category === "nutrition")?.label ??
+      null;
+  merged.observedSymptoms = observed;
+  merged.symptoms = observed;
 
   return {
-    ...payload,
-    likelyCauses: (payload.likelyCauses ?? differential.hypotheses.map((item) => item.label)).slice(0, 3),
-    rankedCauses: (payload.rankedCauses ?? []).slice(0, 3),
-    diagnosisConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
-    agronomicMode: mode,
-    cropHealthState: state,
-    locationConfidence: facts.locationConfidence,
+    payload: {
+      ...payload,
+      likelyCauses: gated.admitted.map((cause) => cause.label),
+      rankedCauses: gated.admitted,
+      diagnosisConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
+      agronomicMode: mode,
+      cropHealthState: merged,
+      locationConfidence: facts.locationConfidence,
+    },
+    causeDebug: { ...gated.debug, stage: "final" },
   };
 }
 
@@ -1195,10 +1264,16 @@ export async function runAgronomicCase(options: {
   });
   const turnMode = agronomicModeFor({ evidence: turnEvidence, facts: knownFacts });
   let rankedCauses: ReturnType<typeof rankDiagnosticCauses> = isDiagnosticIntent(classified.intent)
-    ? rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
-        crop: knownFacts.crop,
-        facts: knownFacts,
+    ? gateRankedCausesForTurn({
+        ranked: rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
+          crop: knownFacts.crop,
+          facts: knownFacts,
+          evidence: turnEvidence,
+        }),
         evidence: turnEvidence,
+        facts: knownFacts,
+        state: previousState,
+        stage: "prompt",
       })
     : [];
 
@@ -1667,10 +1742,16 @@ export async function runAgronomicCase(options: {
           rankedCauses.splice(
             0,
             rankedCauses.length,
-            ...rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
-              crop: knownFacts.crop,
-              facts: knownFacts,
+            ...gateRankedCausesForTurn({
+              ranked: rankDiagnosticCauses(knownFacts.rawText || effectiveMessage, {
+                crop: knownFacts.crop,
+                facts: knownFacts,
+                evidence: evidenceWithWeather,
+              }),
               evidence: evidenceWithWeather,
+              facts: knownFacts,
+              state: previousState,
+              stage: "prompt",
             }),
           );
         }
@@ -1768,7 +1849,7 @@ export async function runAgronomicCase(options: {
         previousState,
       },
     );
-    const farmerFacing = attachCropHealthState(
+    const attached = attachCropHealthState(
       corrected,
       knownFacts,
       images.length > 0,
@@ -1776,6 +1857,7 @@ export async function runAgronomicCase(options: {
       previousState,
       message,
     );
+    const farmerFacing = attached.payload;
     const usedRetrievedWeather =
       weatherDebug.providerResult === "success" &&
       retrievedWeatherSignals.length > 0 &&
@@ -1803,6 +1885,7 @@ export async function runAgronomicCase(options: {
       requestCompleted: true,
       questionsAsked,
       weatherDebug,
+      causeDebug: attached.causeDebug,
     };
   } catch (error) {
     const withCode = error as Error & {

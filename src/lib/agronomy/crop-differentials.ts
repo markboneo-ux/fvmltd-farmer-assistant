@@ -9,6 +9,12 @@ import type { ObservedEvidence } from "./evidence-hierarchy";
 import type { KnownFarmerFacts } from "./tomato-protocol";
 import { describeObservedSpots, extractSymptomAttributes } from "./symptom-consistency";
 import { NARROW_SPRAY_TARGET } from "./chemical-guidance";
+import {
+  hasLesionEvidence,
+  HOLD_FERTILIZER,
+  isLesionSpecificDisease,
+  UNDERSIDE_INSECT_QUESTION,
+} from "./evidence-gated-causes";
 
 export type CropPlaybook = {
   id: string;
@@ -107,7 +113,10 @@ const SEEDS: CauseSeed[] = [
     decreasesIf: "Only the leaf edges burn, or you can see insects and sticky residue instead of spots.",
     base: 6,
     wetBoost: 4,
-    match: (text, evidence) => evidence.symptoms.includes("spots") || /\bcercospora\b/.test(text),
+    match: (text, evidence) =>
+      evidence.symptoms.includes("spots") &&
+      /\b(spots?|lesions?|leaf[- ]spot)\b/.test(text) &&
+      hasLesionEvidence({ evidence }),
   },
   {
     crops: ["pepper"],
@@ -118,7 +127,10 @@ const SEEDS: CauseSeed[] = [
     decreasesIf: "A clean margin burn with no discrete spots.",
     base: 5,
     wetBoost: 4,
-    match: (text, evidence) => evidence.symptoms.includes("spots"),
+    match: (text, evidence) =>
+      evidence.symptoms.includes("spots") &&
+      /\b(spots?|lesions?|leaf[- ]spot)\b/.test(text) &&
+      hasLesionEvidence({ evidence }),
   },
   {
     crops: ["pepper", "tomato"],
@@ -320,9 +332,11 @@ export function rankCropCauses(options: {
   const text = options.text.toLowerCase();
   const scored: Array<RankedCause & { score: number }> = [];
 
+  const lesion = hasLesionEvidence({ evidence: options.evidence });
   for (const seed of SEEDS) {
     if (crop && !allowsCrop(seed, crop) && !seed.crops.includes("*")) continue;
     if (!crop && !seed.crops.includes("*") && seed.category !== "insects") continue;
+    if (isLesionSpecificDisease(seed.label) && !lesion) continue;
     if (!seed.match(text, options.evidence)) continue;
     const score = scoreSeed(seed, options.evidence);
     if (score <= 0) continue;
@@ -382,7 +396,11 @@ export function cropPlaybookFor(options: {
     return tomatoSpotPlaybook(labels, options.evidence, options.farmerLevel, options.facts);
   }
 
-  if (crop === "pepper" && options.evidence.symptoms.includes("spots")) {
+  if (
+    crop === "pepper" &&
+    hasLesionEvidence({ evidence: options.evidence, facts: options.facts }) &&
+    options.evidence.symptoms.includes("spots")
+  ) {
     return pepperSpotPlaybook(labels, options.evidence, options.farmerLevel, options.facts);
   }
 
@@ -600,15 +618,15 @@ function pepperCurlYellowPlaybook(
     base: {
       id: "pepper_curl_yellow",
       likelyCauses: causes.slice(0, 3),
-      why: "On sweet pepper, curling with yellowing usually ranks sucking insects under new leaves, a nutrient pattern if older leaves are worse, and a virus risk if new growth stays cupped. Drainage only rises if plants sit wet.",
+      why: "On sweet pepper, curling with yellowing is still unconfirmed. Sucking insects under new leaves, a nutrient pattern if older leaves are worse, and a virus risk if new growth stays cupped are possibilities — none of them is established yet.",
       checks: [
-        "Turn over curled new leaves and look for insects, cast skins, or sticky residue",
-        "Compare whether yellowing is worse on old leaves or new growth",
+        "Turn over curled new leaves and look for insects, mites, cast skins, or sticky residue",
+        "Compare whether yellowing is worse on the newest curled leaves or the older lower leaves",
         "Note whether affected plants are scattered, in patches, or field-wide",
       ],
       actionsToday: [
         "Scout the underside of curled new leaves before changing fertilizer or sprays",
-        "Hold extra fertilizer until you know whether old or new leaves are worse",
+        HOLD_FERTILIZER,
         "Keep notes on how many plants are affected",
       ],
       avoid: [
@@ -621,12 +639,12 @@ function pepperCurlYellowPlaybook(
         "Scattered plants with mosaic or severe new-leaf curl would raise a virus concern",
       ],
       monitor: "Watch whether new growth stays curled and whether more plants join in over 2–3 days.",
-      oneQuestion: "Are insects present under the curled new leaves?",
+      oneQuestion: UNDERSIDE_INSECT_QUESTION,
       photoHelpful: true,
     },
     HOME_GARDENER: {
       id: "pepper_curl_yellow_home",
-      why: "Your sweet peppers are curling and yellowing. Check under the new leaves for insects before you change fertilizer or think about a spray.",
+      why: "Your sweet peppers are curling and yellowing. Check under the new leaves for insects before you change fertilizer.",
     },
   });
 }

@@ -85,16 +85,13 @@ export function extractObservedEvidence(options: {
 
   const symptoms: string[] = [];
   const deniesSpots = /\bno (discrete )?(leaf[- ]?)?spots?\b/.test(lower);
-  if (
-    /\b(spots?|lesions?|cercospora|septoria|sigatoka|anthracnose|blight)\b/.test(lower) &&
-    !deniesSpots
-  ) {
+  if (/\b(spots?|lesions?|leaf[- ]spot)\b/.test(lower) && !deniesSpots) {
     symptoms.push("spots");
   }
   if (/\byellow/.test(lower)) symptoms.push("yellowing");
   if (/\bcurl/.test(lower)) symptoms.push("leaf curl");
   if (/\bwilt/.test(lower)) symptoms.push("wilt");
-  if (/\b(burn|scorch|brown (tips?|edges?))\b/.test(lower)) symptoms.push("leaf burn");
+  if (/\b(burn(?:ing|t)?|scorch|brown (tips?|edges?))\b/.test(lower)) symptoms.push("leaf burn");
   if (/\b(sticky|honeydew|sooty)\b/.test(lower)) symptoms.push("honeydew");
   if (pest) symptoms.push(pest.label);
   if (facts?.suspectedIssue && !symptoms.includes(facts.suspectedIssue)) {
