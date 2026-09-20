@@ -4,6 +4,8 @@ import { extractObservedEvidence } from "./evidence-hierarchy";
 import { rankDiagnosticCauses } from "./causes";
 import {
   admitEvidenceGatedCauses,
+  applyAdmittedCauseContract,
+  extractNamedCausesFromProse,
   farmerReportedLesions,
   hasLesionEvidence,
   isLesionSpecificDisease,
@@ -91,6 +93,92 @@ describe("evidence-gated causes", () => {
         farmerReportedLesions: false,
       }),
     ).toEqual(["cupped new leaves"]);
+  });
+
+  it("scrubs every first-turn visible field when the model dumps lesion/spray prose", () => {
+    const facts = extractKnownFacts(COUVA);
+    const evidence = extractObservedEvidence({ facts, text: facts.rawText });
+    const assessment = [
+      "Cercospora / frogeye leaf spot is most likely.",
+      "Bacterial leaf spot is also possible.",
+      "Pale-centred spots versus greasy water-soaked lesions.",
+      "IF A SPRAY IS NEEDED",
+      "Mancozeb- or chlorothalonil-class protectants for a fungal leaf spot, or copper spray classes for bacterial leaf spot.",
+    ].join(" ");
+    const payload = {
+      mode: "quick_help" as const,
+      stage: "assessment" as const,
+      questionId: "",
+      questionType: "" as const,
+      nextQuestion: "Are the spots round with a pale centre, or greasy and water-soaked?",
+      quickReplies: [],
+      preliminaryAssessment: assessment,
+      severity: "unknown" as const,
+      checksToday: [
+        "Are spots round with a pale centre, or greasy and water-soaked?",
+        "Look for fungal vs bacterial leaf spots",
+      ],
+      safeActionsNow: [
+        "If a spray is needed, use Mancozeb- or chlorothalonil-class protectants",
+        "Copper spray classes for bacterial leaf spot",
+      ],
+      actionsToAvoid: [
+        "Do not mix fungal and bacterial leaf spot products until pale-centred versus greasy water-soaked spots are known",
+      ],
+      photoRecommended: true,
+      escalationRecommended: false,
+      regionalContext: { country: null, district: null, productDataAsOf: null, weatherDataAsOf: null },
+      weatherRisks: [],
+      verifiedInputOptions: [],
+      internalMissingInformation: [],
+      likelyCauses: [],
+      rankedCauses: [],
+      diagnosisWhy: assessment,
+      whatWouldChangeDiagnosis: ["Pale-centred spots would raise Cercospora"],
+      monitorNext: "Watch for greasy water-soaked spots.",
+      sprayGuidanceText:
+        "If a spray is needed\nMancozeb. Chlorothalonil. Copper spray classes.",
+    };
+    expect(extractNamedCausesFromProse(payload).join(" ").toLowerCase()).toMatch(
+      /cercospora|bacterial leaf spot/,
+    );
+    const gated = admitEvidenceGatedCauses({
+      incoming: [],
+      evidence,
+      facts,
+      crop: facts.crop,
+    });
+    const next = applyAdmittedCauseContract(payload, {
+      admitted: gated.admitted,
+      rawModelCauses: extractNamedCausesFromProse(payload),
+      evidence,
+      facts,
+    });
+    const visible = [
+      next.preliminaryAssessment,
+      next.diagnosisWhy,
+      ...next.checksToday,
+      ...next.safeActionsNow,
+      ...next.actionsToAvoid,
+      ...(next.whatWouldChangeDiagnosis ?? []),
+      next.monitorNext,
+      next.nextQuestion,
+      next.sprayGuidanceText,
+      ...(next.admittedCauses ?? []).map((cause) => `${cause.label} ${cause.why} ${cause.increasesIf}`),
+    ]
+      .join("\n")
+      .toLowerCase();
+    expect(visible).not.toMatch(
+      /cercospora|frogeye|bacterial leaf spot|fungal leaf spot|pale[- ]centr|greasy|water[\s-]?soaked|mancozeb|chlorothalonil|copper spray classes|if a spray is needed/,
+    );
+    expect(next.sprayGuidanceText).toBeNull();
+    expect((next.admittedCauses ?? []).map((cause) => cause.label).join(" ").toLowerCase()).toMatch(
+      /aphid|sucking|nutrient/,
+    );
+    expect(facts.crop).toBe("pepper");
+    expect(facts.district?.toLowerCase()).toBe("couva");
+    expect(evidence.symptoms).toEqual(expect.arrayContaining(["leaf curl", "yellowing"]));
+    expect(evidence.symptoms).not.toContain("spots");
   });
 
   it("does not treat a disease name alone as lesion evidence", () => {

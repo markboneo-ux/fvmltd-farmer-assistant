@@ -823,3 +823,113 @@ describe("Couva 3-turn farmer-visible payload (ChatAssistantMessage contract)", 
     );
   });
 });
+
+describe("Couva first-turn live-shaped schema (weather on, no likelyCauses)", () => {
+  const turn1 =
+    "My sweet pepper plants in Couva have some leaves curling and yellowing. It started a few days ago.";
+  const forbiddenVisible =
+    /cercospora|frogeye|bacterial leaf spot|fungal leaf spot|pale[- ]centr|greasy|water[\s-]?soaked|mancozeb|chlorothalonil|copper spray classes|if a spray is needed/i;
+
+  function allVisible(result: Awaited<ReturnType<typeof runAgronomicCase>>): string {
+    if (!result.ok) return "";
+    const payload = result.case;
+    return [
+      farmerRenderedAnswer(payload),
+      payload.preliminaryAssessment,
+      payload.diagnosisWhy,
+      ...(payload.checksToday ?? []),
+      ...(payload.safeActionsNow ?? []),
+      ...(payload.actionsToAvoid ?? []),
+      ...(payload.whatWouldChangeDiagnosis ?? []),
+      payload.monitorNext,
+      payload.nextQuestion,
+      payload.sprayGuidanceText,
+      payload.weatherBrief,
+      ...(payload.weatherRisks ?? []).map((risk) => `${risk.diseaseOrPest} ${risk.recommendedChecks.join(" ")} ${risk.preventiveActions.join(" ")}`),
+      ...(payload.admittedCauses ?? []).map(
+        (cause) => `${cause.label} ${cause.why} ${cause.increasesIf} ${cause.decreasesIf}`,
+      ),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  it("does not leak lesion or spray language from schema-only first-turn model JSON", async () => {
+    const first = await runAgronomicCase({
+      message: turn1,
+      createResponse: async () => ({
+        id: "couva-first-turn-live",
+        output_text: mockJson({
+          stage: "assessment",
+          preliminaryAssessment: [
+            "WHAT I THINK IS MOST LIKELY",
+            "Cercospora / frogeye leaf spot, with bacterial leaf spot also possible.",
+            "WHY",
+            "Pale-centred spots versus greasy water-soaked lesions.",
+            "OTHER POSSIBILITIES",
+            "A fungal leaf spot versus bacterial leaf spot.",
+            "CHECK THIS NOW",
+            "Are spots round with a pale centre, or greasy and water-soaked?",
+            "WHAT TO DO TODAY",
+            "Scout before you spray.",
+            "IF A SPRAY IS NEEDED",
+            "Mancozeb- or chlorothalonil-class protectants for a fungal leaf spot, or copper spray classes for bacterial leaf spot. Separate fungal vs bacterial sprays.",
+          ].join("\n"),
+          checksToday: [
+            "Are spots round with a pale centre, or greasy and water-soaked?",
+            "Look for fungal vs bacterial leaf spots",
+          ],
+          safeActionsNow: [
+            "If a spray is needed, use Mancozeb- or chlorothalonil-class protectants",
+            "Copper spray classes for bacterial leaf spot",
+          ],
+          actionsToAvoid: [
+            "Do not mix fungal and bacterial leaf spot products until pale-centred versus greasy water-soaked spots are known",
+          ],
+          nextQuestion: "Are the spots round with a pale centre, or greasy and water-soaked?",
+        }),
+      }),
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    expect(first.causeDebug?.extractedSymptoms).toEqual(
+      expect.arrayContaining(["leaf curl", "yellowing"]),
+    );
+    expect(first.causeDebug?.extractedSymptoms?.join(" ").toLowerCase()).not.toMatch(/\bspots?\b/);
+    expect(first.causeDebug?.rawModelCauses.join(" ").toLowerCase()).toMatch(
+      /cercospora|bacterial leaf spot/,
+    );
+    expect(first.causeDebug?.playbookSelectedCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(first.causeDebug?.playbookSelectedCauses?.join(" ").toLowerCase()).not.toMatch(
+      /cercospora|bacterial leaf spot/,
+    );
+    expect(first.causeDebug?.preGateRankedCauses?.join(" ").toLowerCase()).not.toMatch(
+      /cercospora|bacterial leaf spot/,
+    );
+    expect(first.causeDebug?.admittedCauses.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(first.causeDebug?.admittedCauses.join(" ").toLowerCase()).not.toMatch(
+      /cercospora|bacterial leaf spot/,
+    );
+    expect(first.causeDebug?.sprayIntent).toBe(false);
+    expect(first.causeDebug?.pesticideTarget).toBe(false);
+    expect(first.causeDebug?.finalVisibleCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(first.causeDebug?.finalVisibleCauses?.join(" ").toLowerCase()).not.toMatch(
+      /cercospora|bacterial leaf spot/,
+    );
+
+    expect(first.case.cropHealthState?.crop).toMatch(/pepper/);
+    expect(first.case.cropHealthState?.farmingArea?.toLowerCase()).toBe("couva");
+    expect(first.case.sprayGuidanceText).toBeFalsy();
+    expect(first.case.cropHealthState?.observedSymptoms.join(" ").toLowerCase()).not.toMatch(
+      /\b(spots?|lesions?)\b/,
+    );
+
+    const visible = allVisible(first);
+    expect(visible).not.toMatch(forbiddenVisible);
+    expect(visible.toLowerCase()).toMatch(/curl|yellow/);
+    expect(first.case.nextQuestion.toLowerCase()).toMatch(
+      /underside|insect|mite|older lower leaves|newest curled/,
+    );
+  });
+});

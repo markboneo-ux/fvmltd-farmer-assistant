@@ -20,7 +20,7 @@ import {
 } from "./evidence-gated-causes";
 
 export const SPOT_LEAKAGE =
-  /\b(pale centre|pale center|greasy water-?soaked|water-?soaked spots|fungal vs bacterial|cercospora|frogeye|separate spots|true leaf spots|leaf spots)\b/i;
+  /\b(pale[- ]centr(?:ed|e)?|pale center|greasy(?: water[\s-]?soaked)?|water[\s-]?soaked|fungal vs bacterial|cercospora|frogeye|separate spots|true leaf spots|leaf spots|mancozeb|chlorothalonil)\b/i;
 
 export const SPRAY_HEADING_RE = /if a spray is needed/gi;
 
@@ -167,12 +167,16 @@ export function stripUnobservedSpotLanguage(text: string, spotsObserved: boolean
     .replace(/\bleaf[- ]spots?\b/gi, "leaf symptoms")
     .replace(/\bseparate spots\b/gi, "a different pattern")
     .replace(/\b(fungal|bacterial) leaf spot\b/gi, "a leaf disease")
-    .replace(/\bpale-centred spots\b/gi, "a spotted pattern, which has not been reported")
-    .replace(/\bwater-soaked spots\b/gi, "water-soaked lesions, which have not been reported")
+    .replace(/\bpale[- ]centr(?:ed|e)? spots\b/gi, "a spotted pattern, which has not been reported")
+    .replace(/\bwater[\s-]?soaked spots\b/gi, "water-soaked lesions, which have not been reported")
     .replace(/\bunless spots are visible\b/gi, "unless a spotted pattern is later seen")
-    .replace(/\bI need a closer look at the spots\b/gi, "I need a closer look at the curled and yellowing leaves");
-  if (SPOT_LEAKAGE.test(next) && !/\bno (leaf )?spots\b/i.test(next) && !/\bnot been reported\b/i.test(next)) {
-    next = next.replace(SPOT_LEAKAGE, "the curling and yellowing already described");
+    .replace(/\bI need a closer look at the spots\b/gi, "I need a closer look at the curled and yellowing leaves")
+    .replace(/\b(cercospora|frogeye|mancozeb|chlorothalonil)\b/gi, "the curling and yellowing already described")
+    .replace(/\bif a spray is needed\b/gi, "");
+  const leakageGlobal =
+    /\b(pale[- ]centr(?:ed|e)?|pale center|greasy(?: water[\s-]?soaked)?|water[\s-]?soaked|fungal vs bacterial|cercospora|frogeye|separate spots|true leaf spots|leaf spots|mancozeb|chlorothalonil)\b/gi;
+  if (leakageGlobal.test(next) && !/\bno (leaf )?spots\b/i.test(next) && !/\bnot been reported\b/i.test(next)) {
+    next = next.replace(leakageGlobal, "the curling and yellowing already described");
   }
   return next;
 }

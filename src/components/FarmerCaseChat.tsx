@@ -855,14 +855,44 @@ export function FarmerCaseChat({
                             ) || "—"}
                           </p>
                           <p>
+                            extractedSymptoms:{" "}
+                            {(message.causeDebug?.extractedSymptoms ?? []).join(" | ") || "—"}
+                          </p>
+                          <p>
                             rawModelCauses:{" "}
-                            {(message.casePayload.rawModelCauses ?? []).join(" | ") || "—"}
+                            {(message.causeDebug?.rawModelCauses ??
+                              message.casePayload.rawModelCauses ??
+                              []).join(" | ") || "—"}
+                          </p>
+                          <p>
+                            playbookSelectedCauses:{" "}
+                            {(message.causeDebug?.playbookSelectedCauses ?? []).join(" | ") || "—"}
+                          </p>
+                          <p>
+                            preGateRankedCauses:{" "}
+                            {(message.causeDebug?.preGateRankedCauses ?? []).join(" | ") || "—"}
                           </p>
                           <p>
                             admittedCauses:{" "}
-                            {(message.casePayload.admittedCauses ?? [])
-                              .map((cause) => cause.label)
-                              .join(" | ") || "—"}
+                            {(message.causeDebug?.admittedCauses ??
+                              (message.casePayload.admittedCauses ?? []).map((cause) => cause.label)
+                            ).join(" | ") || "—"}
+                          </p>
+                          <p>
+                            sprayIntent:{" "}
+                            {message.causeDebug?.sprayIntent == null
+                              ? "—"
+                              : String(message.causeDebug.sprayIntent)}
+                          </p>
+                          <p>
+                            pesticideTarget:{" "}
+                            {message.causeDebug?.pesticideTarget == null
+                              ? "—"
+                              : String(message.causeDebug.pesticideTarget)}
+                          </p>
+                          <p>
+                            finalVisibleCauses:{" "}
+                            {(message.causeDebug?.finalVisibleCauses ?? []).join(" | ") || "—"}
                           </p>
                           <p>
                             suspectedCauses:{" "}

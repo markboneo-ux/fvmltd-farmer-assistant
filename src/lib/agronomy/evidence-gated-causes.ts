@@ -32,13 +32,20 @@ export type CauseAdmission = {
 
 export type CauseRankingDebug = {
   stage?: "prompt" | "final";
+  /** First-turn trace, in this exact order when present. */
+  extractedSymptoms?: string[];
+  rawModelCauses: string[];
+  playbookSelectedCauses?: string[];
+  preGateRankedCauses?: string[];
+  admittedCauses: string[];
+  sprayIntent?: boolean;
+  pesticideTarget?: boolean;
+  finalVisibleCauses?: string[];
   lesionEvidence: boolean;
   observedSymptoms: string[];
   photoFindings: string[];
   causes: CauseAdmission[];
   rejected: Array<{ label: string; reason: string }>;
-  rawModelCauses: string[];
-  admittedCauses: string[];
 };
 
 export const HOLD_FERTILIZER =
@@ -62,11 +69,92 @@ const LESION_UNCERTAIN =
 const LESION_DENIED =
   /\bno (discrete )?(leaf[- ]?)?(spots?|lesions?)\b|\b(spots?|lesions?) (are )?(not |not yet )visible\b|\bnot visible\b.{0,20}\b(spots?|lesions?)\b/i;
 
+/** Non-global: safe for `.test()`. Do not add the `g` flag. */
 export const FORBIDDEN_UNGATED_LESION =
-  /\b(cercospora|frogeye|bacterial leaf spot|fungal leaf spot|bacterial spot|pale[- ]centr(?:ed|e)?|water-?soaked|greasy specks?|mancozeb|chlorothalonil)\b/i;
+  /\b(cercospora|frogeye|bacterial leaf spot|fungal leaf spot|bacterial spot|pale[- ]centr(?:ed|e)?|water[\s-]?soaked|greasy(?:\s+specks?)?|mancozeb|chlorothalonil|copper(?:-based)?\s+(?:spray|protectants?|bactericides?|classes?)|copper spray classes)\b/i;
 
-const COPPER_SPRAY_CLASS =
-  /\bcopper(?:-based)? (?:spray|protectants?|bactericides?|classes?)\b|\bcopper spray classes\b/i;
+const COPPER_SPRAY_CLASS_GLOBAL =
+  /\bcopper(?:-based)?\s+(?:spray|protectants?|bactericides?|classes?)\b|\bcopper spray classes\b/gi;
+
+const LESION_NAME_GLOBAL =
+  /\b(cercospora(?:\s*\/\s*frogeye)?(?:\s+leaf\s+spot)?|frogeye(?:\s+leaf\s+spot)?|bacterial leaf spot|fungal leaf spot|bacterial spot)\b/gi;
+
+const LESION_SIGN_GLOBAL =
+  /\bpale[- ]centr(?:ed|e)?\b|\bwater[\s-]?soaked\b|\bgreasy(?:\s+specks?)?\b/gi;
+
+const SPRAY_CLASS_GLOBAL = /\b(mancozeb|chlorothalonil)\b/gi;
+
+const FUNGAL_VS_BACTERIAL_GLOBAL =
+  /\b(fungal vs bacterial|fungal versus bacterial|fungal and bacterial(?: leaf spots?)?)\b/gi;
+
+const SPRAY_HEADING_GLOBAL = /\bif a spray is needed\b/gi;
+
+export const CURL_YELLOW_CHECKS = [
+  "Turn over curled new leaves and look for insects, mites, cast skins, or sticky residue",
+  "Compare whether yellowing is worse on the newest curled leaves or the older lower leaves",
+];
+
+export const CURL_YELLOW_ACTIONS = [
+  "Scout the underside of curled new leaves before changing fertilizer or sprays",
+  HOLD_FERTILIZER,
+  "Keep notes on how many plants are affected",
+];
+
+export const CURL_YELLOW_AVOID = [
+  "Do not jump to a spray until insects, old versus new leaves, and spread are checked",
+  "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
+];
+
+export function mentionsPepper(text: string | null | undefined): boolean {
+  return /\b(sweet\s+|hot\s+|bell\s+)?peppers?\b|\bcapsicum\b|\bscotch bonnet\b/i.test(text ?? "");
+}
+
+export function isPepperCurlYellowCase(options: {
+  facts?: KnownFarmerFacts | null;
+  evidence?: ObservedEvidence | null;
+  crop?: string | null;
+}): boolean {
+  const pepper =
+    mentionsPepper(options.crop) ||
+    mentionsPepper(options.facts?.crop) ||
+    mentionsPepper(options.facts?.rawText);
+  if (!pepper) return false;
+  return Boolean(
+    options.evidence?.symptoms.includes("leaf curl") ||
+      /\bcurl/.test(options.facts?.rawText ?? "") ||
+      options.facts?.suspectedIssue === "leaf curl" ||
+      options.facts?.suspectedIssue === "leaf curl and yellowing",
+  );
+}
+
+export function containsUngatedLesionLeak(text: string | null | undefined): boolean {
+  const value = text ?? "";
+  if (!value.trim()) return false;
+  return (
+    FORBIDDEN_UNGATED_LESION.test(value) ||
+    /\bif a spray is needed\b/i.test(value) ||
+    /\b(fungal vs bacterial|fungal versus bacterial|fungal and bacterial(?: leaf spots?)?)\b/i.test(value)
+  );
+}
+
+export function extractNamedCausesFromProse(payload: AgronomicCasePayload): string[] {
+  const blob = [
+    payload.preliminaryAssessment,
+    payload.diagnosisWhy ?? "",
+    ...(payload.checksToday ?? []),
+    ...(payload.safeActionsNow ?? []),
+    ...(payload.actionsToAvoid ?? []),
+    ...(payload.whatWouldChangeDiagnosis ?? []),
+    payload.sprayGuidanceText ?? "",
+    payload.monitorNext ?? "",
+    payload.nextQuestion ?? "",
+  ].join("\n");
+  const found: string[] = [];
+  if (/\b(cercospora|frogeye)\b/i.test(blob)) found.push("Cercospora / frogeye leaf spot");
+  if (/\bbacterial (?:leaf )?spot\b/i.test(blob)) found.push("Bacterial leaf spot");
+  if (/\bfungal leaf spot\b/i.test(blob)) found.push("fungal leaf spot");
+  return found;
+}
 
 const DESTRUCTION_COPY =
   /\b(remove whole plants|destroy (the )?(plants?|crop)|pull (up|out) (the )?(plants?|crop)|plant removal|rogue(?:ing)? (out )?(affected )?plants|do not remove whole plants)\b/i;
@@ -387,11 +475,12 @@ export function admitEvidenceGatedCauses(options: {
         decreasesIf: "",
       }));
 
-  const crop = (options.crop ?? options.facts?.crop ?? "").toLowerCase();
   const curlYellow =
-    crop.includes("pepper") &&
-    (options.evidence.symptoms.includes("leaf curl") || /\bcurl/.test(options.facts?.rawText ?? "")) &&
-    !lesion;
+    isPepperCurlYellowCase({
+      facts: options.facts,
+      evidence: options.evidence,
+      crop: options.crop,
+    }) && !lesion;
 
   const pool: RankedCause[] = considered.length > 0 ? considered : curlYellow ? CURL_YELLOW_HYPOTHESES : [];
   if (curlYellow) {
@@ -459,14 +548,21 @@ export function admitEvidenceGatedCauses(options: {
     unique.push({ ...cause, rank: unique.length + 1 });
   }
 
+  const admittedLabels = unique.slice(0, 3).map((cause) => cause.label);
   const debug: CauseRankingDebug = {
+    extractedSymptoms: options.evidence.symptoms,
+    rawModelCauses: labels,
+    playbookSelectedCauses: [],
+    preGateRankedCauses: labels,
+    admittedCauses: admittedLabels,
+    sprayIntent: Boolean(options.facts?.asksForProducts),
+    pesticideTarget: admittedHasPesticideTarget(unique.slice(0, 3)),
+    finalVisibleCauses: admittedLabels,
     lesionEvidence: lesion,
     observedSymptoms: options.evidence.symptoms,
     photoFindings: findings,
     causes: admissions,
     rejected,
-    rawModelCauses: labels,
-    admittedCauses: unique.slice(0, 3).map((cause) => cause.label),
   };
 
   return { admitted: unique.slice(0, 3), rejected, debug };
@@ -531,8 +627,7 @@ export function curlYellowFollowUp(options: {
 export function collectRawModelCauses(payload: AgronomicCasePayload): string[] {
   const fromPayload = [
     ...(payload.rawModelCauses ?? []),
-    ...(payload.likelyCauses ?? []),
-    ...(payload.rankedCauses ?? []).map((cause) => cause.label),
+    ...extractNamedCausesFromProse(payload),
   ];
   const unique: string[] = [];
   for (const label of fromPayload) {
@@ -573,17 +668,27 @@ function stripForbiddenVisibleLanguage(
 ): string {
   if (!text.trim()) return text;
   let next = text;
-  if (!options.lesionEvidence) {
-    next = next
-      .replace(FORBIDDEN_UNGATED_LESION, "")
-      .replace(COPPER_SPRAY_CLASS, "")
-      .replace(/\b(fungal vs bacterial|fungal and bacterial leaf spots)\b/gi, "")
-      .replace(/\bIF THE SPOTS FIT A (FUNGAL|BACTERIAL) LEAF SPOT\b/gi, "");
-  }
-  if (!options.allowSpray) {
-    next = next
-      .replace(/\n*(?:if a spray is needed)[:\s-]*[\s\S]*?(?=\n[A-Z]|$)/gi, "\n")
-      .replace(/\bif a spray is needed\b/gi, "");
+  const scrubLesion = !options.lesionEvidence;
+  const scrubSpray = !options.allowSpray;
+  for (let pass = 0; pass < 6; pass += 1) {
+    const before = next;
+    if (scrubLesion) {
+      next = next
+        .replace(LESION_NAME_GLOBAL, "")
+        .replace(LESION_SIGN_GLOBAL, "")
+        .replace(FUNGAL_VS_BACTERIAL_GLOBAL, "")
+        .replace(/\bIF THE SPOTS FIT A (FUNGAL|BACTERIAL) LEAF SPOT\b/gi, "");
+    }
+    if (scrubSpray) {
+      next = next
+        .replace(/\n*(?:if a spray is needed)[:\s—-]*[\s\S]*?(?=\n[A-Z]|$)/gi, "\n")
+        .replace(SPRAY_HEADING_GLOBAL, "")
+        .replace(SPRAY_CLASS_GLOBAL, "")
+        .replace(COPPER_SPRAY_CLASS_GLOBAL, "");
+    } else if (scrubLesion) {
+      next = next.replace(SPRAY_CLASS_GLOBAL, "").replace(COPPER_SPRAY_CLASS_GLOBAL, "");
+    }
+    if (before === next) break;
   }
   if (!options.allowDestruction) {
     next = next.replace(
@@ -622,19 +727,28 @@ function diagnosisFromAdmitted(options: {
   curlYellow: boolean;
   fallbackWhy?: string | null;
   photoUncertain?: boolean;
+  lesionEvidence?: boolean;
 }): string {
   const conservativeCurl =
     "The curling and yellowing you described is still unconfirmed. Sucking insects under new leaves are the first thing to check. A nutrient pattern would rise only if older leaves are worse than new ones.";
   const causeWhy = options.admitted
     .map((cause) => cause.why)
     .filter(Boolean)
+    .filter((item) => options.lesionEvidence || !containsUngatedLesionLeak(item))
     .filter((item, index, all) => all.indexOf(item) === index);
   let body = causeWhy.join(" ");
+  const fallback = options.fallbackWhy?.trim() || "";
+  const fallbackUsable =
+    Boolean(fallback) &&
+    (options.lesionEvidence || !containsUngatedLesionLeak(fallback));
   if (!body) {
     if (options.curlYellow) body = conservativeCurl;
-    else body = options.fallbackWhy?.trim() || "There is not enough evidence yet to name a cause.";
+    else body = fallbackUsable ? fallback : "There is not enough evidence yet to name a cause.";
   }
   if (options.photoUncertain && options.curlYellow) {
+    body = conservativeCurl;
+  }
+  if (options.curlYellow && containsUngatedLesionLeak(body)) {
     body = conservativeCurl;
   }
   if (options.photoLine?.trim()) {
@@ -676,9 +790,11 @@ export function applyAdmittedCauseContract(
   const pesticideTarget = admittedHasPesticideTarget(admitted);
   const allowSpray = Boolean(options.facts.asksForProducts) && pesticideTarget;
   const allowDestruction = farmerConsideringDestruction(options.facts.rawText);
-  const curlYellow =
-    (options.facts.crop ?? "").toLowerCase().includes("pepper") &&
-    (options.evidence.symptoms.includes("leaf curl") || /\bcurl/.test(options.facts.rawText));
+  const curlYellow = isPepperCurlYellowCase({
+    facts: options.facts,
+    evidence: options.evidence,
+    crop: options.facts.crop,
+  });
 
   const clean = (value: string) =>
     stripForbiddenVisibleLanguage(value, {
@@ -686,6 +802,19 @@ export function applyAdmittedCauseContract(
       allowSpray,
       allowDestruction,
     });
+
+  const stillLeaks = (value: string | null | undefined) => {
+    if (!value?.trim()) return false;
+    if (allowSpray && lesion) return false;
+    if (!lesion && containsUngatedLesionLeak(value)) return true;
+    if (
+      !allowSpray &&
+      /\bif a spray is needed|mancozeb|chlorothalonil|copper spray/i.test(value)
+    ) {
+      return true;
+    }
+    return false;
+  };
 
   const photoLine = options.hasPhotos
     ? photoEvidenceNarrative({
@@ -702,32 +831,26 @@ export function applyAdmittedCauseContract(
       curlYellow,
       fallbackWhy: payload.diagnosisWhy || payload.preliminaryAssessment,
       photoUncertain,
+      lesionEvidence: lesion,
     }),
   );
 
   let preliminaryAssessment = clean(payload.preliminaryAssessment);
-  if (
-    curlYellow ||
-    photoUncertain ||
-    (!lesion && FORBIDDEN_UNGATED_LESION.test(payload.preliminaryAssessment || ""))
-  ) {
+  if (curlYellow || photoUncertain || stillLeaks(preliminaryAssessment) || stillLeaks(payload.preliminaryAssessment)) {
     preliminaryAssessment = diagnosisWhy;
   }
 
-  const checks = payload.checksToday.map(clean).filter(Boolean);
-  const defaultChecks = [
-    "Turn over curled new leaves and look for insects, mites, cast skins, or sticky residue",
-    "Compare whether yellowing is worse on the newest curled leaves or the older lower leaves",
-  ];
-
+  let checks = payload.checksToday.map(clean).filter(Boolean);
   const avoid = payload.actionsToAvoid
     .map(clean)
-    .filter((item) => item && (allowDestruction || !DESTRUCTION_COPY.test(item)));
+    .filter((item) => item && (allowDestruction || !DESTRUCTION_COPY.test(item)))
+    .filter((item) => !stillLeaks(item));
 
-  const safeActions = payload.safeActionsNow
+  let safeActions = payload.safeActionsNow
     .map(clean)
     .filter((item) => item && (allowDestruction || !DESTRUCTION_COPY.test(item)))
-    .filter((item) => lesion || !/\b(remove|pick off|strip)\b[\s\S]{0,50}\b(leaves?|leaf)\b/i.test(item));
+    .filter((item) => lesion || !/\b(remove|pick off|strip)\b[\s\S]{0,50}\b(leaves?|leaf)\b/i.test(item))
+    .filter((item) => !stillLeaks(item));
   if (curlYellow && !safeActions.some((item) => /fertilizer/i.test(item))) {
     safeActions.push(HOLD_FERTILIZER);
   }
@@ -735,10 +858,11 @@ export function applyAdmittedCauseContract(
   const whatWouldChange = admitted
     .map((cause) => cause.increasesIf)
     .map(clean)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((item) => !stillLeaks(item));
 
   let nextQuestion = payload.nextQuestion.trim();
-  if (curlYellow && (!nextQuestion || FORBIDDEN_UNGATED_LESION.test(nextQuestion))) {
+  if (curlYellow && (!nextQuestion || stillLeaks(nextQuestion) || FORBIDDEN_UNGATED_LESION.test(nextQuestion))) {
     nextQuestion = curlYellowFollowUp({
       hasPhotos: options.hasPhotos,
       findings,
@@ -747,6 +871,13 @@ export function applyAdmittedCauseContract(
     });
   }
   nextQuestion = clean(nextQuestion);
+
+  if (curlYellow && (checks.length === 0 || checks.some((item) => stillLeaks(item) || /\b(pale|greasy|spot|spray|cercospora|water[\s-]?soaked)\b/i.test(item)))) {
+    checks = [...CURL_YELLOW_CHECKS];
+  }
+  if (curlYellow && (safeActions.length === 0 || safeActions.some((item) => stillLeaks(item)))) {
+    safeActions = [...CURL_YELLOW_ACTIONS];
+  }
 
   const next: AgronomicCasePayload = {
     ...payload,
@@ -757,13 +888,19 @@ export function applyAdmittedCauseContract(
     diagnosisWhy,
     preliminaryAssessment,
     whatWouldChangeDiagnosis: whatWouldChange,
-    checksToday:
-      curlYellow && (checks.length === 0 || checks.some((item) => FORBIDDEN_UNGATED_LESION.test(item)))
-        ? defaultChecks
-        : checks,
+    checksToday: checks,
     safeActionsNow: safeActions,
-    actionsToAvoid: avoid,
-    monitorNext: payload.monitorNext ? clean(payload.monitorNext) : payload.monitorNext,
+    actionsToAvoid:
+      curlYellow && (avoid.length === 0 || avoid.some((item) => stillLeaks(item)))
+        ? [...CURL_YELLOW_AVOID]
+        : avoid,
+    monitorNext: payload.monitorNext && !stillLeaks(clean(payload.monitorNext))
+      ? clean(payload.monitorNext)
+      : curlYellow
+        ? "Watch whether new growth stays curled and whether more plants join in over 2–3 days."
+        : payload.monitorNext
+          ? clean(payload.monitorNext)
+          : payload.monitorNext,
     nextQuestion,
     sprayGuidanceText: allowSpray && payload.sprayGuidanceText ? clean(payload.sprayGuidanceText) : null,
     verifiedInputOptions: allowSpray ? payload.verifiedInputOptions : [],
@@ -772,6 +909,49 @@ export function applyAdmittedCauseContract(
   if (!allowSpray) {
     next.sprayGuidanceText = null;
   }
+
+  if (!lesion) {
+    if (next.weatherBrief && stillLeaks(next.weatherBrief)) {
+      next.weatherBrief = null;
+    }
+    next.weatherRisks = (next.weatherRisks ?? []).filter(
+      (risk) =>
+        !stillLeaks(risk.diseaseOrPest) &&
+        !/\b(cercospora|frogeye|leaf[- ]spot|bacterial spot)\b/i.test(risk.diseaseOrPest),
+    );
+    if (curlYellow && next.weatherBrief && /\b(leaf[- ]spot|cercospora|fungal|bacterial)\b/i.test(next.weatherBrief)) {
+      next.weatherBrief = null;
+    }
+  }
+
+  const scrubbedFields: Array<keyof AgronomicCasePayload> = [
+    "preliminaryAssessment",
+    "diagnosisWhy",
+    "nextQuestion",
+    "monitorNext",
+    "sprayGuidanceText",
+    "weatherBrief",
+  ];
+  for (const field of scrubbedFields) {
+    const value = next[field];
+    if (typeof value === "string" && stillLeaks(value)) {
+      if (field === "preliminaryAssessment" || field === "diagnosisWhy") {
+        next[field] = diagnosisWhy as never;
+      } else if (field === "sprayGuidanceText") {
+        next[field] = allowSpray && lesion ? (clean(value) as never) : (null as never);
+      } else if (field === "weatherBrief") {
+        next[field] = null as never;
+      } else {
+        next[field] = clean(value) as never;
+      }
+    }
+  }
+  next.checksToday = next.checksToday.filter((item) => !stillLeaks(item));
+  next.safeActionsNow = next.safeActionsNow.filter((item) => !stillLeaks(item));
+  next.actionsToAvoid = next.actionsToAvoid.filter((item) => !stillLeaks(item));
+  if (curlYellow && next.checksToday.length === 0) next.checksToday = [...CURL_YELLOW_CHECKS];
+  if (curlYellow && next.safeActionsNow.length === 0) next.safeActionsNow = [...CURL_YELLOW_ACTIONS];
+  if (curlYellow && next.actionsToAvoid.length === 0) next.actionsToAvoid = [...CURL_YELLOW_AVOID];
 
   return next;
 }

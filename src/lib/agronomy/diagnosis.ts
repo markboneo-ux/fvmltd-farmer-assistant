@@ -25,7 +25,7 @@ import { extractObservedEvidence, genericCauseList } from "./evidence-hierarchy"
 import { cropPlaybookFor, rankCropCauses } from "./crop-differentials";
 import { agronomicModeFor } from "./case-modes";
 import { isGenericCareQuestion, spotsAreObserved } from "./case-continuity";
-import { hasLesionEvidence, isLesionSpecificDisease } from "./evidence-gated-causes";
+import { hasLesionEvidence, isLesionSpecificDisease, containsUngatedLesionLeak, isPepperCurlYellowCase } from "./evidence-gated-causes";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -377,6 +377,7 @@ export function playbookFor(
     text: facts.rawText,
     crop: facts.crop,
     evidence,
+    facts,
   });
   const cropSpecific = cropPlaybookFor({
     crop: facts.crop,
@@ -579,42 +580,70 @@ export function applyDiagnosticPlaybook(
   const lesion = hasLesionEvidence({ evidence, facts });
   const incomingLesionWithoutEvidence =
     likelyCauses.some((label) => isLesionSpecificDisease(label)) && !lesion;
+  const curlYellow = isPepperCurlYellowCase({ facts, evidence, crop: facts.crop }) && !lesion;
+  const incomingLeaky =
+    curlYellow &&
+    (containsUngatedLesionLeak(next.preliminaryAssessment) ||
+      next.checksToday.some((item) => containsUngatedLesionLeak(item)) ||
+      next.safeActionsNow.some((item) => containsUngatedLesionLeak(item)) ||
+      next.actionsToAvoid.some((item) => containsUngatedLesionLeak(item)));
   const usePlaybookCauses =
     likelyCauses.length === 0 ||
     incomingGeneric ||
     (cropSpecific && incomingGeneric) ||
-    incomingLesionWithoutEvidence;
+    incomingLesionWithoutEvidence ||
+    curlYellow;
 
   next = {
     ...next,
     likelyCauses: usePlaybookCauses ? playbook.likelyCauses : likelyCauses,
     diagnosisWhy:
-      !lesion && /\b(cercospora|frogeye|bacterial leaf spot|pale[- ]centr|water-?soaked|greasy)\b/i.test(
+      curlYellow ||
+      (!lesion && /\b(cercospora|frogeye|bacterial leaf spot|pale[- ]centr|water[\s-]?soaked|greasy)\b/i.test(
         next.diagnosisWhy || "",
-      )
+      ))
         ? playbook.why
         : next.diagnosisWhy || playbook.why,
     whatWouldChangeDiagnosis:
-      !lesion &&
-      (payload.whatWouldChangeDiagnosis ?? []).some((item) =>
-        /\b(pale[- ]centr|greasy|water-?soaked|cercospora)\b/i.test(item),
-      )
+      curlYellow ||
+      (!lesion &&
+        (payload.whatWouldChangeDiagnosis ?? []).some((item) =>
+          /\b(pale[- ]centr|greasy|water[\s-]?soaked|cercospora)\b/i.test(item),
+        ))
         ? playbook.whatWouldChange
         : disconfirmers.length > 0
           ? disconfirmers
           : playbook.whatWouldChange,
     monitorNext: next.monitorNext || playbook.monitor,
-    checksToday: next.checksToday.length > 0 ? next.checksToday : playbook.checks,
+    checksToday:
+      curlYellow && (next.checksToday.length === 0 || incomingLeaky || next.checksToday.some((item) => containsUngatedLesionLeak(item)))
+        ? playbook.checks
+        : next.checksToday.length > 0
+          ? next.checksToday
+          : playbook.checks,
     safeActionsNow:
-      next.safeActionsNow.length > 0 ? next.safeActionsNow : playbook.actionsToday,
-    actionsToAvoid: next.actionsToAvoid.length > 0 ? next.actionsToAvoid : playbook.avoid,
+      curlYellow && (next.safeActionsNow.length === 0 || incomingLeaky || next.safeActionsNow.some((item) => containsUngatedLesionLeak(item)))
+        ? playbook.actionsToday
+        : next.safeActionsNow.length > 0
+          ? next.safeActionsNow
+          : playbook.actionsToday,
+    actionsToAvoid:
+      curlYellow && (next.actionsToAvoid.length === 0 || incomingLeaky || next.actionsToAvoid.some((item) => containsUngatedLesionLeak(item)))
+        ? playbook.avoid
+        : next.actionsToAvoid.length > 0
+          ? next.actionsToAvoid
+          : playbook.avoid,
     photoRecommended: next.photoRecommended || playbook.photoHelpful,
     agronomicMode: mode,
   };
   if (
-    (celerySpecific || cropSpecific || isThinAssessment(payload)) &&
+    (celerySpecific || cropSpecific || isThinAssessment(payload) || curlYellow || incomingLeaky) &&
     playbook.why &&
-    (isThinAssessment(payload) || incomingGeneric || next.preliminaryAssessment.length < 80)
+    (isThinAssessment(payload) ||
+      incomingGeneric ||
+      incomingLeaky ||
+      curlYellow ||
+      next.preliminaryAssessment.length < 80)
   ) {
     next.preliminaryAssessment = playbook.why;
   }

@@ -321,6 +321,7 @@ export function applyQualityCorrection(
       text: facts.rawText,
       crop: facts.crop,
       evidence,
+      facts,
     });
   const playbook = cropPlaybookFor({
     crop: facts.crop,
@@ -396,7 +397,7 @@ export function applyQualityCorrection(
     ) ||
       next.preliminaryAssessment.trim().length < 80 ||
       (!spotsAreObserved(evidence, options.previousState, facts) &&
-        /pale centre|water-soaked|cercospora|if a spray is needed/i.test(next.preliminaryAssessment)))
+        /pale[- ]centr|water[\s-]?soaked|cercospora|frogeye|if a spray is needed|mancozeb|chlorothalonil|greasy/i.test(next.preliminaryAssessment)))
   ) {
     next = { ...next, preliminaryAssessment: playbook.why, diagnosisWhy: playbook.why };
   }
@@ -545,9 +546,23 @@ export function applyQualityCorrection(
   if (
     playbook &&
     !spotsObserved &&
-    next.checksToday.some((item) => /pale centre|water-soaked|cercospora|if a spray is needed/i.test(item))
+    next.checksToday.some((item) => /pale[- ]centr|water[\s-]?soaked|cercospora|frogeye|if a spray is needed|greasy|mancozeb|chlorothalonil/i.test(item))
   ) {
     next = { ...next, checksToday: playbook.checks };
+  }
+  if (
+    playbook &&
+    !spotsObserved &&
+    next.safeActionsNow.some((item) => /pale[- ]centr|water[\s-]?soaked|cercospora|if a spray is needed|mancozeb|chlorothalonil|copper spray|greasy/i.test(item))
+  ) {
+    next = { ...next, safeActionsNow: playbook.actionsToday };
+  }
+  if (
+    playbook &&
+    !spotsObserved &&
+    next.actionsToAvoid.some((item) => /pale[- ]centr|water[\s-]?soaked|cercospora|if a spray is needed|mancozeb|chlorothalonil|greasy/i.test(item))
+  ) {
+    next = { ...next, actionsToAvoid: playbook.avoid };
   }
 
   next = {

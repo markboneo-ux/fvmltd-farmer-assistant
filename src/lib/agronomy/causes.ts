@@ -68,6 +68,7 @@ export function rankDiagnosticCauses(
     text,
     crop,
     evidence,
+    facts: options.facts,
     limit: 5,
   });
 

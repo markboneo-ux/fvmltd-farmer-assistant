@@ -27,6 +27,7 @@ import {
   type IntentCategory,
 } from "@/lib/assistant/intents";
 import { applyDiagnosticPlaybook } from "@/lib/agronomy/diagnosis";
+import { cropPlaybookFor } from "@/lib/agronomy/crop-differentials";
 import { needsDiagnosisRewrite, THIN_REWRITE_INSTRUCTION, applyQualityCorrection } from "@/lib/agronomy/response-quality";
 import { answerShapeForIntent } from "./answer-structure";
 import { rankDiagnosticCauses, rankedCausesForPrompt } from "./causes";
@@ -70,12 +71,14 @@ import { farmerIntentFromMessage, photoUnknownLine } from "./case-continuity";
 import {
   admitEvidenceGatedCauses,
   applyAdmittedCauseContract,
+  collectRawModelCauses,
   farmerReportedLesions,
   gatedCausesToEntries,
   hasLesionEvidence,
   logCauseDebug,
   sanitizePhotoFindings,
   trustedPhotoFindings,
+  admittedHasPesticideTarget,
   type CauseRankingDebug,
 } from "./evidence-gated-causes";
 import { agronomicModeFor, modeAnswerGuide, shouldShowRankedCauses } from "./case-modes";
@@ -624,13 +627,32 @@ function attachCropHealthState(
   }
 
   const gated = admitEvidenceGatedCauses({
-    incoming: payload.rankedCauses?.length ? payload.rankedCauses : payload.likelyCauses ?? [],
+    incoming: payload.likelyCauses?.length
+      ? payload.likelyCauses
+      : payload.rankedCauses?.length
+        ? payload.rankedCauses
+        : [],
     evidence,
     facts,
     state: previousState,
     crop: facts.crop,
   });
-  const rawModelCauses = payload.rawModelCauses ?? [];
+  const playbook = cropPlaybookFor({
+    crop: facts.crop,
+    facts,
+    evidence,
+    farmerLevel: facts.farmerLevel,
+  });
+  const cropDifferential = rankDiagnosticCauses(facts.rawText, {
+    crop: facts.crop,
+    facts,
+    evidence,
+  });
+  const rawModelCauses = collectRawModelCauses({
+    ...payload,
+    rawModelCauses: payload.rawModelCauses ?? [],
+  });
+  const preGateRankedCauses = cropDifferential.map((cause) => cause.label);
   const contracted = applyAdmittedCauseContract(
     {
       ...payload,
@@ -646,14 +668,37 @@ function attachCropHealthState(
     },
   );
   const admitted = contracted.admittedCauses ?? [];
+  const finalVisibleCauses = admitted.map((cause) => cause.label);
   const causeDebug: CauseRankingDebug = {
-    ...gated.debug,
     stage: "final",
-    lesionEvidence: gated.debug.lesionEvidence,
+    extractedSymptoms: evidence.symptoms,
     rawModelCauses,
-    admittedCauses: admitted.map((cause) => cause.label),
+    playbookSelectedCauses: playbook?.likelyCauses ?? [],
+    preGateRankedCauses,
+    admittedCauses: finalVisibleCauses,
+    sprayIntent: Boolean(facts.asksForProducts),
+    pesticideTarget: admittedHasPesticideTarget(admitted),
+    finalVisibleCauses,
+    lesionEvidence: gated.debug.lesionEvidence,
+    observedSymptoms: evidence.symptoms,
+    photoFindings: gated.debug.photoFindings,
+    causes: gated.debug.causes,
+    rejected: gated.debug.rejected,
   };
   logCauseDebug(causeDebug, "final");
+  console.info(
+    "[fvm-first-turn-debug]",
+    JSON.stringify({
+      extractedSymptoms: causeDebug.extractedSymptoms,
+      rawModelCauses: causeDebug.rawModelCauses,
+      playbookSelectedCauses: causeDebug.playbookSelectedCauses,
+      preGateRankedCauses: causeDebug.preGateRankedCauses,
+      admittedCauses: causeDebug.admittedCauses,
+      sprayIntent: causeDebug.sprayIntent,
+      pesticideTarget: causeDebug.pesticideTarget,
+      finalVisibleCauses: causeDebug.finalVisibleCauses,
+    }),
+  );
 
   const farmerHasLesions = farmerReportedLesions(facts.rawText);
   const photoFindings = hasPhotos
@@ -1497,7 +1542,9 @@ export async function runAgronomicCase(options: {
     }),
     askForCrop: turn.askForCrop,
     askForCountry,
-    answerShape: `${modeAnswerGuide(turnMode)}\n\n${answerShapeForIntent(classified.intent, turnMode)}`,
+    answerShape: `${modeAnswerGuide(turnMode)}\n\n${answerShapeForIntent(classified.intent, turnMode, {
+      asksForSpray: knownFacts.asksForProducts,
+    })}`,
     relevance: relevanceInstructions(
       rankTurnContext({
         intent: classified.intent,
@@ -1674,7 +1721,13 @@ export async function runAgronomicCase(options: {
         hasImages: images.length > 0,
       };
       const applyPlaybookAndGuards = (payload: AgronomicCasePayload) => {
-        let next = attachIntent(payload, turn);
+        let next = attachIntent(
+          {
+            ...payload,
+            rawModelCauses: collectRawModelCauses(payload),
+          },
+          turn,
+        );
         next = applyDiagnosticPlaybook(next, {
           facts: knownFacts,
           farmerLevel: knownFacts.farmerLevel,

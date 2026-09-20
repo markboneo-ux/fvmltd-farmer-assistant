@@ -46,7 +46,19 @@ type CauseSeed = {
 const ALL_CROPS = ["*"];
 
 function cropKey(crop: string | null | undefined): string {
-  return (crop ?? "").trim().toLowerCase();
+  const raw = (crop ?? "").trim().toLowerCase();
+  if (
+    /\b(sweet\s+|hot\s+|bell\s+)?peppers?\b/.test(raw) ||
+    /\bcapsicum\b/.test(raw) ||
+    /\bscotch bonnet\b/.test(raw)
+  ) {
+    return "pepper";
+  }
+  return raw;
+}
+
+function cropFromFacts(facts: KnownFarmerFacts, crop?: string | null): string {
+  return cropKey(crop) || cropKey(facts.crop) || (/\bpeppers?\b/i.test(facts.rawText) ? "pepper" : "");
 }
 
 function allowsCrop(seed: CauseSeed, crop: string): boolean {
@@ -326,13 +338,14 @@ export function rankCropCauses(options: {
   text: string;
   crop?: string | null;
   evidence: ObservedEvidence;
+  facts?: KnownFarmerFacts | null;
   limit?: number;
 }): RankedCause[] {
-  const crop = cropKey(options.crop);
+  const crop = cropKey(options.crop) || (options.facts ? cropFromFacts(options.facts, options.crop) : "");
   const text = options.text.toLowerCase();
   const scored: Array<RankedCause & { score: number }> = [];
 
-  const lesion = hasLesionEvidence({ evidence: options.evidence });
+  const lesion = hasLesionEvidence({ evidence: options.evidence, facts: options.facts });
   for (const seed of SEEDS) {
     if (crop && !allowsCrop(seed, crop) && !seed.crops.includes("*")) continue;
     if (!crop && !seed.crops.includes("*") && seed.category !== "insects") continue;
@@ -383,9 +396,16 @@ export function cropPlaybookFor(options: {
   farmerLevel: FarmerLevel | null;
   ranked?: RankedCause[];
 }): CropPlaybook | null {
-  const crop = cropKey(options.crop);
+  const crop = cropFromFacts(options.facts, options.crop);
   const text = options.facts.rawText.toLowerCase();
-  const ranked = options.ranked ?? rankCropCauses({ text: options.facts.rawText, crop, evidence: options.evidence });
+  const ranked =
+    options.ranked ??
+    rankCropCauses({
+      text: options.facts.rawText,
+      crop,
+      evidence: options.evidence,
+      facts: options.facts,
+    });
   const labels = ranked.slice(0, 3).map((item) => item.label);
 
   if (options.evidence.observedPest === "whiteflies" && !options.evidence.secondUnexplainedSymptom) {
@@ -605,9 +625,12 @@ function pepperCurlYellowPlaybook(
   farmerLevel: FarmerLevel | null,
   facts: KnownFarmerFacts,
 ): CropPlaybook {
+  const filtered = labels
+    .filter((label) => !/\b(cercospora|bacterial leaf spot|frogeye|virus)\b/i.test(label))
+    .slice(0, 3);
   const causes =
-    labels.length >= 2
-      ? labels.filter((label) => !/\b(cercospora|bacterial leaf spot|frogeye|virus)\b/i.test(label)).slice(0, 3)
+    filtered.length >= 2
+      ? filtered
       : [
           "Aphids or other sucking insects",
           "Nutrient shortage or uneven feeding",
