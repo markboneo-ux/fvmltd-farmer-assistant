@@ -27,7 +27,7 @@ import {
   type IntentCategory,
 } from "@/lib/assistant/intents";
 import { applyDiagnosticPlaybook } from "@/lib/agronomy/diagnosis";
-import { needsDiagnosisRewrite, THIN_REWRITE_INSTRUCTION } from "@/lib/agronomy/response-quality";
+import { needsDiagnosisRewrite, THIN_REWRITE_INSTRUCTION, applyQualityCorrection } from "@/lib/agronomy/response-quality";
 import { answerShapeForIntent } from "./answer-structure";
 import { rankDiagnosticCauses, rankedCausesForPrompt } from "./causes";
 import { rankTurnContext, relevanceInstructions } from "./relevance";
@@ -64,6 +64,8 @@ import {
   suspectedCausesFromRanked,
   type CropHealthCaseState,
 } from "./crop-health-state";
+import { extractObservedEvidence } from "./evidence-hierarchy";
+import { agronomicModeFor, modeAnswerGuide, shouldShowRankedCauses } from "./case-modes";
 import { specificPhotoRequest } from "./photo-request";
 import {
   countryKnowledgeHooks,
@@ -503,10 +505,16 @@ function attachCropHealthState(
   hasPhotos: boolean,
   photoAlreadyRequested: boolean,
 ): AgronomicCasePayload {
+  const evidence = extractObservedEvidence({
+    facts,
+    text: facts.rawText,
+    hasPhotos,
+  });
+  const mode = agronomicModeFor({ evidence, facts });
   const differential = buildDifferentialDiagnosis({
     text: facts.rawText,
     facts,
-    ranked: payload.rankedCauses,
+    ranked: shouldShowRankedCauses(mode, evidence) ? payload.rankedCauses : [],
     hasPhotos,
     photoAlreadyRequested,
   });
@@ -548,12 +556,13 @@ function attachCropHealthState(
     diagnosticConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
     missingInformation: payload.internalMissingInformation,
     recommendedActions: payload.safeActionsNow,
-    suspectedPest: differential.suspectedPest,
+    suspectedPest: evidence.observedPestLabel ?? differential.suspectedPest,
     suspectedDiseaseOrDisorder: differential.suspectedDiseaseOrDisorder,
     suspectedCause: differential.suspectedCause,
     confirmedDiagnosis: null,
     nextDistinguishingCheck: payload.nextQuestion || differential.nextObservation,
     requestedPhotoView: photo?.view ?? null,
+    agronomicMode: mode,
   });
 
   return {
@@ -561,6 +570,7 @@ function attachCropHealthState(
     likelyCauses: (payload.likelyCauses ?? differential.hypotheses.map((item) => item.label)).slice(0, 3),
     rankedCauses: (payload.rankedCauses ?? []).slice(0, 3),
     diagnosisConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
+    agronomicMode: mode,
     cropHealthState: state,
   };
 }
@@ -1059,8 +1069,17 @@ export async function runAgronomicCase(options: {
     asksForProducts: knownFacts.asksForProducts,
     asksAboutWeather: knownFacts.asksAboutWeather,
   });
+  const turnEvidence = extractObservedEvidence({
+    facts: knownFacts,
+    text: effectiveMessage,
+  });
+  const turnMode = agronomicModeFor({ evidence: turnEvidence, facts: knownFacts });
   const rankedCauses = isDiagnosticIntent(classified.intent)
-    ? rankDiagnosticCauses(effectiveMessage)
+    ? rankDiagnosticCauses(effectiveMessage, {
+        crop: knownFacts.crop,
+        facts: knownFacts,
+        evidence: turnEvidence,
+      })
     : [];
 
   const researchNeed = classifyResearchNeed({
@@ -1261,7 +1280,7 @@ export async function runAgronomicCase(options: {
     }),
     askForCrop: turn.askForCrop,
     askForCountry,
-    answerShape: answerShapeForIntent(classified.intent),
+    answerShape: `${modeAnswerGuide(turnMode)}\n\n${answerShapeForIntent(classified.intent, turnMode)}`,
     relevance: relevanceInstructions(
       rankTurnContext({
         intent: classified.intent,
@@ -1272,7 +1291,9 @@ export async function runAgronomicCase(options: {
         webResearchUsed: Boolean(research?.used),
       }),
     ),
-    rankedCauses: rankedCausesForPrompt(rankedCauses),
+    rankedCauses: rankedCausesForPrompt(rankedCauses, {
+      observedPest: turnEvidence.observedPestLabel,
+    }),
     researchNotes: [
       research ? researchNotesForPrompt(research) : "",
       isDiagnosticIntent(classified.intent)
@@ -1321,7 +1342,9 @@ export async function runAgronomicCase(options: {
       allowedCrops: turn.allowedCrops,
       askForCrop: turn.askForCrop,
     }),
-    rankedCausesForPrompt(rankedCauses),
+    rankedCausesForPrompt(rankedCauses, {
+      observedPest: turnEvidence.observedPestLabel,
+    }),
     research ? researchNotesForPrompt(research) : "",
     askForCountry
       ? 'Country is required for this local question. Ask: "What country are you farming in?" Give general agronomy only until the country is known. Do not use Trinidad information for another country.'
@@ -1585,11 +1608,18 @@ export async function runAgronomicCase(options: {
     return {
       ok: true,
       case: attachCropHealthState(
-        applyOutputGuard(parsed, {
-          userMessage: knownFacts.rawText,
-          crop: knownFacts.crop,
-          allowedCrops: turn.allowedCrops,
-        }),
+        applyQualityCorrection(
+          applyOutputGuard(parsed, {
+            userMessage: knownFacts.rawText,
+            crop: knownFacts.crop,
+            allowedCrops: turn.allowedCrops,
+          }),
+          {
+            facts: knownFacts,
+            weatherSignals: turnEvidence.weatherSignals,
+            ranked: rankedCauses,
+          },
+        ),
         knownFacts,
         images.length > 0,
         photoAlreadyRequested,

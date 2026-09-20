@@ -4,32 +4,41 @@
 
 import type { IntentCategory } from "@/lib/assistant/intents";
 import { isBusinessIntent, isCalculationIntent, isDiagnosticIntent } from "@/lib/assistant/intents";
+import type { AgronomicMode } from "./case-modes";
 
-export const AGRICULTURAL_ANSWER_SHAPE = `For a meaningful crop-health question, write a complete farmer-facing answer in preliminaryAssessment. Use short paragraphs or 5–10 useful bullets. Do not artificially shorten it.
+export const AGRICULTURAL_ANSWER_SHAPE = `Write ONE coherent farmer-facing answer in preliminaryAssessment. Do not repeat the same guidance in paragraphs and again as cards.
 
-Cover, in this order, using plain sentences (no markdown headings, and do not say "triage" unless you explain it):
-1. WHAT I THINK IS HAPPENING — 1 to 3 likely causes, not one jump-to diagnosis
-2. WHAT TO CHECK TODAY
-3. WHAT TO DO NOW — cultural and IPM steps first
-4. SPRAY OR FERTILIZER OPTIONS only when justified; if local registration is not verified, say so
-5. WEATHER IMPLICATIONS only when weather actually changes diagnosis or management
-6. EXACTLY WHAT INFORMATION OR PHOTO IS NEEDED NEXT if uncertainty remains (a specific photo such as underside of a leaf, whole plant, roots, stem lesion, cut fruit, or field pattern — never "more photos")
+Use this order, skipping any heading that adds no value. Plain sentences, no markdown headings, and do not say "triage" unless you explain it:
 
-Skip a heading when it is not needed.
-Use Integrated Pest Management: cultural/physical, then biological, then chemical when justified. Do not make farmers feel guilty for using registered products.
+1. WHAT I THINK IS MOST LIKELY
+2. WHY
+3. OTHER POSSIBILITIES — only if genuinely unresolved. Skip this when the farmer already reported a pest and there is no second unexplained symptom.
+4. CHECK THIS NOW
+5. WHAT TO DO TODAY — low-risk actions first. Do not automatically say to remove leaves or plants.
+6. IF A SPRAY IS NEEDED — only if the farmer asked or a spray is justified. Separate VERIFIED FOR THIS COUNTRY/CROP from GENERAL ACTIVE-INGREDIENT CLASSES NOT YET VERIFIED LOCALLY. Never invent registration.
+7. WEATHER EFFECT — only if weather changes a ranking or a decision (wetness, spray timing, heat, dry). Do not append a generic "wet weather increases disease pressure" line.
+8. WHAT WOULD CHANGE MY ASSESSMENT
+9. ONE NEXT QUESTION or ONE SPECIFIC PHOTO REQUEST
+
+Fill checksToday and safeActionsNow with the same unique points — do not write a second copy in the prose if those arrays are populated.
+Use Integrated Pest Management: cultural/physical, then biological, then chemical when justified.
 At low confidence, investigate before recommending pulling plants, dumping crop, or a high-risk spray.
+Keep language simple and practical.`;
 
-Keep language simple, practical, and farmer-friendly. Not academic.
-
-For simple maths, stay concise and skip this structure.
-For cashflow / bank work, use the business table instead of a diagnosis card.`;
-
-export function answerShapeForIntent(intent: IntentCategory): string {
+export function answerShapeForIntent(
+  intent: IntentCategory,
+  mode?: AgronomicMode | null,
+): string {
   if (isCalculationIntent(intent)) {
     return "Answer the calculation directly and briefly. Show the working. Do not use a diagnosis card.";
   }
   if (isBusinessIntent(intent)) {
     return "This is farm business, not crop diagnosis. Ask only missing numbers. Never invent assumptions without labelling them.";
+  }
+  if (mode === "OBSERVED_PEST_MANAGEMENT") {
+    return `${AGRICULTURAL_ANSWER_SHAPE}
+
+This is pest management, not a cause-ranking case. Do not show generic abiotic causes.`;
   }
   if (isDiagnosticIntent(intent) || intent === "general_agriculture") {
     return AGRICULTURAL_ANSWER_SHAPE;

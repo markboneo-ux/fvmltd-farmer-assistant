@@ -53,7 +53,7 @@ export function specificPhotoRequest(options: {
   ) {
     return pick(
       "underside_of_leaf",
-      "Can you send a close photo of the underside of an affected leaf?",
+      "A close photo of the underside of a leaf would help — show how many whiteflies there are and whether there is sticky residue or black mould.",
     );
   }
 

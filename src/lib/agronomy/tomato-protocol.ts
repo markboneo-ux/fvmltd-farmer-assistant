@@ -218,7 +218,7 @@ export function extractKnownFacts(
     located.region || lookedUp?.farmingArea || profile?.district?.trim() || null;
   if (!district) {
     const districtMatch = lower.match(
-      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin)\b/,
+      /\b(couva|chaguanas|arima|san\s+fernando|port\s+of\s+spain|sangre\s+grande|point\s+fortin|tunapuna|penal|debe|princes\s+town|rio\s+claro|mayaro|siparia|diego\s+martin|st\s+elizabeth|saint\s+elizabeth|cayo|dennery|christ\s+church)\b/,
     );
     if (districtMatch) district = districtMatch[1];
   }
@@ -287,7 +287,7 @@ export function extractKnownFacts(
       /\bstunt/.test(lower) &&
       /\b(whole|entire|most\s+of\s+the)\s+field\b/.test(lower),
     asksForProducts:
-      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+can\s+i\s+(buy|use|spray)|what\s+(to|should i)\s+spray|spray for\b|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
+      /\b(product|pesticide|insecticide|fungicide|spray\s+to\s+use|what\s+spray|which\s+spray|spray can i use|what\s+can\s+i\s+(buy|use|spray)|what\s+(to|should i)\s+spray|spray for\b|what\s+chemical|what\s+fungicide|what\s+fertilizer|what\s+is\s+available|recommend(ed)?\s+(a\s+)?(product|chemical)|ask about (a )?product)\b/.test(
         lower,
       ) || /\bask about products\b/.test(lower),
     asksAboutWeather:
@@ -877,7 +877,7 @@ function buildForcedQuickGuidance(
   if (facts.suspectedIssue === "whiteflies") {
     const cropLabel = facts.crop ?? "the crop";
     return {
-      preliminaryAssessment: `Preliminary guidance: Whiteflies on ${cropLabel} are a likely concern based on your report. Severity and next steps depend on how widespread the infestation is and whether leaves show sticky residue, mould, or yellowing. This is preliminary only.`,
+      preliminaryAssessment: `You already found whiteflies on ${cropLabel}. That is an observed pest, not heat or wind damage. Next we need how many there are, whether leaves are sticky or black, and whether this is a hotspot or most of the field. This is preliminary only.`,
       severity:
         facts.distributionHint === "most of field" ? "high" : payload.severity === "unknown" ? "medium" : payload.severity,
       checksToday: [
@@ -887,8 +887,8 @@ function buildForcedQuickGuidance(
       ],
       safeActionsNow: [
         "Scout early morning when whiteflies are easier to see",
-        "Remove heavily infested lower leaves if plants are strong enough",
-        "Avoid spraying the same product repeatedly without checking results",
+        "Compare a few plants versus patches versus most of the field",
+        "Avoid spraying the same insecticide group repeatedly",
       ],
       actionsToAvoid: [
         "Do not mix insecticides into unapproved cocktails",

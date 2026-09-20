@@ -36,7 +36,10 @@ export function buildDifferentialDiagnosis(options: {
 }): DifferentialDiagnosis {
   const ranked = (options.ranked?.length
     ? options.ranked
-    : rankDiagnosticCauses(options.text)
+    : rankDiagnosticCauses(options.text, {
+        crop: options.facts?.crop,
+        facts: options.facts,
+      })
   ).slice(0, 3);
 
   const hypotheses: SuspectedCauseEntry[] = ranked.map((cause) => ({
@@ -88,7 +91,10 @@ export function buildDifferentialDiagnosis(options: {
     diagnosticConfidence,
     nextObservation,
     nextPhotoQuestion: photo?.farmerQuestion ?? null,
-    suspectedPest: hypotheses.find((item) => PEST_CATEGORIES.has(item.category))?.label ?? null,
+    suspectedPest:
+      options.facts?.suspectedIssue === "whiteflies"
+        ? "whiteflies"
+        : hypotheses.find((item) => PEST_CATEGORIES.has(item.category))?.label ?? null,
     suspectedDiseaseOrDisorder:
       hypotheses.find((item) => DISEASE_CATEGORIES.has(item.category))?.label ?? null,
     suspectedCause: top?.label ?? null,
@@ -102,7 +108,7 @@ function distinguishingQuestion(
 ): string {
   if (facts?.distributionHint) {
     if (hypotheses.some((item) => /wilt|root/i.test(item.label))) {
-      return "If you cut a wilted stem, is the inside brown, and do the roots look rotten or healthy?";
+      return "If you cut a wilted stem, is the inside brown, and do the roots look rotten or healthy? A milky stream in water would make bacterial wilt much more likely — it is not a laboratory confirmation.";
     }
   }
   if (hypotheses.length >= 2) {

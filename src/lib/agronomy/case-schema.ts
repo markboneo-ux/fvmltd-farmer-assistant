@@ -9,6 +9,7 @@ import type { DiagnosisConfidence } from "./diagnosis-confidence";
 import type { PesticideCheck, WebCitation, WebSourceCitation } from "@/lib/research/types";
 import { isQuestionType, type QuestionType } from "./question-types";
 import type { CropHealthCaseState } from "./crop-health-state";
+import type { AgronomicMode } from "./case-modes";
 
 export const CASE_MODES = ["quick_help", "full_crop_check"] as const;
 export type CaseMode = (typeof CASE_MODES)[number];
@@ -132,6 +133,7 @@ export type AgronomicCasePayload = {
   /** Engine-only structured crop-health state. */
   cropHealthState?: CropHealthCaseState | null;
   askFarmingArea?: boolean;
+  agronomicMode?: AgronomicMode | null;
 };
 
 /** Schema sent to OpenAI — tool-filled fields are empty stubs only. */

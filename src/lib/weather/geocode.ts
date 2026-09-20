@@ -93,6 +93,8 @@ const AREAS: AreaEntry[] = [
   { aliases: ["roseau"], label: "Roseau", country: "Dominica", coordinates: { latitude: 15.301, longitude: -61.388 } },
   { aliases: ["basseterre"], label: "Basseterre", country: "Saint Kitts and Nevis", coordinates: { latitude: 17.295, longitude: -62.726 } },
   { aliases: ["belmopan", "orange walk", "corozal"], label: "Belmopan", country: "Belize", coordinates: { latitude: 17.251, longitude: -88.759 } },
+  { aliases: ["cayo", "san ignacio", "spanish lookout"], label: "Cayo", country: "Belize", coordinates: { latitude: 17.155, longitude: -89.08 } },
+  { aliases: ["dennery"], label: "Dennery", country: "Saint Lucia", coordinates: { latitude: 13.91, longitude: -60.89 } },
   { aliases: ["nassau"], label: "Nassau", country: "The Bahamas", coordinates: { latitude: 25.044, longitude: -77.35 } },
   { aliases: ["paramaribo"], label: "Paramaribo", country: "Suriname", coordinates: { latitude: 5.852, longitude: -55.204 } },
   { aliases: ["cap-haitien", "cap haitien", "port-au-prince"], label: "Port-au-Prince", country: "Haiti", coordinates: { latitude: 18.594, longitude: -72.307 } },

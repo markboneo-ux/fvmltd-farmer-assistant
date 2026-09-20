@@ -11,13 +11,16 @@ export type DestructiveCheck = {
 const DESTRUCTIVE =
   /\b(dump|destroy|pull up|pull out|remove all|rip out|abandon (the )?(field|crop)|plough (in|under)|discard (the )?plants?)\b/i;
 
+const PREMATURE_REMOVAL =
+  /\b(remove (the )?(affected |damaged |infected |spotted )?(leaves|plants)|pick off (the )?(affected )?leaves|strip (the )?leaves|pull the whole field)\b/i;
+
 const MAJOR_CORRECTION =
   /\b(heavy (fertilizer|fertiliser) correction|replant the (whole )?(field|crop)|spray (the )?(whole|entire) (field|crop))\b/i;
 
 const VAGUE_WILT = /\bwilt(ing|ed)?\b/i;
 
 export function isDestructiveRecommendation(text: string): boolean {
-  return DESTRUCTIVE.test(text) || MAJOR_CORRECTION.test(text);
+  return DESTRUCTIVE.test(text) || MAJOR_CORRECTION.test(text) || PREMATURE_REMOVAL.test(text);
 }
 
 export function shouldBlockDestructiveAction(options: {
@@ -45,7 +48,9 @@ export function shouldBlockDestructiveAction(options: {
       : ["insufficient evidence", "irreversible action"],
     farmerMessage: wilt
       ? "Bacterial wilt is one possibility, but other problems can cause similar wilting. Before removing plants, let’s check the stem, roots and how the problem is spreading."
-      : "That is a big step. Let’s confirm what is going on first — check a few plants closely before removing crop or spraying the whole field.",
+      : PREMATURE_REMOVAL.test(options.recommendation)
+        ? "Removing leaves or plants is a big step. Check the pattern first unless we are sure of a disease that needs sanitation."
+        : "That is a big step. Let’s confirm what is going on first — check a few plants closely before removing crop or spraying the whole field.",
   };
 }
 

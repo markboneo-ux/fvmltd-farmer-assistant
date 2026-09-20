@@ -62,6 +62,7 @@ export type CropHealthCaseState = {
   confirmedDiagnosis: string | null;
   nextDistinguishingCheck: string | null;
   requestedPhotoView: CropHealthPhotoView | null;
+  agronomicMode?: string | null;
 };
 
 export const CROP_HEALTH_STATE_KEY = "cropHealthState";
@@ -102,6 +103,7 @@ export function emptyCropHealthState(
     confirmedDiagnosis: null,
     nextDistinguishingCheck: null,
     requestedPhotoView: null,
+    agronomicMode: null,
     ...overrides,
   };
 }
@@ -171,6 +173,7 @@ export function mergeCropHealthState(
       incoming.nextDistinguishingCheck,
     ),
     requestedPhotoView: incoming.requestedPhotoView ?? base.requestedPhotoView,
+    agronomicMode: incoming.agronomicMode ?? base.agronomicMode ?? null,
   };
 }
 

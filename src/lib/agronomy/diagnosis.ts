@@ -21,6 +21,9 @@ import { questionAsksForKnownFact, type KnownFarmerFacts } from "./tomato-protoc
 import { extractWorkingCase, highestValueMissingQuestion } from "./working-case";
 import { specificPhotoRequest } from "./photo-request";
 import { shouldAskFarmingArea } from "@/lib/weather/geocode";
+import { extractObservedEvidence, genericCauseList } from "./evidence-hierarchy";
+import { cropPlaybookFor, rankCropCauses } from "./crop-differentials";
+import { agronomicModeFor } from "./case-modes";
 
 export type DiagnosticPlaybook = {
   id: string;
@@ -366,15 +369,36 @@ export function playbookFor(
     if (farmerLevel === "TECHNICAL_USER") return CELERY_BURN_TECHNICAL;
     return CELERY_BURN;
   }
-  if (facts.suspectedIssue === "whiteflies" || facts.suddenWilt) {
-    return null;
-  }
+
+  const evidence = extractObservedEvidence({ facts, text: facts.rawText });
+  const ranked = rankCropCauses({
+    text: facts.rawText,
+    crop: facts.crop,
+    evidence,
+  });
+  const cropSpecific = cropPlaybookFor({
+    crop: facts.crop,
+    facts,
+    evidence,
+    farmerLevel,
+    ranked,
+  });
+  if (cropSpecific) return cropSpecific;
+
   const text = facts.rawText.toLowerCase();
-  if (
+  const hasNamedProblem =
     /\b(burn|burning|yellowing|spots?|stunt|wilt|holes?|leaf\s+spot|scorch|necrosis|brown(ing)?|leaf\s+edges?|tip\s*burn|cercospora|septoria|alternaria|mildew|anthracnose|blight|rot|lesion|chloros)\b/.test(
       text,
-    ) &&
-    facts.crop
+    );
+  // Generic root/nutrient/foliar cards are last resort only — never for a
+  // named pest, discrete spots, or sudden wilt on a known crop.
+  if (
+    hasNamedProblem &&
+    facts.crop &&
+    !evidence.observedPest &&
+    !evidence.symptoms.includes("spots") &&
+    !facts.suddenWilt &&
+    !/\bwilt/.test(text)
   ) {
     return genericDifferentialFor(farmerLevel);
   }
@@ -534,14 +558,18 @@ export function applyDiagnosticPlaybook(
   next.preliminaryAssessment = weatherMustNotLead(next.preliminaryAssessment);
   const likelyCauses = next.likelyCauses ?? [];
   const disconfirmers = next.whatWouldChangeDiagnosis ?? [];
+  const evidence = extractObservedEvidence({ facts, text: facts.rawText });
+  const mode = agronomicModeFor({ evidence, facts });
 
   const celerySpecific = playbook.id.startsWith("celery");
-  // Fill empty diagnostic slots from the playbook. Never invent extra pests or
-  // overwrite causes the model already ranked. Thin assessments may be replaced
-  // with the playbook's reasoning; a solid assessment is kept.
+  const cropSpecific = !playbook.id.startsWith("generic");
+  const incomingGeneric = genericCauseList(likelyCauses);
+  const usePlaybookCauses =
+    likelyCauses.length === 0 || incomingGeneric || (cropSpecific && incomingGeneric);
+
   next = {
     ...next,
-    likelyCauses: likelyCauses.length > 0 ? likelyCauses : playbook.likelyCauses,
+    likelyCauses: usePlaybookCauses ? playbook.likelyCauses : likelyCauses,
     diagnosisWhy: next.diagnosisWhy || playbook.why,
     whatWouldChangeDiagnosis:
       disconfirmers.length > 0 ? disconfirmers : playbook.whatWouldChange,
@@ -551,11 +579,12 @@ export function applyDiagnosticPlaybook(
       next.safeActionsNow.length > 0 ? next.safeActionsNow : playbook.actionsToday,
     actionsToAvoid: next.actionsToAvoid.length > 0 ? next.actionsToAvoid : playbook.avoid,
     photoRecommended: next.photoRecommended || playbook.photoHelpful,
+    agronomicMode: mode,
   };
   if (
-    (celerySpecific || isThinAssessment(payload)) &&
+    (celerySpecific || cropSpecific || isThinAssessment(payload)) &&
     playbook.why &&
-    (isThinAssessment(payload) || next.preliminaryAssessment.length < 80)
+    (isThinAssessment(payload) || incomingGeneric || next.preliminaryAssessment.length < 80)
   ) {
     next.preliminaryAssessment = playbook.why;
   }
@@ -576,11 +605,11 @@ export function applyDiagnosticPlaybook(
 
   if (
     facts.asksForProducts &&
-    /\b(cercospora|septoria|alternaria|leaf\s+spot)\b/i.test(facts.rawText)
+    /\b(cercospora|septoria|alternaria|leaf\s+spot|spots?|white\s*fl|spray)\b/i.test(facts.rawText)
   ) {
     const general =
-      "Active ingredients normally used against Cercospora-type leaf spots include protectant coppers or chlorothalonil and, where a programme is justified, strobilurin (QoI) or DMI fungicides in rotation. That is general agronomy, not proof of local registration.";
-    if (!/haven't verified registration|active ingredients normally used/i.test(next.preliminaryAssessment)) {
+      "Active ingredients normally used against this kind of problem are listed only as general agronomy, not proof of local registration.";
+    if (!/haven't verified registration|active ingredients normally used|could not verify a current/i.test(next.preliminaryAssessment)) {
       next.preliminaryAssessment = `${next.preliminaryAssessment} ${general}`.trim();
     }
   }

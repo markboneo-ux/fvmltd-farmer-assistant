@@ -302,9 +302,9 @@ describe("pesticide fallback and trend geography", () => {
         intent: "crop_problem",
       }),
     };
-    expect(playbookFor(extractKnownFacts(message), "HOME_GARDENER")?.id).toBe("generic_home");
+    expect(playbookFor(extractKnownFacts(message), "HOME_GARDENER")?.id).toBe("lettuce_edge_home");
     expect(playbookFor(extractKnownFacts("I farm a small plot of lettuce with brown edges"), "SMALL_FARMER")?.id).toBe(
-      "generic_small",
+      "lettuce_edge_small",
     );
     expect(byLevel.HOME_GARDENER.likelyCauses?.join(" ")).not.toEqual(
       byLevel.AGRONOMIST.likelyCauses?.join(" "),
