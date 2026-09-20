@@ -4,10 +4,11 @@
  */
 
 import type { FarmerLevel } from "@/lib/assistant/farmer-context";
-import type { AgronomicWeatherSignal } from "./agronomic-weather";
 import type { RankedCause, CauseCategory } from "./causes";
 import type { ObservedEvidence } from "./evidence-hierarchy";
 import type { KnownFarmerFacts } from "./tomato-protocol";
+import { describeObservedSpots, extractSymptomAttributes } from "./symptom-consistency";
+import { NARROW_SPRAY_TARGET } from "./chemical-guidance";
 
 export type CropPlaybook = {
   id: string;
@@ -341,11 +342,11 @@ export function cropPlaybookFor(options: {
   }
 
   if (crop === "tomato" && (options.evidence.symptoms.includes("spots") || /\b(yellow|spot|blight)\b/.test(text))) {
-    return tomatoSpotPlaybook(labels, options.evidence, options.farmerLevel);
+    return tomatoSpotPlaybook(labels, options.evidence, options.farmerLevel, options.facts);
   }
 
   if (crop === "pepper" && options.evidence.symptoms.includes("spots")) {
-    return pepperSpotPlaybook(labels, options.evidence, options.farmerLevel);
+    return pepperSpotPlaybook(labels, options.evidence, options.farmerLevel, options.facts);
   }
 
   if ((crop === "lettuce" || crop === "celery") && /\b(burn|burning|burnt|brown (tips?|edges?)|scorch)\b/.test(text)) {
@@ -391,28 +392,44 @@ function tomatoSpotPlaybook(
   labels: string[],
   evidence: ObservedEvidence,
   farmerLevel: FarmerLevel | null,
+  facts: KnownFarmerFacts,
 ): CropPlaybook {
   const causes =
     labels.length >= 2
       ? labels
       : ["Septoria leaf spot", "Early blight", "Bacterial spot or speck"];
-  const wet = evidence.wetFromFarmer || evidence.weatherSignals.includes("prolonged_wetness");
+  const attrs = extractSymptomAttributes({
+    facts,
+    text: facts.rawText,
+    weatherSignals: evidence.weatherSignals,
+  });
+  const observed = describeObservedSpots(attrs);
+  const wetFromFarmer = evidence.wetFromFarmer;
+  const weatherWet = evidence.weatherSignals.includes("prolonged_wetness");
+  const wetWhy = wetFromFarmer
+    ? `On tomato, ${observed} after a wet week make a foliar disease — especially Septoria or early blight — more likely than a generic nutrient or root problem. Bacterial spot still belongs on the list if spots look water-soaked. Nutrient or root stress would rise only if the colouring is even, with no true spots.`
+    : weatherWet
+      ? `On tomato, ${observed} fit a foliar disease — especially Septoria or early blight — more than a generic nutrient or root problem. Recent conditions have been wet, which can raise that disease pressure. Bacterial spot still belongs on the list if spots look water-soaked. Nutrient or root stress would rise only if the colouring is even, with no true spots.`
+      : `On tomato, ${observed}. Separate true leaf spots from even colouring. Septoria, early blight, and bacterial spot/speck are the crop-relevant possibilities. Nutrient or root stress is lower unless the pattern is even colouring without lesions.`;
+  const wetHome = wetFromFarmer
+    ? `${observed.charAt(0).toUpperCase()}${observed.slice(1)} after rain usually mean a leaf disease, not hungry plants. We still need a close look at the spots before naming one disease or spraying.`
+    : weatherWet
+      ? `${observed.charAt(0).toUpperCase()}${observed.slice(1)} on tomato usually mean a leaf disease, not hungry plants. Recent conditions have been wet, which can raise disease pressure. We still need a close look at the spots before naming one disease or spraying.`
+      : `${observed.charAt(0).toUpperCase()}${observed.slice(1)} on tomato usually mean a leaf disease, not hungry plants. We still need a close look at the spots before naming one disease or spraying.`;
   const base: CropPlaybook = {
     id: "tomato_foliar",
     likelyCauses: causes,
-    why: wet
-      ? "On tomato, yellow spots on the lower leaves after a wet week make a foliar disease — especially Septoria or early blight — more likely than a generic nutrient or root problem. Bacterial spot still belongs on the list if spots look water-soaked. Nutrient or root stress would rise only if the yellowing is even, with no true spots."
-      : "On tomato, separate true leaf spots from even yellowing. Septoria, early blight, and bacterial spot/speck are the crop-relevant possibilities. Nutrient or root stress is lower unless the pattern is even yellowing without lesions.",
+    why: wetWhy,
     checks: [
-      "Are the spots separate lesions, or is the yellowing even from the leaf edge?",
+      "Are the spots separate lesions, or is the colouring even from the leaf edge?",
       "Do spots have rings, tiny dark centres, or a greasy water-soaked look?",
       "Are older lower leaves worse than new growth?",
-      "Is the soil staying wet around the roots, or only the leaves wet from rain?",
+      "Is the soil staying wet around the roots, or only the leaves wet from rain or dew?",
     ],
     actionsToday: [
       "Keep people and tools from moving through wet plants more than needed",
       "Avoid overhead watering if you can, so leaves dry faster",
-      "Hold extra fertilizer and do not start a spray until the spot type is clearer",
+      `Hold extra fertilizer. ${NARROW_SPRAY_TARGET}`,
     ],
     avoid: [
       "Do not strip leaves just because they have a few spots",
@@ -431,7 +448,7 @@ function tomatoSpotPlaybook(
     base,
     HOME_GARDENER: {
       id: "tomato_foliar_home",
-      why: "Yellow spots on the lower tomato leaves after rain usually mean a leaf disease, not hungry plants. We still need a close look at the spots before naming one disease or spraying.",
+      why: wetHome,
       actionsToday: [
         "Do not add fertilizer today",
         "Water the soil, not the leaves, if the plants need water",
@@ -440,19 +457,25 @@ function tomatoSpotPlaybook(
     },
     SMALL_FARMER: {
       id: "tomato_foliar_small",
-      why: "On a tomato planting, lower-leaf spotting after a wet week is a foliar-disease problem first. Walk the beds and see which spots you have before changing the spray programme.",
+      why: wetFromFarmer
+        ? `On a tomato planting, ${observed} after a wet week is a foliar-disease problem first. Walk the beds and see which spots you have before changing the spray programme.`
+        : weatherWet
+          ? `On a tomato planting, ${observed} are a foliar-disease problem first. Recent conditions have been wet. Walk the beds and see which spots you have before changing the spray programme.`
+          : `On a tomato planting, ${observed} are a foliar-disease problem first. Walk the beds and see which spots you have before changing the spray programme.`,
     },
     COMMERCIAL_FARMER: {
       id: "tomato_foliar_commercial",
-      why: "On a commercial tomato planting, lower-leaf spotting after prolonged wetness raises Septoria/early blight pressure and can cut marketable canopy. Bacterial spot remains in the differential if lesions are greasy. Do not treat this as a backyard nutrient tip.",
+      why: wetFromFarmer || weatherWet
+        ? `On a commercial tomato planting, ${observed}${wetFromFarmer ? " after prolonged wetness" : ""} raise Septoria/early blight pressure and can cut marketable canopy. ${weatherWet && !wetFromFarmer ? "Recent conditions have been wet. " : ""}Bacterial spot remains in the differential if lesions are greasy. Do not treat this as a backyard nutrient tip.`
+        : `On a commercial tomato planting, ${observed} raise Septoria/early blight as the first foliar differential. Bacterial spot remains if lesions are greasy. Do not treat this as a backyard nutrient tip.`,
     },
     TECHNICAL_USER: {
       id: "tomato_foliar_technical",
-      why: "Tomato lower-leaf spotting after prolonged leaf wetness shifts prior toward Septoria lycopersici or Alternaria early blight; bacterial spot/speck remains if lesions are water-soaked. Abiotic nutrient/root stress is not the leading hypothesis while discrete spots are present.",
+      why: `Tomato ${observed}${wetFromFarmer || weatherWet ? " with prolonged leaf wetness" : ""} shifts prior toward Septoria lycopersici or Alternaria early blight; bacterial spot/speck remains if lesions are water-soaked.${weatherWet && !wetFromFarmer ? " Recent conditions have been wet." : ""} Abiotic nutrient/root stress is not the leading hypothesis while discrete spots are present.`,
     },
     AGRONOMIST: {
       id: "tomato_foliar_agronomist",
-      why: "Epidemiological prior: tomato + older-leaf discrete lesions + prolonged wetness. Rank Septoria and early blight above abiotic scorch. Confirm lesion architecture (pycnidia vs concentric rings vs water-soaking) before a FRAC programme. Do not start QoI/DMI from a generic nutrient card.",
+      why: `Epidemiological prior: tomato + ${observed}${wetFromFarmer || weatherWet ? " + prolonged wetness" : ""}. Rank Septoria and early blight above abiotic scorch. Confirm lesion architecture (pycnidia vs concentric rings vs water-soaking) before a FRAC programme. Do not start QoI/DMI from a generic nutrient card.`,
       checks: [
         "Lesion architecture: pycnidia, concentric rings, or water-soaking/halo",
         "Spatial pattern: lower canopy vs new growth; rain-splash gradient",
@@ -466,18 +489,20 @@ function pepperSpotPlaybook(
   labels: string[],
   evidence: ObservedEvidence,
   farmerLevel: FarmerLevel | null,
+  facts: KnownFarmerFacts,
 ): CropPlaybook {
   const causes =
     labels.length >= 2
       ? labels
       : ["Cercospora / frogeye leaf spot", "Bacterial leaf spot"];
-  const wet = evidence.wetFromFarmer || evidence.weatherSignals.includes("prolonged_wetness");
+  const wetFromFarmer = evidence.wetFromFarmer;
+  const weatherWet = evidence.weatherSignals.includes("prolonged_wetness");
   return levelTone(farmerLevel, {
     base: {
       id: "pepper_foliar",
       likelyCauses: causes,
-      why: wet
-        ? "On sweet or hot pepper, leaf spots after wet weather are more likely Cercospora-type or bacterial spot than a generic nutrient problem. We still need the spot type before choosing a spray."
+      why: wetFromFarmer || weatherWet
+        ? `On sweet or hot pepper, leaf spots${wetFromFarmer ? " after wet weather" : ""} are more likely Cercospora-type or bacterial spot than a generic nutrient problem.${weatherWet && !wetFromFarmer ? " Recent conditions have been wet." : ""} We still need the spot type before choosing a spray.`
         : "On pepper, separate fungal Cercospora-type spots from bacterial spot before choosing a product. Nutrient burn is lower unless the damage is only at the leaf edge.",
       checks: [
         "Are spots round with a pale centre, or greasy and water-soaked?",
@@ -487,7 +512,7 @@ function pepperSpotPlaybook(
       actionsToday: [
         "Avoid working the crop while leaves are wet",
         "Improve airflow if plants are crowded",
-        "Hold a spray until we know fungal vs bacterial",
+        NARROW_SPRAY_TARGET,
       ],
       avoid: [
         "Do not borrow a Trinidad-registered product as proof it is legal in this country",
@@ -503,7 +528,11 @@ function pepperSpotPlaybook(
     },
     HOME_GARDENER: {
       id: "pepper_foliar_home",
-      why: "Leaf spots on pepper after wet weather usually mean a leaf disease. We should tell fungal spots from bacterial spots before you buy a spray.",
+      why: wetFromFarmer
+        ? "Leaf spots on pepper after wet weather usually mean a leaf disease. We should tell fungal spots from bacterial spots before you buy a spray."
+        : weatherWet
+          ? "Leaf spots on pepper usually mean a leaf disease. Recent conditions have been wet. We should tell fungal spots from bacterial spots before you buy a spray."
+          : "Leaf spots on pepper usually mean a leaf disease. We should tell fungal spots from bacterial spots before you buy a spray.",
     },
   });
 }

@@ -1,6 +1,7 @@
 /**
  * Country-aware spray / pesticide language.
  * Never invent registration. Always separate verified vs general classes.
+ * Never show a "classes" heading unless actual classes are named.
  */
 
 import type { PesticideCheck } from "@/lib/research/types";
@@ -13,10 +14,23 @@ export type SprayGuidance = {
   localRegistrationVerified: boolean;
 };
 
-const FOLIAR_SPOT_CLASSES = [
-  "Protectant copper products",
+export const SPRAY_NEEDED_HEADING = "If a spray is needed";
+
+export const FUNGAL_LEAF_SPOT_HEADING = "IF THE SPOTS FIT A FUNGAL LEAF SPOT";
+export const BACTERIAL_LEAF_SPOT_HEADING = "IF THE SPOTS FIT A BACTERIAL LEAF SPOT";
+
+export const NARROW_SPRAY_TARGET =
+  "Avoid choosing a disease-specific spray until the likely target is narrowed enough to select the right type of product.";
+
+const FUNGAL_LEAF_SPOT_CLASSES = [
   "Mancozeb- or chlorothalonil-class protectants",
+  "Copper protectants",
   "Strobilurin (QoI) or DMI fungicides only later, in rotation, if a programme is justified",
+];
+
+const BACTERIAL_LEAF_SPOT_CLASSES = [
+  "Copper-based bactericides or protectants where the crop and label allow",
+  "A product labelled for bacterial spot or speck on this crop, only if a current local label exists",
 ];
 
 const WHITEFLY_CLASSES = [
@@ -25,30 +39,77 @@ const WHITEFLY_CLASSES = [
   "A locally labelled whitefly insecticide, rotating IRAC groups if you do spray",
 ];
 
-export const SPRAY_NEEDED_HEADING = "If a spray is needed";
-
 export function couldNotVerifyUse(country: string, crop?: string | null): string {
   void crop;
   return `I could not verify a current ${country} registration for this exact use.`;
+}
+
+export function sanitizePrematureSprayWording(text: string): string {
+  if (!text.trim()) return text;
+  return text
+    .replace(
+      /\bavoid spraying until the cause is confirmed\.?/gi,
+      NARROW_SPRAY_TARGET,
+    )
+    .replace(
+      /\b(hold a spray|do not start a spray|avoid spraying) until (we know(?: fungal vs bacterial)?|the (?:spot type|cause) is (?:clearer|confirmed))\.?/gi,
+      NARROW_SPRAY_TARGET,
+    )
+    .replace(
+      /\bhold extra fertilizer and do not start a spray until the spot type is clearer\.?/gi,
+      `Hold extra fertilizer. ${NARROW_SPRAY_TARGET}`,
+    );
+}
+
+function isWhitefly(options: {
+  pestOrDisease?: string | null;
+  observedPest?: string | null;
+}): boolean {
+  return /\bwhitefl/.test(`${options.observedPest ?? ""} ${options.pestOrDisease ?? ""}`.toLowerCase());
+}
+
+function fungalBacterialSplit(options: {
+  pestOrDisease?: string | null;
+  likelyCauses?: string[];
+  crop?: string | null;
+}): boolean {
+  const blob = `${options.pestOrDisease ?? ""} ${(options.likelyCauses ?? []).join(" ")}`.toLowerCase();
+  const fungal = /\b(cercospora|septoria|early blight|alternaria|fungal|frogeye|anthracnose)\b/.test(
+    blob,
+  );
+  const bacterial = /\bbacterial\b/.test(blob);
+  if (fungal && bacterial) return true;
+  const leafSpots =
+    /\b(leaf\s+spots?|foliar fungal disease|spots?)\b/.test(blob) ||
+    options.pestOrDisease === "foliar fungal disease";
+  const splitCrop = options.crop === "pepper" || options.crop === "tomato";
+  return Boolean(leafSpots && splitCrop);
 }
 
 export function generalClassesFor(options: {
   pestOrDisease?: string | null;
   observedPest?: string | null;
   asksForSpray?: boolean;
+  likelyCauses?: string[];
+  crop?: string | null;
 }): string[] {
-  const needle = `${options.observedPest ?? ""} ${options.pestOrDisease ?? ""}`.toLowerCase();
-  if (/\bwhitefl/.test(needle)) return WHITEFLY_CLASSES;
-  if (/\b(spot|blight|fungal|cercospora|septoria|mould|mold|mildew)\b/.test(needle)) {
-    return FOLIAR_SPOT_CLASSES;
+  if (isWhitefly(options)) return WHITEFLY_CLASSES;
+  if (fungalBacterialSplit(options)) {
+    return [...FUNGAL_LEAF_SPOT_CLASSES, ...BACTERIAL_LEAF_SPOT_CLASSES];
   }
-  if (options.asksForSpray) {
-    return [
-      "Start with cultural and monitoring steps",
-      "Use a product only if it is labelled for this crop and pest in your country",
-    ];
+  const needle = `${options.observedPest ?? ""} ${options.pestOrDisease ?? ""} ${(options.likelyCauses ?? []).join(" ")}`.toLowerCase();
+  if (/\b(bacterial)\b/.test(needle) && !/\b(cercospora|septoria|fungal|blight)\b/.test(needle)) {
+    return BACTERIAL_LEAF_SPOT_CLASSES;
+  }
+  if (/\b(spot|blight|fungal|cercospora|septoria|mould|mold|mildew)\b/.test(needle)) {
+    return FUNGAL_LEAF_SPOT_CLASSES;
   }
   return [];
+}
+
+function formatUnverifiedClasses(country: string | null, classes: string[]): string {
+  const where = country ? ` for ${country}` : " locally";
+  return `General classes only, not verified${where}: ${classes.join("; ")}.`;
 }
 
 export function buildSprayGuidance(options: {
@@ -60,6 +121,7 @@ export function buildSprayGuidance(options: {
   asksForSpray: boolean;
   verifiedInputs?: VerifiedInputDisplay[];
   pesticideChecks?: PesticideCheck[];
+  likelyCauses?: string[];
 }): SprayGuidance | null {
   if (!options.asksForSpray) return null;
 
@@ -89,29 +151,31 @@ export function buildSprayGuidance(options: {
     }
   }
 
+  const split = fungalBacterialSplit({
+    pestOrDisease: options.target,
+    likelyCauses: options.likelyCauses,
+    crop: options.crop,
+  });
+  const whitefly = isWhitefly({
+    pestOrDisease: options.target,
+    observedPest: options.observedPest,
+  });
+
   const unverifiedClasses = localRegistrationVerified
     ? []
     : generalClassesFor({
         pestOrDisease: options.target,
         observedPest: options.observedPest,
         asksForSpray: true,
+        likelyCauses: options.likelyCauses,
+        crop: options.crop,
       });
 
   const parts: string[] = [];
-  const uncertain =
-    !options.diagnosisConfidence ||
-    options.diagnosisConfidence === "possible" ||
-    options.diagnosisConfidence === "unknown";
-
-  if (uncertain && !options.observedPest) {
-    parts.push(
-      "A spray only helps if we have the right target. Check the spot or pest type first so you do not buy the wrong product.",
-    );
-  }
 
   if (!country) {
     parts.push(
-      "I need the country before I can say whether a product is registered. I can still outline general management classes, clearly labelled as not locally verified.",
+      "I need the country before I can say whether a product is registered.",
     );
   } else if (!localRegistrationVerified) {
     parts.push(couldNotVerifyUse(country, options.crop));
@@ -121,20 +185,36 @@ export function buildSprayGuidance(options: {
     parts.push(`Verified for this country/crop: ${verifiedLines.join(" ")}`);
   }
 
-  if (unverifiedClasses.length > 0) {
+  if (!localRegistrationVerified && split) {
     parts.push(
-      `General active-ingredient classes, NOT verified local recommendations: ${unverifiedClasses.join("; ")}.`,
+      "Fungal and bacterial leaf spots need different product choices.",
     );
+    parts.push(FUNGAL_LEAF_SPOT_HEADING);
+    parts.push(formatUnverifiedClasses(country, FUNGAL_LEAF_SPOT_CLASSES));
+    parts.push(BACTERIAL_LEAF_SPOT_HEADING);
+    parts.push(formatUnverifiedClasses(country, BACTERIAL_LEAF_SPOT_CLASSES));
+    parts.push(
+      "Look closely: pale-centred or target-like spots raise a fungal leaf spot; greasy or water-soaked specks raise a bacterial leaf spot.",
+    );
+    parts.push(NARROW_SPRAY_TARGET);
+  } else if (!localRegistrationVerified && unverifiedClasses.length > 0) {
+    parts.push(formatUnverifiedClasses(country, unverifiedClasses));
     parts.push(
       "These are management classes used in similar crops, not a statement that they are registered or for sale in your country. Read the local label and regulator list before you buy or spray.",
     );
+    if (!whitefly) parts.push(NARROW_SPRAY_TARGET);
+  } else if (!localRegistrationVerified && unverifiedClasses.length === 0) {
+    parts.push(
+      "I cannot name a product class yet. I need a closer look at the spots — pale centre versus greasy water-soaked — before choosing between fungal and bacterial management.",
+    );
+    parts.push(NARROW_SPRAY_TARGET);
   }
 
   parts.push(
     "Cultural steps come first: keep leaves drier if you can, avoid moving through wet plants, and scout before you spray.",
   );
 
-  if (/\bwhitefl/.test(`${options.observedPest ?? ""} ${options.target ?? ""}`.toLowerCase())) {
+  if (whitefly) {
     parts.push(
       "If you do spray for whiteflies, rotate IRAC groups and do not use the same chemistry over and over. That is resistance management, not a product pitch.",
     );
@@ -143,7 +223,7 @@ export function buildSprayGuidance(options: {
   return {
     verifiedLines,
     unverifiedClasses,
-    farmerText: parts.join(" "),
+    farmerText: sanitizePrematureSprayWording(parts.join("\n")),
     localRegistrationVerified,
   };
 }

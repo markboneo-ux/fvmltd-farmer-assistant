@@ -6,7 +6,7 @@ import { extractObservedEvidence } from "./evidence-hierarchy";
 import { applyDiagnosticPlaybook, playbookFor } from "./diagnosis";
 import { applyQualityCorrection, evaluateConsistency } from "./response-quality";
 import { sanitizeCertaintyLanguage, overclaimsConfirmation } from "./certainty-language";
-import { buildSprayGuidance, SPRAY_NEEDED_HEADING } from "./chemical-guidance";
+import { buildSprayGuidance, SPRAY_NEEDED_HEADING, FUNGAL_LEAF_SPOT_HEADING, BACTERIAL_LEAF_SPOT_HEADING, NARROW_SPRAY_TARGET } from "./chemical-guidance";
 import { extractKnownFacts, applyCommercialSafetyGuards } from "./tomato-protocol";
 import { extractLastCrop } from "@/lib/assistant/crops";
 import { runAgronomicCase } from "./runCase";
@@ -126,9 +126,15 @@ describe("evidence hierarchy and modes", () => {
       target: "leaf spots",
       asksForSpray: true,
       diagnosisConfidence: "possible",
+      likelyCauses: ["Cercospora / frogeye leaf spot", "Bacterial leaf spot"],
     });
     expect(spray?.farmerText).toMatch(/I could not verify a current Grenada registration for this exact use/);
-    expect(spray?.farmerText.toLowerCase()).toMatch(/general active-ingredient classes/);
+    expect(spray?.farmerText).toContain(FUNGAL_LEAF_SPOT_HEADING);
+    expect(spray?.farmerText).toContain(BACTERIAL_LEAF_SPOT_HEADING);
+    expect(spray?.farmerText.toLowerCase()).toMatch(/mancozeb|chlorothalonil/);
+    expect(spray?.farmerText.toLowerCase()).toMatch(/copper/);
+    expect(spray?.farmerText).toContain(NARROW_SPRAY_TARGET);
+    expect(spray?.farmerText.toLowerCase()).not.toMatch(/avoid spraying until the cause is confirmed/);
     expect(spray?.farmerText.toLowerCase()).not.toMatch(/^check with the regulator\.?$/);
     expect(spray?.localRegistrationVerified).toBe(false);
   });
@@ -227,6 +233,12 @@ describe("live case shaping through runAgronomicCase", () => {
     const rendered = farmerRenderedAnswer(result.case);
     expect(rendered).toMatch(new RegExp(SPRAY_NEEDED_HEADING, "i"));
     expect(rendered).toMatch(/I could not verify a current Grenada registration for this exact use/);
+    expect(rendered).toContain(FUNGAL_LEAF_SPOT_HEADING);
+    expect(rendered).toContain(BACTERIAL_LEAF_SPOT_HEADING);
+    expect(rendered.toLowerCase()).toMatch(/mancozeb|chlorothalonil/);
+    expect(rendered.toLowerCase()).toMatch(/copper/);
+    expect(rendered).toContain(NARROW_SPRAY_TARGET);
+    expect(rendered.toLowerCase()).not.toMatch(/avoid spraying until the cause is confirmed/);
     expect(rendered.toLowerCase()).toMatch(/not verified/);
     expect(result.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/cercospora|bacterial/);
   });
@@ -318,7 +330,11 @@ describe("preview remaining live-case gaps", () => {
     const rendered = farmerRenderedAnswer(result.case);
     expect(rendered).toMatch(/If a spray is needed/i);
     expect(rendered).toMatch(/I could not verify a current Grenada registration for this exact use/);
+    expect(rendered).toContain(FUNGAL_LEAF_SPOT_HEADING);
+    expect(rendered).toContain(BACTERIAL_LEAF_SPOT_HEADING);
+    expect(rendered.toLowerCase()).toMatch(/mancozeb|copper/);
     expect(rendered).not.toMatch(/^Check with the regulator\.?$/m);
+    expect(rendered.toLowerCase()).not.toMatch(/avoid spraying until the cause is confirmed/);
   });
 
   it("regenerates only quick replies when the follow-up is about lesion type but chips are symptom location", () => {
@@ -405,6 +421,36 @@ describe("preview remaining live-case gaps", () => {
     expect(result.case.weatherBrief).toMatch(/wet|humid|rain|leaf-disease/i);
     const rendered = farmerRenderedAnswer(result.case);
     expect(rendered).toMatch(/wet|humid|rain|leaf-disease|damp/i);
+    expect(rendered.toLowerCase()).toMatch(/brown spots/);
+    expect(rendered.toLowerCase()).not.toMatch(/yellow spots/);
+  });
+
+  it("never changes Couva brown spots to yellow spots in the visible reply", async () => {
+    const message =
+      "My tomato leaves in Couva are developing small brown spots on the lower leaves.";
+    const result = await runAgronomicCase({
+      message,
+      createResponse: async () => ({
+        id: "couva-brown-not-yellow",
+        output_text: mockJson({
+          stage: "assessment",
+          preliminaryAssessment:
+            "On tomato, yellow spots on the lower leaves after a wet week make a foliar disease more likely.",
+          diagnosisWhy:
+            "On tomato, yellow spots on the lower leaves after a wet week make a foliar disease more likely.",
+          likelyCauses: ["Septoria leaf spot", "Early blight", "Bacterial spot or speck"],
+          checksToday: ["Look at spot centres"],
+          safeActionsNow: ["Keep people from walking through wet plants"],
+        }),
+      }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const rendered = farmerRenderedAnswer(result.case);
+    expect(rendered.toLowerCase()).toMatch(/brown spots/);
+    expect(rendered.toLowerCase()).not.toMatch(/yellow spots/);
+    expect(result.case.diagnosisWhy?.toLowerCase() ?? "").not.toMatch(/yellow spots/);
+    expect(result.case.preliminaryAssessment.toLowerCase()).not.toMatch(/yellow spots/);
   });
 
   it("does not invent weather when retrieval fails", async () => {

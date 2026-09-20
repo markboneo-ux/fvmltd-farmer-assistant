@@ -10,12 +10,17 @@ import {
   weatherChangesDecision,
 } from "./evidence-hierarchy";
 import { sanitizeCertaintyLanguage, overclaimsConfirmation } from "./certainty-language";
-import { buildSprayGuidance, hasUnverifiedCountryPesticideClaim } from "./chemical-guidance";
+import { buildSprayGuidance, hasUnverifiedCountryPesticideClaim, sanitizePrematureSprayWording } from "./chemical-guidance";
 import { sanitizeDestructiveActions, softenDestructiveWording } from "@/lib/cases/destructive";
 import type { AgronomicWeatherSignal } from "./agronomic-weather";
 import type { RankedCause } from "./causes";
 import { reconcileQuickReplies, repliesMatchQuestion } from "./question-types";
 import { sanitizePhotoQuestion } from "./photo-request";
+import {
+  alignNarrativeToObservedSymptoms,
+  extractSymptomAttributes,
+  hasStaleSymptomWording,
+} from "./symptom-consistency";
 
 const GENERIC_DIAGNOSIS =
   /\b(could be heat|heat, nutrient|heat, watering|may be a disease|monitor it|check your plants|could be many things|looks like stress)\b/i;
@@ -219,6 +224,27 @@ export function evaluateConsistency(options: {
     ].join(" ");
     if (!/if a spray is needed|could not verify a current|verified for this country/i.test(rendered)) {
       reasons.push("spray_question_unanswered");
+    }
+    if (
+      /general active-ingredient classes/i.test(rendered) &&
+      !/\b(copper|mancozeb|chlorothalonil|strobilurin|soap|beauveria)\b/i.test(rendered)
+    ) {
+      reasons.push("spray_classes_heading_without_classes");
+    }
+  }
+
+  if (facts) {
+    const attrs = extractSymptomAttributes({
+      facts,
+      text: facts.rawText,
+    });
+    const narrative = [
+      payload.preliminaryAssessment,
+      payload.diagnosisWhy ?? "",
+      ...(payload.checksToday ?? []),
+    ].join(" ");
+    if (hasStaleSymptomWording(narrative, attrs)) {
+      reasons.push("stale_symptom_wording");
     }
   }
 
@@ -425,6 +451,7 @@ export function applyQualityCorrection(
       asksForSpray: true,
       verifiedInputs: next.verifiedInputOptions,
       pesticideChecks: next.pesticideChecks,
+      likelyCauses: likely,
     });
     if (spray) {
       next = { ...next, sprayGuidanceText: spray.farmerText };
@@ -456,6 +483,27 @@ export function applyQualityCorrection(
       ),
     };
   }
+
+  const attrs = extractSymptomAttributes({
+    facts,
+    text: facts.rawText,
+    weatherSignals: evidence.weatherSignals,
+  });
+  const align = (value: string) =>
+    sanitizePrematureSprayWording(alignNarrativeToObservedSymptoms(value, attrs));
+  next = {
+    ...next,
+    preliminaryAssessment: align(next.preliminaryAssessment),
+    diagnosisWhy: next.diagnosisWhy ? align(next.diagnosisWhy) : next.diagnosisWhy,
+    checksToday: next.checksToday.map(align),
+    safeActionsNow: next.safeActionsNow.map(align),
+    actionsToAvoid: next.actionsToAvoid.map(align),
+    monitorNext: next.monitorNext ? align(next.monitorNext) : next.monitorNext,
+    sprayGuidanceText: next.sprayGuidanceText ? align(next.sprayGuidanceText) : next.sprayGuidanceText,
+    weatherBrief: next.weatherBrief
+      ? alignNarrativeToObservedSymptoms(next.weatherBrief, attrs)
+      : next.weatherBrief,
+  };
 
   return next;
 }
