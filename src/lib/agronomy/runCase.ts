@@ -69,6 +69,7 @@ import { extractObservedEvidence } from "./evidence-hierarchy";
 import { farmerIntentFromMessage, photoUnknownLine } from "./case-continuity";
 import {
   admitEvidenceGatedCauses,
+  applyAdmittedCauseContract,
   farmerReportedLesions,
   gatedCausesToEntries,
   hasLesionEvidence,
@@ -629,7 +630,30 @@ function attachCropHealthState(
     state: previousState,
     crop: facts.crop,
   });
-  logCauseDebug(gated.debug, "final");
+  const rawModelCauses = payload.rawModelCauses ?? [];
+  const contracted = applyAdmittedCauseContract(
+    {
+      ...payload,
+      rawModelCauses,
+    },
+    {
+      admitted: gated.admitted,
+      rawModelCauses,
+      evidence,
+      facts,
+      hasPhotos,
+      previousState,
+    },
+  );
+  const admitted = contracted.admittedCauses ?? [];
+  const causeDebug: CauseRankingDebug = {
+    ...gated.debug,
+    stage: "final",
+    lesionEvidence: gated.debug.lesionEvidence,
+    rawModelCauses,
+    admittedCauses: admitted.map((cause) => cause.label),
+  };
+  logCauseDebug(causeDebug, "final");
 
   const farmerHasLesions = farmerReportedLesions(facts.rawText);
   const photoFindings = hasPhotos
@@ -661,22 +685,22 @@ function attachCropHealthState(
     recentFertilizer: facts.recentFertilizer ? "mentioned" : null,
     recentSprays: facts.recentPesticide ? "mentioned" : null,
     photoFindings,
-    suspectedCauses: gatedCausesToEntries(gated.admitted),
-    diagnosticConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
-    missingInformation: payload.internalMissingInformation,
-    recommendedActions: payload.safeActionsNow,
+    suspectedCauses: gatedCausesToEntries(admitted),
+    diagnosticConfidence: contracted.diagnosisConfidence ?? differential.diagnosticConfidence,
+    missingInformation: contracted.internalMissingInformation,
+    recommendedActions: contracted.safeActionsNow,
     suspectedPest: evidence.observedPestLabel ?? differential.suspectedPest,
     suspectedDiseaseOrDisorder: lesion
       ? differential.suspectedDiseaseOrDisorder
-      : gated.admitted.find((cause) => cause.category.includes("viral") || cause.category === "nutrition")
+      : admitted.find((cause) => cause.category.includes("viral") || cause.category === "nutrition")
           ?.label ?? null,
-    suspectedCause: gated.admitted[0]?.label ?? null,
+    suspectedCause: admitted[0]?.label ?? null,
     confirmedDiagnosis: null,
-    nextDistinguishingCheck: payload.nextQuestion || differential.nextObservation,
+    nextDistinguishingCheck: contracted.nextQuestion || differential.nextObservation,
     requestedPhotoView: photo?.view ?? previousState?.requestedPhotoView ?? null,
     agronomicMode: mode,
     farmerIntent: farmerIntentFromMessage(currentMessage || facts.rawText, facts.asksForProducts),
-    lastDiagnosticQuestion: payload.nextQuestion || null,
+    lastDiagnosticQuestion: contracted.nextQuestion || null,
     answeredDiagnosticQuestions: answered,
     caseNarrative: facts.rawText,
     photoSupports: hasPhotos
@@ -689,26 +713,24 @@ function attachCropHealthState(
       : previousState?.photoWeakens,
     photoUnknown: hasPhotos ? [photoUnknownLine()] : previousState?.photoUnknown,
   });
-  merged.suspectedCauses = gatedCausesToEntries(gated.admitted);
-  merged.suspectedCause = gated.admitted[0]?.label ?? null;
+  merged.suspectedCauses = gatedCausesToEntries(admitted);
+  merged.suspectedCause = admitted[0]?.label ?? null;
   merged.suspectedDiseaseOrDisorder = lesion
     ? differential.suspectedDiseaseOrDisorder
-    : gated.admitted.find((cause) => cause.category.includes("viral") || cause.category === "nutrition")?.label ??
+    : admitted.find((cause) => cause.category.includes("viral") || cause.category === "nutrition")?.label ??
       null;
   merged.observedSymptoms = observed;
   merged.symptoms = observed;
 
   return {
     payload: {
-      ...payload,
-      likelyCauses: gated.admitted.map((cause) => cause.label),
-      rankedCauses: gated.admitted,
-      diagnosisConfidence: payload.diagnosisConfidence ?? differential.diagnosticConfidence,
+      ...contracted,
+      diagnosisConfidence: contracted.diagnosisConfidence ?? differential.diagnosticConfidence,
       agronomicMode: mode,
       cropHealthState: merged,
       locationConfidence: facts.locationConfidence,
     },
-    causeDebug: { ...gated.debug, stage: "final" },
+    causeDebug,
   };
 }
 
@@ -1661,7 +1683,6 @@ export async function runAgronomicCase(options: {
           researchNeed,
         });
         next.farmerLevel = knownFacts.farmerLevel;
-        next.rankedCauses = rankedCauses.slice(0, 3);
         next.askCountry = askForCountry;
         next.askFarmingArea = shouldAskFarmingArea({
           farmingArea: knownFacts.district,

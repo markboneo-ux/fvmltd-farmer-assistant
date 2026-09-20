@@ -588,9 +588,21 @@ export function applyDiagnosticPlaybook(
   next = {
     ...next,
     likelyCauses: usePlaybookCauses ? playbook.likelyCauses : likelyCauses,
-    diagnosisWhy: next.diagnosisWhy || playbook.why,
+    diagnosisWhy:
+      !lesion && /\b(cercospora|frogeye|bacterial leaf spot|pale[- ]centr|water-?soaked|greasy)\b/i.test(
+        next.diagnosisWhy || "",
+      )
+        ? playbook.why
+        : next.diagnosisWhy || playbook.why,
     whatWouldChangeDiagnosis:
-      disconfirmers.length > 0 ? disconfirmers : playbook.whatWouldChange,
+      !lesion &&
+      (payload.whatWouldChangeDiagnosis ?? []).some((item) =>
+        /\b(pale[- ]centr|greasy|water-?soaked|cercospora)\b/i.test(item),
+      )
+        ? playbook.whatWouldChange
+        : disconfirmers.length > 0
+          ? disconfirmers
+          : playbook.whatWouldChange,
     monitorNext: next.monitorNext || playbook.monitor,
     checksToday: next.checksToday.length > 0 ? next.checksToday : playbook.checks,
     safeActionsNow:

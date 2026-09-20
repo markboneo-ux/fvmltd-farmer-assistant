@@ -1,5 +1,3 @@
-import { VIRUS_ROGUE_CAUTION } from "@/lib/agronomy/case-continuity";
-
 export type DestructiveCheck = {
   blocked: boolean;
   reasons: string[];
@@ -58,8 +56,8 @@ export function softenDestructiveWording(
     return text.replace(
       /[^.!?]{0,80}\b(remov(e|ing)|rogue|pull|destroy|discard)\b[^.!?]{0,60}\b(plants?|crop)\b[^.!?]*[.!?]?/gi,
       (match) => {
-        if (/\bdo not\b/i.test(match) || /\bavoid\b/i.test(match)) return match;
-        return VIRUS_ROGUE_CAUTION;
+        if (/\bdo not\b/i.test(match) || /\bavoid\b/i.test(match)) return "";
+        return "";
       },
     );
   }
@@ -112,10 +110,8 @@ export function shouldBlockDestructiveAction(options: {
         ? ["unconfirmed virus", "irreversible action"]
         : ["insufficient evidence", "irreversible action"],
     farmerMessage: wilt
-      ? "Bacterial wilt is one possibility, but other problems can cause similar wilting. Before removing plants, let’s check the stem, roots and how the problem is spreading."
-      : virus
-        ? VIRUS_ROGUE_CAUTION
-        : "That is a big step. Let’s confirm what is going on first — check a few plants closely before removing crop or spraying the whole field.",
+      ? "Bacterial wilt is one possibility, but other problems can look similar. Before removing plants, let’s check the stem, roots and how the problem is spreading."
+      : "That is a big step. Let’s confirm what is going on first — check a few plants closely before removing crop or spraying the whole field.",
   };
 }
 

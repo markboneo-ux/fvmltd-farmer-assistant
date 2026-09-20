@@ -84,7 +84,10 @@ export function extractObservedEvidence(options: {
   const facts = options.facts ?? null;
 
   const symptoms: string[] = [];
-  const deniesSpots = /\bno (discrete )?(leaf[- ]?)?spots?\b/.test(lower);
+  const deniesSpots =
+    /\bno (discrete )?(leaf[- ]?)?spots?\b/.test(lower) ||
+    /\bcannot determine whether lesions\b/.test(lower) ||
+    /\blesions cannot be determined\b/.test(lower);
   if (/\b(spots?|lesions?|leaf[- ]spot)\b/.test(lower) && !deniesSpots) {
     symptoms.push("spots");
   }

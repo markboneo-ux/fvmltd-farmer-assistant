@@ -855,6 +855,16 @@ export function FarmerCaseChat({
                             ) || "—"}
                           </p>
                           <p>
+                            rawModelCauses:{" "}
+                            {(message.casePayload.rawModelCauses ?? []).join(" | ") || "—"}
+                          </p>
+                          <p>
+                            admittedCauses:{" "}
+                            {(message.casePayload.admittedCauses ?? [])
+                              .map((cause) => cause.label)
+                              .join(" | ") || "—"}
+                          </p>
+                          <p>
                             suspectedCauses:{" "}
                             {(message.casePayload.cropHealthState?.suspectedCauses ?? [])
                               .map(

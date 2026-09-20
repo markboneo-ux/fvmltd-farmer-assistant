@@ -588,6 +588,8 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
     expect(firstText).not.toMatch(/just to confirm, are you farming in trinidad/);
     expect(first.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/waterlog/);
     expect(first.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
+    expect(first.causeDebug?.rawModelCauses.join(" ").toLowerCase()).toMatch(/cercospora|bacterial leaf spot/);
+    expect(first.causeDebug?.admittedCauses.join(" ").toLowerCase()).not.toMatch(/cercospora|bacterial leaf spot/);
     expect(first.case.nextQuestion.toLowerCase()).toMatch(/underside|insect|mite|older lower leaves|newest curled/);
 
     const second = await runAgronomicCase({
@@ -674,12 +676,150 @@ describe("Couva sweet pepper curling/yellowing case continuity", () => {
     assertEvidenceSupportedState(third, { hasPhotos: true });
     const thirdText = rendered(third).toLowerCase();
     expect(third.case.cropHealthState?.crop).toMatch(/pepper/);
-    expect(thirdText).toMatch(/do not remove whole plants|inspect vectors|staff review/);
+    expect(thirdText).not.toMatch(/do not remove whole plants|remove whole plants unless/);
     expect(thirdText).toMatch(/do not add extra fertilizer yet/);
     expect(third.case.nextQuestion.toLowerCase()).toMatch(
       /underside of the curled new leaves|newest curled leaves or the older lower leaves/,
     );
     expect(third.case.likelyCauses?.join(" ").toLowerCase()).toMatch(/aphid|nutrient/);
     expect(third.case.likelyCauses?.join(" ").toLowerCase()).not.toMatch(/cercospora|waterlog|bacterial leaf spot/);
+  });
+});
+
+describe("Couva 3-turn farmer-visible payload (ChatAssistantMessage contract)", () => {
+  const turn1 =
+    "My sweet pepper plants in Couva have some leaves curling and yellowing. It started a few days ago.";
+  const turn2 = "I really want to make sure my sweet peppers survive.";
+  const forbiddenVisible =
+    /cercospora|bacterial leaf spot|fungal leaf spot|pale[- ]centr|water-?soaked|greasy specks?|mancozeb|chlorothalonil|copper spray classes|if a spray is needed|remove whole plants|destroy (the )?plants|plant removal/i;
+
+  it("renders only admittedCauses after an uncertain photo, with no lesion or spray language", async () => {
+    const first = await runAgronomicCase({
+      message: turn1,
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "couva-visible-1",
+        output_text: mockJson({
+          preliminaryAssessment:
+            "If a spray is needed I need a closer look at the spots — pale centre versus greasy water-soaked.",
+          sprayGuidanceText:
+            "If a spray is needed\nIF THE SPOTS FIT A FUNGAL LEAF SPOT\nMancozeb. IF THE SPOTS FIT A BACTERIAL LEAF SPOT\nCopper.",
+          likelyCauses: ["Cercospora / frogeye leaf spot", "Bacterial leaf spot"],
+          diagnosisWhy: "Cercospora / frogeye leaf spot versus bacterial leaf spot.",
+          whatWouldChangeDiagnosis: ["Pale-centred spots would raise Cercospora"],
+          nextQuestion: "Just to confirm, are you farming in Trinidad and Tobago?",
+        }),
+      }),
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = await runAgronomicCase({
+      message: turn2,
+      history: [
+        { role: "user", content: turn1 },
+        { role: "assistant", content: farmerRenderedAnswer(first.case) },
+      ],
+      activeCase: {
+        crop: "pepper",
+        conversationIntent: "crop_problem",
+        farmerProblemText: turn1,
+        country: "Trinidad and Tobago",
+        district: "Couva",
+        cropHealthState: first.case.cropHealthState,
+      },
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "couva-visible-2",
+        output_text: mockJson({
+          preliminaryAssessment: "To keep sweet peppers healthy, water regularly.",
+          likelyCauses: [],
+          nextQuestion: "Are you growing them in pots or in the ground?",
+        }),
+      }),
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    const third = await runAgronomicCase({
+      message: "Here is a photo of the leaves.",
+      images: [{ mimeType: "image/jpeg", base64: "aaaa", fileName: "leaf.jpg" }],
+      history: [
+        { role: "user", content: turn1 },
+        { role: "assistant", content: farmerRenderedAnswer(first.case) },
+        { role: "user", content: turn2 },
+        { role: "assistant", content: farmerRenderedAnswer(second.case) },
+      ],
+      activeCase: {
+        crop: "pepper",
+        conversationIntent: "crop_problem",
+        farmerProblemText: turn1,
+        country: "Trinidad and Tobago",
+        district: "Couva",
+        cropHealthState: {
+          ...second.case.cropHealthState!,
+          photoFindings: [],
+        },
+      },
+      skipRegionalTools: true,
+      createResponse: async () => ({
+        id: "couva-visible-3",
+        output_text: mockJson({
+          preliminaryAssessment:
+            "The photo makes Cercospora / frogeye leaf spot more likely. If a spray is needed, separate fungal vs bacterial spots. Pale-centred spots raise Cercospora; greasy water-soaked specks raise bacterial leaf spot.",
+          sprayGuidanceText:
+            "If a spray is needed\nIF THE SPOTS FIT A FUNGAL LEAF SPOT\nMancozeb. IF THE SPOTS FIT A BACTERIAL LEAF SPOT\nCopper.",
+          likelyCauses: ["Cercospora / frogeye leaf spot", "Bacterial leaf spot"],
+          rankedCauses: [
+            {
+              category: "fungal disease",
+              label: "Cercospora / frogeye leaf spot",
+              rank: 1,
+              why: "pale-centred spots",
+              increasesIf: "pale-centred spots",
+              decreasesIf: "no spots",
+            },
+          ],
+          safeActionsNow: [
+            "Remove affected plants because this may be a virus",
+          ],
+          actionsToAvoid: ["Do not remove whole plants unless the virus is confirmed."],
+          whatWouldChangeDiagnosis: [
+            "Pale-centred spots would raise Cercospora",
+            "Greasy specks would raise bacterial leaf spot",
+          ],
+          diagnosisWhy:
+            "Cercospora / frogeye leaf spot and bacterial leaf spot. Pale-centred versus water-soaked greasy specks.",
+          nextQuestion:
+            "Are insects present under the curled new leaves? Is yellowing worse on old leaves or new growth?",
+        }),
+      }),
+    });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+
+    const visible = farmerRenderedAnswer(third.case);
+    expect(visible.toLowerCase()).toMatch(/curl|yellow/);
+    expect(third.case.nextQuestion.toLowerCase()).toMatch(
+      /underside|insect|mite|older lower leaves|newest curled/,
+    );
+    expect((third.case.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
+    expect(visible).not.toMatch(forbiddenVisible);
+    expect(visible.toLowerCase()).not.toMatch(/mancozeb|chlorothalonil|copper-based/);
+    expect(visible).toMatch(/cannot determine whether lesions, insects, or a nutrient pattern are present/i);
+
+    expect(third.case.rawModelCauses?.join(" ").toLowerCase()).toMatch(/cercospora|bacterial leaf spot/);
+    expect((third.case.admittedCauses ?? []).map((cause) => cause.label).join(" ").toLowerCase()).not.toMatch(
+      /cercospora|bacterial leaf spot|fungal leaf spot/,
+    );
+    expect((third.case.admittedCauses ?? []).map((cause) => cause.label).join(" ").toLowerCase()).toMatch(
+      /aphid|sucking|nutrient/,
+    );
+    expect(third.causeDebug?.rawModelCauses.join(" ").toLowerCase()).toMatch(/cercospora/);
+    expect(third.causeDebug?.admittedCauses.join(" ").toLowerCase()).not.toMatch(/cercospora/);
+    expect(third.case.sprayGuidanceText).toBeFalsy();
+    expect(third.case.admittedCauses?.some((cause) => /cercospora|bacterial leaf spot/i.test(cause.label))).toBe(
+      false,
+    );
   });
 });

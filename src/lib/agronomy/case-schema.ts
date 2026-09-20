@@ -122,6 +122,19 @@ export type AgronomicCasePayload = {
   weatherBrief?: string | null;
   webSources?: WebSourceCitation[];
   likelyCauses?: string[];
+  /** Server-only: ungated model cause labels, never rendered. */
+  rawModelCauses?: string[];
+  /** Server-only canonical list after evidence gating — the only list the UI may render. */
+  admittedCauses?: Array<
+    RankedCause & {
+      evidenceSource:
+        | "farmer_report"
+        | "photo_finding"
+        | "weather_support"
+        | "prior_confirmed_case_fact";
+      evidenceFact: string;
+    }
+  >;
   diagnosisWhy?: string | null;
   whatWouldChangeDiagnosis?: string[];
   monitorNext?: string | null;
@@ -334,7 +347,24 @@ export function parseCasePayload(raw: unknown): AgronomicCasePayload {
     weatherRelevance: "omit",
     weatherBrief: null,
     webSources: [],
-    likelyCauses: asStringArray(data.likelyCauses),
+    rawModelCauses: [
+      ...asStringArray(data.likelyCauses),
+      ...asStringArray(
+        Array.isArray(data.rankedCauses)
+          ? data.rankedCauses
+              .map((item) =>
+                typeof item === "string"
+                  ? item
+                  : item && typeof item === "object" && "label" in item && typeof (item as { label: unknown }).label === "string"
+                    ? (item as { label: string }).label
+                    : "",
+              )
+              .filter(Boolean)
+          : [],
+      ),
+    ],
+    admittedCauses: [],
+    likelyCauses: [],
     diagnosisWhy: asTrimmedString(data.diagnosisWhy) || null,
     whatWouldChangeDiagnosis: asStringArray(data.whatWouldChangeDiagnosis),
     monitorNext: asTrimmedString(data.monitorNext) || null,

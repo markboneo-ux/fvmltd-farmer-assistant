@@ -128,6 +128,8 @@ export function applyOutputGuard(
     actionsToAvoid: payload.actionsToAvoid.map(strip).filter(Boolean),
     likelyCauses: (payload.likelyCauses ?? []).map(strip).filter(Boolean),
     diagnosisWhy: payload.diagnosisWhy ? strip(payload.diagnosisWhy) : payload.diagnosisWhy,
+    admittedCauses: payload.admittedCauses,
+    rawModelCauses: payload.rawModelCauses,
     whatWouldChangeDiagnosis: (payload.whatWouldChangeDiagnosis ?? []).map(strip).filter(Boolean),
     monitorNext: payload.monitorNext ? strip(payload.monitorNext) : payload.monitorNext,
     weatherBrief,

@@ -52,6 +52,9 @@ describe("case-schema rapid triage", () => {
     expect(payload.photoRecommended).toBe(true);
     expect(payload.internalMissingInformation).toContain("spray history");
     expect(payload.weatherRisks).toEqual([]);
+    expect(payload.rawModelCauses).toEqual([]);
+    expect(payload.admittedCauses).toEqual([]);
+    expect(payload.likelyCauses).toEqual([]);
     expect(payload.verifiedInputOptions).toEqual([]);
     expect(isInterviewStage(payload.stage)).toBe(true);
     expect(isGuidanceStage(payload.stage)).toBe(false);
@@ -82,5 +85,31 @@ describe("case-schema rapid triage", () => {
         internalMissingInformation: [],
       }),
     ).toThrow(/invalid mode/i);
+  });
+
+  it("stashes ungated model causes and does not keep them as likelyCauses", () => {
+    const payload = parseCasePayload({
+      mode: "quick_help",
+      stage: "assessment",
+      questionId: "",
+      questionType: "",
+      preliminaryAssessment: "Cercospora looks likely.",
+      severity: "unknown",
+      nextQuestion: "",
+      quickReplies: [],
+      checksToday: [],
+      safeActionsNow: [],
+      actionsToAvoid: [],
+      photoRecommended: false,
+      escalationRecommended: false,
+      internalMissingInformation: [],
+      likelyCauses: ["Cercospora / frogeye leaf spot", "Bacterial leaf spot"],
+    });
+    expect(payload.rawModelCauses).toEqual([
+      "Cercospora / frogeye leaf spot",
+      "Bacterial leaf spot",
+    ]);
+    expect(payload.likelyCauses).toEqual([]);
+    expect(payload.admittedCauses).toEqual([]);
   });
 });

@@ -607,18 +607,17 @@ function pepperCurlYellowPlaybook(
 ): CropPlaybook {
   const causes =
     labels.length >= 2
-      ? labels.filter((label) => !/\b(cercospora|bacterial leaf spot|frogeye)\b/i.test(label)).slice(0, 3)
+      ? labels.filter((label) => !/\b(cercospora|bacterial leaf spot|frogeye|virus)\b/i.test(label)).slice(0, 3)
       : [
           "Aphids or other sucking insects",
           "Nutrient shortage or uneven feeding",
-          "Virus risk if new leaves stay curled",
         ];
   void facts;
   return levelTone(farmerLevel, {
     base: {
       id: "pepper_curl_yellow",
       likelyCauses: causes.slice(0, 3),
-      why: "On sweet pepper, curling with yellowing is still unconfirmed. Sucking insects under new leaves, a nutrient pattern if older leaves are worse, and a virus risk if new growth stays cupped are possibilities — none of them is established yet.",
+      why: "On sweet pepper, curling with yellowing is still unconfirmed. Sucking insects under new leaves are the first thing to check. A nutrient pattern would rise if older leaves are worse than new ones.",
       checks: [
         "Turn over curled new leaves and look for insects, mites, cast skins, or sticky residue",
         "Compare whether yellowing is worse on the newest curled leaves or the older lower leaves",
@@ -631,12 +630,12 @@ function pepperCurlYellowPlaybook(
       ],
       avoid: [
         "Do not jump to a spray until insects, old versus new leaves, and spread are checked",
-        "Do not remove whole plants for an unconfirmed virus",
+        "Do not add extra fertilizer yet until we know whether older or newer leaves are affected",
       ],
       whatWouldChange: [
         "Insects or sticky residue under new leaves would raise aphids or whiteflies",
         "Yellowing only on oldest leaves would raise a nutrient pattern",
-        "Scattered plants with mosaic or severe new-leaf curl would raise a virus concern",
+        "Mosaic, mottle, or a confirmed vector would raise a virus concern",
       ],
       monitor: "Watch whether new growth stays curled and whether more plants join in over 2–3 days.",
       oneQuestion: UNDERSIDE_INSECT_QUESTION,

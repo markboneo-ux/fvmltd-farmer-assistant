@@ -420,7 +420,10 @@ export function applyQualityCorrection(
   );
   let safeActionsNow = cleanedActions.actions;
   if (cleanedActions.blocked && cleanedActions.farmerMessage) {
-    if (!next.preliminaryAssessment.includes(cleanedActions.farmerMessage)) {
+    if (
+      !next.preliminaryAssessment.includes(cleanedActions.farmerMessage) &&
+      !/unconfirmed virus|remove whole plants/i.test(cleanedActions.farmerMessage)
+    ) {
       next = {
         ...next,
         preliminaryAssessment: `${next.preliminaryAssessment} ${cleanedActions.farmerMessage}`.trim(),
@@ -507,6 +510,7 @@ export function applyQualityCorrection(
       verifiedInputs: next.verifiedInputOptions,
       pesticideChecks: next.pesticideChecks,
       likelyCauses: likely,
+      admittedCauses: (next.admittedCauses ?? []).map((cause) => cause.label),
       spotsObserved,
     });
     if (spray) {

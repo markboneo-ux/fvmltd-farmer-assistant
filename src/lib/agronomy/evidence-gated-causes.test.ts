@@ -92,4 +92,32 @@ describe("evidence-gated causes", () => {
       }),
     ).toEqual(["cupped new leaves"]);
   });
+
+  it("does not treat a disease name alone as lesion evidence", () => {
+    expect(farmerReportedLesions("Cercospora / frogeye leaf spot")).toBe(false);
+    expect(
+      farmerReportedLesions(
+        "cannot determine whether lesions, insects, or a nutrient pattern are present",
+      ),
+    ).toBe(false);
+    expect(farmerReportedLesions("Sweet peppers have leaf spots")).toBe(true);
+  });
+
+  it("treats an uncertain photo as no lesion evidence", () => {
+    const facts = extractKnownFacts(COUVA);
+    const evidence = extractObservedEvidence({
+      facts,
+      text: facts.rawText,
+      hasPhotos: true,
+      photoFindings: [],
+    });
+    expect(
+      hasLesionEvidence({
+        evidence,
+        facts,
+        photoFindings: [],
+        hasPhotos: true,
+      }),
+    ).toBe(false);
+  });
 });

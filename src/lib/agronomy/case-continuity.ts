@@ -28,7 +28,7 @@ export const DIAGNOSTIC_CONTINUITY =
   /\b((make sure|want) .{0,40}(survive|live|ok|okay)|save (the |my )?(plants?|crop|peppers?)|what should i do|is this serious|i('m| am) worried|help (them|the plants)|how (do i|can i) (save|keep|protect))\b/i;
 
 export const VIRUS_ROGUE_CAUTION =
-  "Do not remove whole plants for an unconfirmed virus. First inspect vectors, the symptom pattern, how plants are distributed, and whether new growth is still curling. Staff review may be appropriate before any destructive action.";
+  "Do not take a destructive step until the cause is confirmed. First inspect how plants are distributed and whether new growth is still curling. Staff review may be appropriate before any destructive action.";
 
 const SPOT_TOKENS = /\b(spots?|lesions?|pale centre|pale center|water-?soaked|greasy specks?|frogeye|cercospora)\b/i;
 
@@ -332,16 +332,10 @@ export function applyAuthoritativeCaseValidation(
       admitted: gated.admitted,
       lesionEvidence: spotsObserved,
     });
-    const stripInventedPhoto = (text: string) =>
-      text
-        .replace(/the photo makes[\s\S]*?(?:\n\n|$)/gi, "\n")
-        .replace(/if they are visible/gi, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
     next = {
       ...next,
-      diagnosisWhy: `${stripInventedPhoto(next.diagnosisWhy || next.preliminaryAssessment)}\n\n${photoLine}`.trim(),
-      preliminaryAssessment: `${stripInventedPhoto(next.preliminaryAssessment)}\n\n${photoLine}`.trim(),
+      diagnosisWhy: photoLine,
+      preliminaryAssessment: photoLine,
     };
     if (isCurlYellowCase(options.evidence, options.facts, options.state)) {
       next = {

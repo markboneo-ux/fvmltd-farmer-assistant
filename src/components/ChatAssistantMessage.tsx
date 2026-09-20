@@ -94,9 +94,10 @@ export function ChatAssistantMessage({
 
   const assessment = stripGuidancePrefix(payload.preliminaryAssessment);
   const question = payload.nextQuestion.trim();
-  const likelyCauses = payload.likelyCauses ?? [];
+  const admitted = payload.admittedCauses ?? [];
+  const causeLabels = admitted.map((cause) => cause.label);
   const useDiagnosis =
-    shouldUseDiagnosisLayout(payload) || likelyCauses.length > 0;
+    shouldUseDiagnosisLayout(payload) || admitted.length > 0;
   const relevance = payload.weatherRelevance ?? "omit";
   const showWeatherCard =
     shouldRenderWeatherRiskCard(relevance) &&
@@ -148,8 +149,8 @@ export function ChatAssistantMessage({
             <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
               What I think is happening
             </h3>
-            {likelyCauses.length > 0 ? (
-              <BulletList items={likelyCauses} ordered />
+            {causeLabels.length > 0 ? (
+              <BulletList items={causeLabels} ordered />
             ) : null}
             {payload.diagnosisConfidence ? (
               <p className="mt-1 text-xs text-muted">
@@ -158,14 +159,14 @@ export function ChatAssistantMessage({
             ) : null}
             <p className="mt-1 whitespace-pre-wrap">{payload.diagnosisWhy || assessment}</p>
           </section>
-          {payload.rankedCauses && payload.rankedCauses.length > 0 ? (
+          {admitted.length > 0 ? (
             <section>
               <h3 className="text-xs font-semibold tracking-wide text-canopy uppercase">
                 Possible causes, ranked
               </h3>
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">
-                {payload.rankedCauses.slice(0, 3).map((cause) => (
-                  <li key={cause.category}>
+                {admitted.slice(0, 3).map((cause) => (
+                  <li key={`${cause.rank}-${cause.label}`}>
                     {cause.label}. More likely if {cause.increasesIf.toLowerCase()}
                   </li>
                 ))}

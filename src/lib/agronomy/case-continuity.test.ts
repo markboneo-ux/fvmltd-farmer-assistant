@@ -121,7 +121,8 @@ describe("case continuity helpers", () => {
     expect(next.sprayGuidanceText).toBeFalsy();
     expect(next.preliminaryAssessment.toLowerCase()).not.toMatch(/pale centre versus greasy water-soaked/);
     expect((next.nextQuestion.match(/\?/g) ?? []).length).toBe(1);
-    expect(VIRUS_ROGUE_CAUTION).toMatch(/Do not remove whole plants/);
+    expect(VIRUS_ROGUE_CAUTION).not.toMatch(/Do not remove whole plants unless/);
+    expect(VIRUS_ROGUE_CAUTION).toMatch(/destructive step|confirm/i);
     expect(
       establishedPesticideTarget({ evidence, facts }),
     ).toBe(false);

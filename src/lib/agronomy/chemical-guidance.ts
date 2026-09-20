@@ -126,9 +126,14 @@ export function buildSprayGuidance(options: {
   verifiedInputs?: VerifiedInputDisplay[];
   pesticideChecks?: PesticideCheck[];
   likelyCauses?: string[];
+  admittedCauses?: string[];
   spotsObserved?: boolean;
 }): SprayGuidance | null {
   if (!options.asksForSpray) return null;
+  const causeLabels =
+    options.admittedCauses && options.admittedCauses.length > 0
+      ? options.admittedCauses
+      : options.likelyCauses;
 
   const country = options.country?.trim() || null;
   const verifiedInputs = (options.verifiedInputs ?? []).filter(
@@ -158,7 +163,7 @@ export function buildSprayGuidance(options: {
 
   const split = fungalBacterialSplit({
     pestOrDisease: options.target,
-    likelyCauses: options.likelyCauses,
+    likelyCauses: causeLabels,
     crop: options.crop,
     spotsObserved: options.spotsObserved,
   });
@@ -173,7 +178,7 @@ export function buildSprayGuidance(options: {
         pestOrDisease: options.target,
         observedPest: options.observedPest,
         asksForSpray: true,
-        likelyCauses: options.likelyCauses,
+        likelyCauses: causeLabels,
         crop: options.crop,
         spotsObserved: options.spotsObserved,
       });
