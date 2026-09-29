@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="viewport-fit=cover, width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes"
+    />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="color-scheme" content="light" />
+    <title>FVM Crop Solution</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canopy: #1b4332;
+        --mint: #d8f3dc;
+        --ink: #081c15;
+        --surface: #f7f6f3;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: linear-gradient(160deg, #081c15 0%, var(--canopy) 55%, #2d6a4f 100%);
+        color: var(--mint);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+      }
+      main {
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+        padding: 2rem 1.25rem;
+        text-align: center;
+        box-sizing: border-box;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.65rem;
+        letter-spacing: 0.02em;
+      }
+      p {
+        margin: 0.75rem 0 0;
+        max-width: 22rem;
+        line-height: 1.45;
+        opacity: 0.92;
+        font-size: 0.95rem;
+      }
+      .pulse {
+        width: 2.5rem;
+        height: 2.5rem;
+        margin: 1.5rem auto 0;
+        border-radius: 999px;
+        border: 3px solid rgba(216, 243, 220, 0.25);
+        border-top-color: var(--mint);
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div>
+        <h1>FVM Crop Solution</h1>
+        <p>Your Caribbean Farming Assistant is starting…</p>
+        <div class="pulse" aria-hidden="true"></div>
+      </div>
+    </main>
+    <script>
+      // When Capacitor is configured with server.url, the WebView loads the
+      // hosted Next.js app. This page is only a local bootstrap / offline shell.
+      (function () {
+        var target =
+          (window.Capacitor &&
+            window.Capacitor.getConfig &&
+            window.Capacitor.getConfig().server &&
+            window.Capacitor.getConfig().server.url) ||
+          "https://crop.farmersvaluemart.com";
+        if (location.protocol === "capacitor:" || location.protocol === "https:") {
+          // Leave Capacitor bridge in control when server.url is set.
+          return;
+        }
+        setTimeout(function () {
+          location.replace(target);
+        }, 400);
+      })();
+    </script>
+  </body>
+</html>

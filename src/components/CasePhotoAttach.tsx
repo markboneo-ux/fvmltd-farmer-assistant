@@ -18,6 +18,7 @@ import {
   FARMER_PHOTO_UPLOAD_FAILED,
   validateCaseImageMeta,
 } from "@/lib/chat/case-images";
+import { isNativeApp } from "@/lib/mobile/native";
 
 export type AttachedCaseImage = {
   id: string;
@@ -58,17 +59,83 @@ export const CasePhotoAttach = forwardRef<
   const cameraRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function openLibrary() {
+  async function openLibrary() {
     setError(null);
+    if (isNativeApp()) {
+      try {
+        const { pickNativePhotos } = await import("@/lib/mobile/camera");
+        const remaining = CASE_IMAGE_MAX_COUNT - images.length;
+        const picked = await pickNativePhotos(Math.max(1, remaining));
+        if (picked.length > 0) {
+          const next = [...images];
+          for (const item of picked) {
+            if (next.length >= CASE_IMAGE_MAX_COUNT) break;
+            const check = validateCaseImageMeta(item.file);
+            if (!check.ok) {
+              setError(check.farmerError);
+              continue;
+            }
+            next.push({
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              file: item.file,
+              previewUrl: URL.createObjectURL(item.file),
+              fileName: item.fileName,
+              mimeType: item.mimeType,
+            });
+          }
+          onChange(next);
+          return;
+        }
+      } catch {
+        // Fall through to HTML file input.
+      }
+    }
     libraryRef.current?.click();
   }
 
-  function openCamera() {
+  async function openCamera() {
     setError(null);
+    if (isNativeApp()) {
+      try {
+        const { captureNativePhoto } = await import("@/lib/mobile/camera");
+        const captured = await captureNativePhoto();
+        if (captured) {
+          if (images.length >= CASE_IMAGE_MAX_COUNT) {
+            setError(FARMER_PHOTO_LIMIT);
+            return;
+          }
+          const check = validateCaseImageMeta(captured.file);
+          if (!check.ok) {
+            setError(check.farmerError);
+            return;
+          }
+          onChange([
+            ...images,
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              file: captured.file,
+              previewUrl: URL.createObjectURL(captured.file),
+              fileName: captured.fileName,
+              mimeType: captured.mimeType,
+            },
+          ]);
+          return;
+        }
+      } catch {
+        // Fall through to HTML file input.
+      }
+    }
     cameraRef.current?.click();
   }
 
-  useImperativeHandle(ref, () => ({ openLibrary, openCamera }));
+  useImperativeHandle(ref, () => ({
+    openLibrary: () => {
+      void openLibrary();
+    },
+    openCamera: () => {
+      void openCamera();
+    },
+  }));
 
   function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;

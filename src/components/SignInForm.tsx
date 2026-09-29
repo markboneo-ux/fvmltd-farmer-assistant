@@ -47,10 +47,18 @@ export function SignInForm() {
     setMessage(null);
     try {
       const { createClient } = await import("@/lib/supabase/client");
+      const { authCallbackUrl, openExternalUrl } = await import(
+        "@/lib/mobile/auth-redirect"
+      );
+      const { isNativeApp } = await import("@/lib/mobile/native");
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOAuth({
+      const redirectTo = authCallbackUrl("/");
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: { redirectTo: `${window.location.origin}/auth/callback` },
+        options: {
+          redirectTo,
+          skipBrowserRedirect: isNativeApp(),
+        },
       });
       if (error) {
         setMessage(
@@ -58,6 +66,10 @@ export function SignInForm() {
             ? "Google sign-in is not ready yet. Use email for now."
             : "Apple sign-in is not ready yet. Use email for now.",
         );
+        return;
+      }
+      if (isNativeApp() && data?.url) {
+        await openExternalUrl(data.url);
       }
     } catch {
       setMessage(

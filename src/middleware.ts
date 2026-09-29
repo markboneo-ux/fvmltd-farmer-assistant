@@ -20,6 +20,7 @@ function withGuestCookie(request: NextRequest, response: NextResponse) {
 /**
  * Guest cookie for all farmer routes.
  * Staff/admin routes require a Supabase Auth session.
+ * Native farmer shells (Capacitor) are redirected away from staff/admin pages.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -31,6 +32,16 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/admin/");
   const isProtectedApi =
     pathname.startsWith("/api/staff") || pathname.startsWith("/api/admin");
+
+  const ua = request.headers.get("user-agent") ?? "";
+  const isNativeFarmerShell = /\bFVMCropSolutionNative\//i.test(ua);
+
+  if (isNativeFarmerShell && (isProtectedPage || isStaffLogin)) {
+    const home = request.nextUrl.clone();
+    home.pathname = "/";
+    home.search = "";
+    return withGuestCookie(request, NextResponse.redirect(home));
+  }
 
   if (!isProtectedPage && !isProtectedApi) {
     return withGuestCookie(request, NextResponse.next());
