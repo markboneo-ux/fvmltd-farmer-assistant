@@ -446,12 +446,15 @@ export function FarmerCaseChat({
     setVoiceError(null);
     setError(null);
     discardVoicePreview();
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setVoiceError("Voice notes are not supported in this browser. Please type instead.");
+    const access = await (
+      await import("@/lib/mobile/microphone")
+    ).ensureMicrophoneAccess();
+    if (!access.ok) {
+      setVoiceError(access.error);
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = access.stream;
       voiceStreamRef.current = stream;
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];

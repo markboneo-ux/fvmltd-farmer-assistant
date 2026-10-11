@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FVM Crop Solution</string>
+    <string name="title_activity_main">FVM Crop Solution</string>
+    <string name="package_name">com.farmersvaluemart.fvmcropsolution</string>
+    <string name="custom_url_scheme">fvmcropsolution</string>
+</resources>

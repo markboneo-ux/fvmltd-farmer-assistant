@@ -11,6 +11,7 @@ This version includes an **AI-first guest chat** on the homepage (no registratio
 - [Tailwind CSS](https://tailwindcss.com/)
 - [Supabase](https://supabase.com/) (Postgres + Storage + Auth-ready clients)
 - [OpenAI](https://openai.com/) (server-only guest chat + preliminary assessments)
+- [Capacitor](https://capacitorjs.com/) (iOS / Android farmer mobile beta shells — see [docs/MOBILE_BETA.md](./docs/MOBILE_BETA.md))
 
 ## Pages
 

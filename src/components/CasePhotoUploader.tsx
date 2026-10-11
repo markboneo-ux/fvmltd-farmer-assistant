@@ -9,6 +9,7 @@ import {
   type CasePhotoRecord,
   type PhotoSlotKey,
 } from "@/lib/crop-check/photos";
+import { isNativeApp } from "@/lib/mobile/native";
 
 type SlotState = {
   key: PhotoSlotKey;
@@ -286,7 +287,25 @@ export function CasePhotoUploader({
                   <button
                     type="button"
                     disabled={Boolean(busySlot) || finishing}
-                    onClick={() => inputRefs.current[slot.key]?.click()}
+                    onClick={() => {
+                      void (async () => {
+                        if (isNativeApp()) {
+                          try {
+                            const { captureNativePhoto } = await import(
+                              "@/lib/mobile/camera"
+                            );
+                            const captured = await captureNativePhoto();
+                            if (captured) {
+                              await handleFileChosen(slot.key, captured.file);
+                              return;
+                            }
+                          } catch {
+                            // Fall through to file input.
+                          }
+                        }
+                        inputRefs.current[slot.key]?.click();
+                      })();
+                    }}
                     className="min-h-11 rounded-xl bg-canopy text-xs font-semibold text-white disabled:opacity-60"
                   >
                     {slot.status === "uploaded" ? "Replace photo" : "Add photo"}

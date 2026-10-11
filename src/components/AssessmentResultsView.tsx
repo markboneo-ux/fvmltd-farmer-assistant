@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/StatusPill";
 import type { AssessmentRecord, GuidanceMode } from "@/lib/assessment/types";
 import { assessment as demoAssessment } from "@/data/placeholder";
 import { useRegisteredFarmer } from "@/lib/farmers/useRegisteredFarmer";
+import { isNativeApp } from "@/lib/mobile/native";
 
 const urgencyTone = {
   low: "low",
@@ -470,7 +471,7 @@ export function AssessmentResultsView() {
                     : "Follow the approved preliminary guidance and keep monitoring the crop."}
               </p>
               <div className="mt-4 grid gap-2">
-                {showHumanReview ? (
+                {showHumanReview && !isNativeApp() ? (
                   <Button
                     href="/staff"
                     className="bg-sun text-soil hover:bg-[#f0c25d]"
